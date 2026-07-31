@@ -120,8 +120,9 @@ fn from_export(file: &PathBuf) -> Result<Scan, String> {
 }
 
 fn from_backend(args: &ScanArgs, registry: &Registry) -> Result<Scan, String> {
-    let adapter = registry.first_usable().ok_or_else(|| {
-        "no usable backend found. Run `nrmk backends` to see what is installed.".to_string()
+    // A backend that cannot scan is not a candidate, however usable it is.
+    let adapter = registry.first_scanner().ok_or_else(|| {
+        "no usable backend can scan. Run `nrmk backends` to see what is installed.".to_string()
     })?;
 
     let options = ScanOptions {

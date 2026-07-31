@@ -1,0 +1,28 @@
+{
+  "path": "/fixtures/mole",
+  "overview": false,
+  "entries": [
+    {
+      "name": "nested",
+      "path": "/fixtures/mole/nested",
+      "size": 65537,
+      "is_dir": true
+    },
+    {
+      "name": "small.txt",
+      "path": "/fixtures/mole/small.txt",
+      "size": 11,
+      "is_dir": false,
+      "last_access": "2026-07-31T15:46:08Z"
+    },
+    {
+      "name": "link.txt →",
+      "path": "/fixtures/mole/link.txt",
+      "size": 0,
+      "is_dir": false,
+      "last_access": "2026-07-31T15:46:08Z"
+    }
+  ],
+  "total_size": 65548,
+  "total_files": 3
+}

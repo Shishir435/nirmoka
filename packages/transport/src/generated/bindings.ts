@@ -10,9 +10,16 @@
 export type Backend = { id: string, displayName: string, supportedVersions: string, detection: Detection | null, error: string | null, 
 /**
  * Usable right now: installed, and at a version this build was tested
- * against. The UI enables the scan button on this and nothing else.
+ * against. Necessary for the scan button, and no longer sufficient: Mole
+ * is usable on macOS and cannot scan.
  */
-usable: boolean, };
+usable: boolean, 
+/**
+ * What this backend can do. Per backend rather than for the app as a
+ * whole, because the two registered backends do not overlap — the UI needs
+ * to know which one it is asking.
+ */
+capabilities: Capabilities, };
 
 /**
  * What the active backend can do, so the UI can hide controls it cannot honour.

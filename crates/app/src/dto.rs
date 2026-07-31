@@ -164,8 +164,13 @@ pub struct Backend {
     pub detection: Option<Detection>,
     pub error: Option<String>,
     /// Usable right now: installed, and at a version this build was tested
-    /// against. The UI enables the scan button on this and nothing else.
+    /// against. Necessary for the scan button, and no longer sufficient: Mole
+    /// is usable on macOS and cannot scan.
     pub usable: bool,
+    /// What this backend can do. Per backend rather than for the app as a
+    /// whole, because the two registered backends do not overlap — the UI needs
+    /// to know which one it is asking.
+    pub capabilities: Capabilities,
 }
 
 impl From<&RegistryEntry> for Backend {
@@ -180,6 +185,7 @@ impl From<&RegistryEntry> for Backend {
             display_name: entry.display_name.to_string(),
             supported_versions: entry.supported_versions.to_string(),
             usable: matches!(&detection, Some(Detection::Found { .. })),
+            capabilities: Capabilities::from(entry.capabilities),
             detection,
             error,
         }

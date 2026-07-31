@@ -1,0 +1,21 @@
+{
+  "path": "/fixtures/mole/nested",
+  "overview": false,
+  "entries": [
+    {
+      "name": "big.bin",
+      "path": "/fixtures/mole/nested/big.bin",
+      "size": 65536,
+      "is_dir": false,
+      "last_access": "2026-07-31T15:46:08Z"
+    },
+    {
+      "name": "deeper",
+      "path": "/fixtures/mole/nested/deeper",
+      "size": 1,
+      "is_dir": true
+    }
+  ],
+  "total_size": 65537,
+  "total_files": 2
+}
