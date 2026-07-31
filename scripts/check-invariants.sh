@@ -36,6 +36,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1b. core's dependency list is an allowlist, not a preference.
+#
+# Invariant 1 is "the standard library, serde, and thiserror". `tauri` is the
+# dependency everyone remembers not to add; the one that actually shows up is
+# something convenient like serde_json or a JSON parser for a backend format,
+# which quietly makes the domain model know about a wire format.
+# ---------------------------------------------------------------------------
+core_deps=$(awk '
+  /^\[dependencies\]/       { in_deps = 1; next }
+  /^\[/                     { in_deps = 0 }
+  in_deps && /^[a-zA-Z0-9_-]+/ { sub(/[[:space:]].*/, "", $0); print }
+' crates/core/Cargo.toml)
+
+unexpected=$(printf '%s\n' "$core_deps" | grep -vE '^(serde|thiserror)?$' || true)
+
+if [[ -n "$unexpected" ]]; then
+  fail "crates/core may only depend on serde and thiserror (see AGENTS.md, invariant 1)"
+  printf '%s\n' "$unexpected" >&2
+else
+  pass "core depends only on serde and thiserror"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. No platform conditionals in core.
 #
 # Matches the attribute form only and drops comment lines — the rule is
