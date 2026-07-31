@@ -16,30 +16,48 @@ env:
 jobs:
   # One job per platform, compiling the workspace exactly once.
   #
-  # The ncdu detection assertions live here rather than in a separate job on
-  # purpose: a standalone job would need its own runner and its own cache, so
-  # ubuntu and macos would each build the whole workspace twice for no gain.
+  # The ncdu assertions live here rather than in a separate job on purpose: a
+  # standalone job would need its own runner and its own cache, so each platform
+  # would build the whole workspace twice for no gain.
   rust:
-    name: rust / ${{ matrix.os }}
+    name: rust / ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 24.04 still ships the ncdu 1.x series, which emits a
-          # different JSON export shape. That makes this runner a free
-          # real-world test that the version gate rejects it.
+          # Ubuntu still ships the ncdu 1.x series, which emits a different JSON
+          # export shape. That makes this runner a free real-world test that the
+          # version gate rejects it.
           - os: ubuntu-latest
+            label: ubuntu (ncdu 1.x from apt)
+            lint: true
             ncdu_install: sudo apt-get update && sudo apt-get install -y ncdu
             ncdu_expect: unsupported
-          # Homebrew ships ncdu 2.x, so this is the usable-backend case.
+          # …and apt has no 2.x package, so the usable-backend path on Linux is
+          # covered by upstream's static build. Without this entry, Linux only
+          # ever exercises the rejection path, and a Linux-only scan regression
+          # would ship.
+          - os: ubuntu-latest
+            label: ubuntu (ncdu 2.x from upstream)
+            lint: false
+            ncdu_install: |
+              curl -fsSL https://dev.yorhel.nl/download/ncdu-2.9.1-linux-x86_64.tar.gz |
+                sudo tar -xz -C /usr/local/bin ncdu
+            ncdu_expect: ok
+          # Homebrew ships ncdu 2.x.
           - os: macos-latest
+            label: macos
+            lint: true
             ncdu_install: brew install ncdu
             ncdu_expect: ok
           # ncdu has no Windows build — it is a curses application. gdu is the
-          # planned Windows backend (roadmap step 11), so this platform only
-          # proves the workspace compiles and its tests pass.
+          # planned Windows backend (roadmap step 11), so this platform proves
+          # the workspace compiles, its tests pass, and the wire format parses
+          # from recorded fixtures with no backend present at all.
           - os: windows-latest
+            label: windows
+            lint: true
             ncdu_expect: skip
     steps:
       - uses: actions/checkout@v7
@@ -48,17 +66,38 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2.9.1
 
+      # Lint once per platform. The second Linux entry exists for its backend,
+      # not to run clippy again on the same source.
       - name: Format
+        if: matrix.lint
         run: cargo fmt --all -- --check
 
       - name: Clippy
+        if: matrix.lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Check
         run: cargo check --workspace --all-targets
 
+      # Includes tests/contract, which is fixture-driven and needs no backend.
       - name: Test
         run: cargo test --workspace
+
+      # Runs everywhere, including Windows: the parser and the whole CLI path
+      # are exercised against recorded output with no backend installed.
+      - name: Scan a recorded export
+        shell: bash
+        run: |
+          cargo run -q -p nirmoka-cli -- \
+            scan --from-export fixtures/ncdu/2.8.2/simple.json --json > scan.json
+          cat scan.json
+
+          # The awkward cases the fixture was recorded for. A parser that
+          # silently stopped deduplicating hardlinks would still exit zero.
+          grep -q '"hardlinksDeduplicated": 1' scan.json ||
+            { echo "::error::hardlink deduplication is not reaching the CLI"; exit 1; }
+          grep -q '"readErrors": 1' scan.json ||
+            { echo "::error::read errors are not reaching the CLI"; exit 1; }
 
       - name: Install ncdu
         if: matrix.ncdu_expect != 'skip'
@@ -93,6 +132,12 @@ jobs:
                 echo "::error::expected ncdu reported as ok at 2.x"
                 exit 1
               fi
+              # Detection must name the binary that will run, not the command
+              # name it hoped to find.
+              if ! printf '%s' "$output" | grep -qE '^ncdu +ok +2\.[^ ]* +/'; then
+                echo "::error::expected an absolute path in the detail column"
+                exit 1
+              fi
               ;;
             unsupported)
               if [ "$status" -eq 0 ]; then
@@ -110,6 +155,35 @@ jobs:
         if: matrix.ncdu_expect != 'skip'
         shell: bash
         run: cargo run -q -p nirmoka-cli -- backends --json || true
+
+      # The end-to-end path: a real backend, as a subprocess, streamed into a
+      # core tree, with no GUI framework in the dependency graph.
+      - name: Scan a real directory
+        if: matrix.ncdu_expect == 'ok'
+        shell: bash
+        run: |
+          cargo run -q -p nirmoka-cli -- scan . --depth 1 --limit 10
+          cargo run -q -p nirmoka-cli -- scan . --json --depth 1 --limit 3 > live.json
+          grep -q '"totalBytes"' live.json ||
+            { echo "::error::a live scan produced no totals"; exit 1; }
+
+      # An unsupported backend must refuse to scan, not scan anyway. ncdu 1.x
+      # emits the same JSON format *major* version as 2.x, so an ungated parse
+      # would succeed and produce plausible numbers from an untested tool.
+      - name: Refuse to scan with an unsupported backend
+        if: matrix.ncdu_expect == 'unsupported'
+        shell: bash
+        run: |
+          set +e
+          output=$(cargo run -q -p nirmoka-cli -- scan . 2>&1)
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::scanned with an unsupported backend"
+            exit 1
+          fi
 
   web:
     name: web
