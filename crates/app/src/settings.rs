@@ -18,9 +18,7 @@
 //! # Where it lives
 //!
 //! From the `directories` crate, never a `~/Library` or `%APPDATA%` literal —
-//! invariant 3. The identifier matches `tauri.conf.json`, so the settings sit
-//! beside whatever else the bundle owns rather than in a second location with a
-//! different name.
+//! invariant 3.
 
 use std::fs;
 use std::io;
@@ -37,9 +35,28 @@ const FILE: &str = "settings.json";
 /// `None` is survivable: the app runs, the choice applies for the session, and
 /// nothing is persisted. A sandbox or a service account with no home is not a
 /// reason to refuse to open a window.
+///
+/// # Why the arguments are not the bundle identifier
+///
+/// `tauri.conf.json` identifies this as `app.nirmoka.desktop`, and mirroring it
+/// as `("app", "nirmoka", "desktop")` looked like the tidy answer. It is wrong
+/// on Linux: `ProjectDirs` builds the XDG path from the **application name
+/// alone**, ignoring qualifier and organization, so it produced
+/// `~/.config/desktop` — a directory naming nothing, beside every other program
+/// that made the same mistake.
+///
+/// The three parts are therefore chosen for what each platform does with them:
+///
+/// | Platform | Result                                              |
+/// | -------- | --------------------------------------------------- |
+/// | macOS    | `~/Library/Application Support/app.nirmoka.Nirmoka` |
+/// | Linux    | `~/.config/nirmoka`                                 |
+/// | Windows  | `%APPDATA%\nirmoka\Nirmoka\config`                  |
+///
+/// Caught by CI on Linux, which is the only reason the macOS-shaped guess did
+/// not ship.
 pub fn settings_path() -> Option<PathBuf> {
-    // Matches `identifier` in tauri.conf.json: app.nirmoka.desktop.
-    ProjectDirs::from("app", "nirmoka", "desktop").map(|dirs| dirs.config_dir().join(FILE))
+    ProjectDirs::from("app", "nirmoka", "Nirmoka").map(|dirs| dirs.config_dir().join(FILE))
 }
 
 /// Read the stored preference, or the platform default if there is not one.
@@ -171,15 +188,36 @@ mod tests {
         assert_eq!(load_from(&path), Preference::of("ncdu"));
     }
 
-    /// Not `~/Library` and not `%APPDATA%` spelled out — invariant 3.
+    /// The settings must land somewhere that names this application.
+    ///
+    /// Not a style check. `ProjectDirs` uses different parts of its three
+    /// arguments on different platforms — Linux uses only the application name —
+    /// so a triple that reads correctly on macOS can silently put the file in
+    /// `~/.config/desktop` on Linux. This test is what caught exactly that.
+    ///
+    /// The directory is checked rather than the whole path, so a machine whose
+    /// home happens to contain "nirmoka" cannot pass it by accident.
     #[test]
-    fn the_settings_path_is_under_a_real_config_directory() {
+    fn the_settings_path_names_this_application_on_every_platform() {
         let Some(path) = settings_path() else {
             return; // No home directory on this machine; that is a valid state.
         };
 
-        assert!(path.is_absolute());
-        assert!(path.ends_with(FILE));
-        assert!(path.to_string_lossy().contains("nirmoka"));
+        assert!(path.is_absolute(), "{}", path.display());
+        assert!(path.ends_with(FILE), "{}", path.display());
+
+        let directory = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .expect("a settings file lives in a directory")
+            .to_string_lossy()
+            .to_lowercase();
+
+        // Windows nests a `config` directory under the application name, so the
+        // parent itself is allowed to be that.
+        let named = directory.contains("nirmoka")
+            || (directory == "config" && path.to_string_lossy().to_lowercase().contains("nirmoka"));
+
+        assert!(named, "settings would land in {}", path.display());
     }
 }
