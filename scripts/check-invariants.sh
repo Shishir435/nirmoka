@@ -24,15 +24,22 @@ pass() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. core and adapter must not depend on a GUI framework.
+# 1. Only the shell may depend on a GUI framework.
 #
 # This is the boundary that makes the frontend replaceable. crates/cli exists
-# to turn a violation into a build failure; this catches it a step earlier.
+# to turn a violation into a build failure; this catches it a step earlier, and
+# catches it for every crate rather than the two that existed when it was
+# written — an adapter reaching for `tauri::async_runtime` would compile fine
+# and quietly weld a backend to the shell.
 # ---------------------------------------------------------------------------
-if grep -qE '^[[:space:]]*tauri' crates/core/Cargo.toml crates/adapter/Cargo.toml 2>/dev/null; then
-  fail "core/adapter must not depend on tauri (see docs/adr/0005)"
+tauri_crates=$(grep -lE '^[[:space:]]*tauri(-build)?[[:space:]]*=' crates/*/Cargo.toml 2>/dev/null |
+  grep -v '^crates/app/Cargo.toml$' || true)
+
+if [[ -n "$tauri_crates" ]]; then
+  fail "only crates/app may depend on tauri (see docs/adr/0005)"
+  printf '%s\n' "$tauri_crates" >&2
 else
-  pass "core and adapter are GUI-framework-free"
+  pass "tauri is confined to crates/app"
 fi
 
 # ---------------------------------------------------------------------------
@@ -89,7 +96,9 @@ fi
 # If a component imports @tauri-apps directly, the React code is welded to
 # Tauri and the escape route in ADR 0005 becomes fiction.
 # ---------------------------------------------------------------------------
-tauri_hits=$(grep -rln '@tauri-apps' apps packages --include='*.ts' --include='*.tsx' 2>/dev/null |
+tauri_hits=$(grep -rln '@tauri-apps' apps packages \
+  --include='*.ts' --include='*.tsx' \
+  --exclude-dir=node_modules --exclude-dir=dist 2>/dev/null |
   grep -v '^packages/transport/' || true)
 
 if [[ -n "$tauri_hits" ]]; then
