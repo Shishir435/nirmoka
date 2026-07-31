@@ -10,14 +10,16 @@ use nirmoka_adapter::Registry;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
-/// Every adapter Nirmoka ships, in preference order.
+/// Every adapter Nirmoka ships, in registration order.
 ///
-/// This must match the registry the CLI and the Tauri app build. When it stops
-/// matching, one of the three is running a backend the others do not know
-/// about, which is exactly the drift a contract suite exists to catch.
+/// Registration order is not preference order — `Registry::resolve` picks, from
+/// the user's choice and the platform default. See ADR 0013. What matters here
+/// is only that this registry holds the same adapters as the CLI's and the Tauri
+/// app's: when it stops matching, one of the three is running a backend the
+/// others do not know about, which is exactly the drift a contract suite exists
+/// to catch.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
-    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry

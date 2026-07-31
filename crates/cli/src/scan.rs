@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use clap::Args;
 use nirmoka_adapter::wire::{self, TreeStats, WireItem, WireSink};
-use nirmoka_adapter::{CancelToken, Registry, ScanOptions, TreeSink};
+use nirmoka_adapter::{CancelToken, Preference, Registry, ScanOptions, TreeSink};
 use nirmoka_core::{format_bytes, NodeId, Tree};
 use serde::Serialize;
 
@@ -60,12 +60,12 @@ pub struct ScanArgs {
     from_export: Option<PathBuf>,
 }
 
-pub fn run(args: ScanArgs, registry: &Registry) -> ExitCode {
+pub fn run(args: ScanArgs, registry: &Registry, preference: &Preference) -> ExitCode {
     let started = Instant::now();
 
     let outcome = match &args.from_export {
         Some(file) => from_export(file),
-        None => from_backend(&args, registry),
+        None => from_backend(&args, registry, preference),
     };
 
     let scan = match outcome {
@@ -119,11 +119,32 @@ fn from_export(file: &PathBuf) -> Result<Scan, String> {
     })
 }
 
-fn from_backend(args: &ScanArgs, registry: &Registry) -> Result<Scan, String> {
-    // A backend that cannot scan is not a candidate, however usable it is.
-    let adapter = registry.first_scanner().ok_or_else(|| {
+fn from_backend(
+    args: &ScanArgs,
+    registry: &Registry,
+    preference: &Preference,
+) -> Result<Scan, String> {
+    // A backend that cannot scan is not a candidate, however usable it is, and
+    // however firmly it was asked for.
+    let choice = registry.scanner(preference).ok_or_else(|| {
         "no usable backend can scan. Run `nrmk backends` to see what is installed.".to_string()
     })?;
+
+    // Said out loud rather than assumed. `--backend mole` is accepted and does
+    // not scan, and a silent substitution would read as the flag being ignored.
+    //
+    // No reason given: the backend may be unable to scan or may not be installed
+    // at all, and `nrmk backends` distinguishes them. Naming the wrong one here
+    // would send someone to install what they already have.
+    if let Some(asked_for) = &choice.instead_of {
+        eprintln!(
+            "note: {asked_for} was preferred; {} is running this scan instead \
+             (`nrmk backends` shows why)",
+            choice.adapter.id()
+        );
+    }
+
+    let adapter = choice.adapter;
 
     let options = ScanOptions {
         one_file_system: args.one_file_system,

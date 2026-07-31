@@ -14,6 +14,7 @@
 pub mod capabilities;
 pub mod detect;
 pub mod error;
+pub mod preference;
 pub mod process;
 pub mod registry;
 pub mod scan;
@@ -24,8 +25,9 @@ use std::path::Path;
 pub use capabilities::Capabilities;
 pub use detect::Detection;
 pub use error::AdapterError;
+pub use preference::{default_order, default_order_for, Ability, Preference};
 pub use process::CancelToken;
-pub use registry::Registry;
+pub use registry::{Choice, Registry};
 pub use scan::{validate_scan_root, ScanOptions, ScanSummary};
 pub use wire::{TreeSink, WireError, WireItem, WireSink};
 

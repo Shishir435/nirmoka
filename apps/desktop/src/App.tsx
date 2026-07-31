@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { resolveTransport, type Backend } from "@nirmoka/transport";
+import { resolveTransport, type Backend, type BackendSelection } from "@nirmoka/transport";
 
 import { BackendList } from "@/components/backend-list";
 import { ScanPanel } from "@/components/scan-panel";
+
+/** A last-resort recovery has nowhere further to fall back to. */
+function noop() {}
 
 /**
  * Every backend call goes through `Transport`. Nothing in this tree knows that
@@ -14,14 +17,17 @@ import { ScanPanel } from "@/components/scan-panel";
 export function App() {
   const transport = useMemo(() => resolveTransport(), []);
   const [backends, setBackends] = useState<Backend[] | null>(null);
+  const [selection, setSelection] = useState<BackendSelection | null>(null);
+  const [choosing, setChoosing] = useState(false);
 
   useEffect(() => {
     let active = true;
 
-    transport
-      .listBackends()
-      .then((result) => {
-        if (active) setBackends(result);
+    Promise.all([transport.listBackends(), transport.backendSelection()])
+      .then(([detected, resolved]) => {
+        if (!active) return;
+        setBackends(detected);
+        setSelection(resolved);
       })
       .catch(() => {
         if (active) setBackends([]);
@@ -32,10 +38,36 @@ export function App() {
     };
   }, [transport]);
 
-  // Usable is not enough: Mole is installed and usable on macOS and cannot
-  // scan, so a button enabled on `usable` alone would be enabled by a backend
-  // that answers `Unsupported`. The Rust side picks the same way.
-  const canScan = backends?.some((backend) => backend.usable && backend.capabilities.scan) ?? false;
+  /**
+   * The answer comes from Rust rather than being computed here.
+   *
+   * A preference is resolved against what each backend can actually do, and
+   * duplicating that rule in the UI is how the two drift: the window would say
+   * one backend and the scan would run on another. The round trip costs a
+   * detection sweep, which is what the button's honesty is worth.
+   */
+  const choose = useCallback(
+    (id: string | null) => {
+      setChoosing(true);
+      transport
+        .chooseBackend(id)
+        .then(setSelection)
+        .catch(() => {
+          // The command does not reject on a failed write — that arrives as
+          // `saveError` on the selection. Reaching here means the round trip
+          // itself failed, so the selection on screen is of unknown accuracy
+          // and asking again is the only honest recovery.
+          transport.backendSelection().then(setSelection).catch(noop);
+        })
+        .finally(() => setChoosing(false));
+    },
+    [transport],
+  );
+
+  // Not `usable`, and no longer a capability check done here either: Rust has
+  // already resolved which backend would run a scan, and `null` means nothing
+  // installed can. Mole is usable on macOS, is its default, and cannot scan.
+  const canScan = selection?.scanner != null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12">
@@ -51,7 +83,7 @@ export function App() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Backends</h2>
-        <BackendList backends={backends} />
+        <BackendList backends={backends} selection={selection} onChoose={choose} busy={choosing} />
       </section>
     </main>
   );

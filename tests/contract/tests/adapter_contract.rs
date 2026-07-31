@@ -175,6 +175,72 @@ fn the_registry_agrees_with_the_adapters_it_holds() {
     );
 }
 
+/// Resolution never hands a backend a job it has said it cannot do.
+///
+/// The promise the whole picker rests on, and the reason a preference is not an
+/// override: a user may choose any backend for any reason, and the resolver has
+/// to keep that from becoming an `Unsupported` at call time. Asserted across
+/// every ability and every possible choice, including ids that name nothing.
+///
+/// Machine-independent: what is installed changes which arm runs, not whether
+/// the promise holds. On a machine with no backend at all, every resolution is
+/// `None`, which is also a pass — `None` disables a control instead of offering
+/// one that fails.
+#[test]
+fn a_resolved_backend_can_always_do_what_it_was_resolved_for() {
+    use nirmoka_adapter::{Ability, Preference};
+
+    const ABILITIES: [Ability; 7] = [
+        Ability::Scan,
+        Ability::Delete,
+        Ability::Trash,
+        Ability::DryRun,
+        Ability::CleanupCategories,
+        Ability::UninstallApps,
+        Ability::SystemStatus,
+    ];
+
+    let registry = registry();
+
+    let mut choices: Vec<Preference> = registry.iter().map(|a| Preference::of(a.id())).collect();
+    choices.push(Preference::platform_default());
+    choices.push(Preference::of("not-a-backend"));
+
+    for ability in ABILITIES {
+        for preference in &choices {
+            let Some(choice) = registry.resolve(ability, preference) else {
+                continue;
+            };
+
+            assert!(
+                ability.is_offered_by(&choice.adapter.capabilities()),
+                "{} was resolved for {} and does not offer it",
+                choice.adapter.id(),
+                ability.name()
+            );
+            assert!(
+                matches!(choice.adapter.detect(), Ok(d) if d.is_usable()),
+                "{} was resolved and is not usable",
+                choice.adapter.id()
+            );
+
+            // A fallback must name who it displaced, and must never claim to
+            // have displaced the backend it actually is.
+            match (&preference.chosen, &choice.instead_of) {
+                (Some(asked), Some(displaced)) => {
+                    assert_eq!(asked, displaced);
+                    assert_ne!(displaced, choice.adapter.id());
+                }
+                (Some(asked), None) => assert_eq!(asked, choice.adapter.id()),
+                (None, displaced) => assert!(
+                    displaced.is_none(),
+                    "a default is not a fallback from anything"
+                ),
+            }
+        }
+    }
+}
+
 #[test]
 fn a_scan_root_that_does_not_exist_is_refused() {
     // Validation happens at the adapter boundary, before a path can become a

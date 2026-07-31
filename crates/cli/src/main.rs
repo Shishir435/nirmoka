@@ -21,7 +21,7 @@ mod backends;
 mod scan;
 
 use clap::{Parser, Subcommand};
-use nirmoka_adapter::Registry;
+use nirmoka_adapter::{Preference, Registry};
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
@@ -33,6 +33,19 @@ use nirmoka_adapter_ncdu::NcduAdapter;
     long_about = None
 )]
 struct Cli {
+    /// Prefer this backend where it can do the job.
+    ///
+    /// A preference, not an override: a backend that cannot do what is being
+    /// asked is fallen back from, with a note on stderr saying so. Without the
+    /// flag the platform default applies.
+    ///
+    /// The GUI stores its own choice in a settings file. `nrmk` deliberately
+    /// does not read it — a harness that inherited a developer's preferences
+    /// would reproduce their machine rather than the default one. See ADR 0007
+    /// on why this binary is not a product.
+    #[arg(long, global = true, value_name = "ID")]
+    backend: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -46,17 +59,20 @@ enum Command {
         json: bool,
     },
 
-    /// Scan a directory with the first usable backend.
+    /// Scan a directory with whichever backend is selected for scanning.
     Scan(scan::ScanArgs),
 }
 
-/// Registration order is preference order.
+/// The registry, in registration order.
+///
+/// Registration order is *not* preference order — it is the last tiebreak,
+/// reached only by a backend no platform default names. `Registry::resolve`
+/// picks. See `crates/adapter/src/preference.rs`.
 ///
 /// Both this and the Tauri app must build an identical registry; the contract
 /// test suite checks that they agree.
 pub fn build_registry() -> Registry {
     let mut registry = Registry::new();
-    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry
@@ -65,9 +81,12 @@ pub fn build_registry() -> Registry {
 fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     let registry = build_registry();
+    let preference = Preference {
+        chosen: cli.backend,
+    };
 
     match cli.command {
-        Command::Backends { json } => backends::run(json, &registry),
-        Command::Scan(args) => scan::run(args, &registry),
+        Command::Backends { json } => backends::run(json, &registry, &preference),
+        Command::Scan(args) => scan::run(args, &registry, &preference),
     }
 }

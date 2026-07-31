@@ -198,6 +198,47 @@ jobs:
             exit 1
           fi
 
+      # A preference is not an override. Choosing a backend that cannot do the
+      # job has to fall back and say so, rather than failing the operation — the
+      # decision in docs/adr/0013-the-backend-is-a-choice.md, asserted against
+      # the binary instead of left in prose.
+      #
+      # `mole` is the argument on every platform on purpose: it is usable and
+      # cannot scan on macOS, and not installed at all elsewhere. Both are
+      # fallbacks, and the same two lines have to come out either way.
+      - name: A preferred backend that cannot do the job falls back
+        if: matrix.ncdu_expect == 'ok'
+        shell: bash
+        run: |
+          output=$(cargo run -q -p nirmoka-cli -- --backend mole backends)
+          printf '%s\n' "$output"
+
+          if ! printf '%s' "$output" | grep -qE '^SCANS WITH +ncdu$'; then
+            echo "::error::preferring mole must leave ncdu scanning, not break the scan"
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -qE '^PREFERRED +mole,'; then
+            echo "::error::a preference that was not met must be named, not silently dropped"
+            exit 1
+          fi
+
+      # The other half: the fallback is not just reported, it actually runs.
+      - name: A scan runs even when the preferred backend cannot scan
+        if: matrix.ncdu_expect == 'ok'
+        shell: bash
+        run: |
+          output=$(cargo run -q -p nirmoka-cli -- --backend mole scan crates/core --depth 1 2>&1)
+          printf '%s\n' "$output"
+
+          if ! printf '%s' "$output" | grep -q 'mole was preferred'; then
+            echo "::error::the substitution must be stated, not silent"
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -qE '^SOURCE +ncdu'; then
+            echo "::error::the scan must have actually run on ncdu"
+            exit 1
+          fi
+
       - name: Detect backends as JSON
         if: matrix.ncdu_expect != 'skip'
         shell: bash

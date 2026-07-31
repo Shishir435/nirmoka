@@ -85,6 +85,7 @@ cargo fmt --all
 cargo run -p nirmoka-cli -- backends
 cargo run -p nirmoka-cli -- backends --json
 pnpm nrmk backends           # same thing via pnpm
+pnpm nrmk --backend mole backends    # prefer one; it falls back where it cannot
 
 pnpm tauri dev               # the desktop shell (starts Vite itself)
 pnpm types                   # regenerate packages/transport/src/generated/bindings.ts

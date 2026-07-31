@@ -2,7 +2,7 @@
 
 use std::process::ExitCode;
 
-use nirmoka_adapter::{Capabilities, Detection, Registry};
+use nirmoka_adapter::{default_order, Capabilities, Detection, Preference, Registry};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -22,7 +22,7 @@ struct BackendReport {
     capabilities: Capabilities,
 }
 
-pub fn run(json: bool, registry: &Registry) -> ExitCode {
+pub fn run(json: bool, registry: &Registry, preference: &Preference) -> ExitCode {
     let entries = registry.detect_all();
 
     let reports: Vec<BackendReport> = entries
@@ -56,6 +56,7 @@ pub fn run(json: bool, registry: &Registry) -> ExitCode {
         );
     } else {
         print_table(&reports);
+        print_selection(registry, preference);
     }
 
     let any_usable = reports
@@ -68,6 +69,36 @@ pub fn run(json: bool, registry: &Registry) -> ExitCode {
         // Non-zero so CI and scripts can tell "no backend" from "found one".
         ExitCode::FAILURE
     }
+}
+
+/// Which backend a scan would use, printed under the table.
+///
+/// A footer rather than a column, for two reasons. The table answers "what is
+/// installed" and this answers "what will run", which are different questions
+/// that stopped having the same answer once backends stopped agreeing on what
+/// they can do. And a column would move the DETAIL field again — CI asserts
+/// against these rows, and a table whose shape shifts every step is a set of
+/// assertions nobody trusts.
+fn print_selection(registry: &Registry, preference: &Preference) {
+    println!();
+
+    match registry.scanner(preference) {
+        Some(choice) => {
+            println!("SCANS WITH  {}", choice.adapter.id());
+            // Deliberately states the fact and not the reason. "cannot scan" and
+            // "is not installed" are both possible here and the difference is
+            // already in the table above — asserting one of them would be a
+            // guess printed as a finding.
+            if let Some(asked_for) = &choice.instead_of {
+                println!("PREFERRED   {asked_for}, which is not running this — see its row above");
+            }
+        }
+        None => println!("SCANS WITH  nothing installed can scan"),
+    }
+
+    // The default is worth showing even when a choice overrides it: it is what
+    // clearing the choice goes back to, and it differs per platform.
+    println!("DEFAULT     {}", default_order().join(", "));
 }
 
 fn print_table(reports: &[BackendReport]) {

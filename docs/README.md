@@ -32,6 +32,8 @@ not in the room.
 | [0009](adr/0009-disk-usage-is-the-number.md)            | Disk usage is the number; apparent size sits beside it |
 | [0010](adr/0010-boundary-types-in-the-shell.md)         | The types that cross to TypeScript live in the shell   |
 | [0011](adr/0011-ordering-and-paging-are-server-side.md) | Ordering and paging happen in Rust                     |
+| [0012](adr/0012-mole-is-not-a-scanner.md)               | Mole is a cleanup backend, not a scanner               |
+| [0013](adr/0013-the-backend-is-a-choice.md)             | The backend is a choice, resolved per ability          |
 
 ## The four ideas that matter
 
