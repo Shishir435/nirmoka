@@ -1,0 +1,91 @@
+[
+  1,
+  2,
+  { "progname": "ncdu", "progver": "2.8.2", "timestamp": 1785498272 },
+  [
+    {
+      "name": "/fixtures/extended",
+      "asize": 192,
+      "dev": 16777230,
+      "uid": 501,
+      "gid": 20,
+      "mode": 16877,
+      "mtime": 1785498272
+    },
+    [{ "name": "empty", "asize": 64, "uid": 501, "gid": 20, "mode": 16877, "mtime": 1785498272 }],
+    [
+      {
+        "name": "unreadable",
+        "asize": 96,
+        "uid": 501,
+        "gid": 20,
+        "mode": 16384,
+        "mtime": 1785498272,
+        "read_error": true
+      }
+    ],
+    {
+      "name": "sparse.img",
+      "asize": 4194304,
+      "uid": 501,
+      "gid": 20,
+      "mode": 33188,
+      "mtime": 1785498272
+    },
+    [
+      { "name": "nested", "asize": 128, "uid": 501, "gid": 20, "mode": 16877, "mtime": 1785498272 },
+      {
+        "name": "regular.txt",
+        "asize": 11,
+        "dsize": 4096,
+        "ino": 47451479,
+        "hlnkc": true,
+        "nlink": 2,
+        "uid": 501,
+        "gid": 20,
+        "mode": 33188,
+        "mtime": 1785498272
+      },
+      [
+        {
+          "name": "deeper",
+          "asize": 160,
+          "uid": 501,
+          "gid": 20,
+          "mode": 16877,
+          "mtime": 1785498272
+        },
+        {
+          "name": "blocks.bin",
+          "asize": 8192,
+          "dsize": 8192,
+          "uid": 501,
+          "gid": 20,
+          "mode": 33188,
+          "mtime": 1785498272
+        },
+        {
+          "name": "link",
+          "asize": 14,
+          "notreg": true,
+          "uid": 501,
+          "gid": 20,
+          "mode": 41453,
+          "mtime": 1785498272
+        },
+        {
+          "name": "hardlink.txt",
+          "asize": 11,
+          "dsize": 4096,
+          "ino": 47451479,
+          "hlnkc": true,
+          "nlink": 2,
+          "uid": 501,
+          "gid": 20,
+          "mode": 33188,
+          "mtime": 1785498272
+        }
+      ]
+    ]
+  ]
+]

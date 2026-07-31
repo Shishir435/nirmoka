@@ -1,0 +1,35 @@
+[
+  1,
+  2,
+  { "progname": "ncdu", "progver": "2.8.2", "timestamp": 1785498272 },
+  [
+    { "name": "/fixtures/simple", "asize": 192, "dev": 16777230 },
+    [{ "name": "empty", "asize": 64 }],
+    [{ "name": "unreadable", "asize": 96, "read_error": true }],
+    { "name": "sparse.img", "asize": 4194304 },
+    [
+      { "name": "nested", "asize": 128 },
+      {
+        "name": "regular.txt",
+        "asize": 11,
+        "dsize": 4096,
+        "ino": 47451479,
+        "hlnkc": true,
+        "nlink": 2
+      },
+      [
+        { "name": "deeper", "asize": 160 },
+        { "name": "blocks.bin", "asize": 8192, "dsize": 8192 },
+        { "name": "link", "asize": 14, "notreg": true },
+        {
+          "name": "hardlink.txt",
+          "asize": 11,
+          "dsize": 4096,
+          "ino": 47451479,
+          "hlnkc": true,
+          "nlink": 2
+        }
+      ]
+    ]
+  ]
+]
