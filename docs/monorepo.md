@@ -17,7 +17,7 @@ nirmoka/
 │   ├── adapter-ncdu/       baseline backend
 │   ├── adapter-mole/       macOS backend (step 9)
 │   ├── cli/                bin `nrmk` — headless harness
-│   └── app/                Tauri shell (step 7)
+│   └── app/                Tauri shell — window, commands, and nothing else
 │
 ├── apps/                   ← TypeScript
 │   └── desktop/            React 19 + Tailwind v4 + shadcn/ui
@@ -37,18 +37,22 @@ within a month — you stop being able to tell what `pnpm -r` will touch, and Ca
 
 ## How Tauri bridges the two
 
-Config, not tooling. `crates/app/tauri.conf.json` (step 7):
+Config, not tooling. `crates/app/tauri.conf.json`:
 
 ```json
 {
   "build": {
     "frontendDist": "../../apps/desktop/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm --filter @nirmoka/desktop dev",
-    "beforeBuildCommand": "pnpm --filter @nirmoka/desktop build"
+    "beforeDevCommand": { "cwd": "../..", "script": "pnpm dev" },
+    "beforeBuildCommand": { "cwd": "../..", "script": "pnpm build" }
   }
 }
 ```
+
+The `cwd` matters: the shell lives in `crates/app` rather than the `src-tauri/` the Tauri
+templates assume, so the frontend commands have to be run from the repository root where
+pnpm's workspace is.
 
 pnpm builds the frontend, Cargo builds the shell, `pnpm tauri dev` runs both. The Vite dev
 server uses `strictPort: true` so a port collision fails loudly instead of silently moving
@@ -59,13 +63,24 @@ to 5174 and leaving the shell pointed at nothing.
 This is the real multi-language problem. Rust structs need TypeScript equivalents, and
 hand-written mirrors drift silently.
 
-**Step 0–6:** `packages/transport/src/types.ts` is hand-written, with each type documented
-as mirroring a specific Rust type.
+`ts-rs` derives on the boundary types in `crates/app/src/dto.rs` and emits one file,
+`packages/transport/src/generated/bindings.ts`. Regenerate with:
 
-**From step 7:** `ts-rs` derives on the Rust types and emits `.d.ts` into
-`packages/transport/src/generated/`. That output is **committed**, so the frontend builds
-without a Rust toolchain, and CI regenerates it and fails on a diff. Committed generated
-code plus a diff check is what makes drift impossible rather than merely discouraged.
+```bash
+pnpm types          # cargo test -p nirmoka-app export_bindings
+```
+
+That output is **committed**, so the frontend builds without a Rust toolchain — the `web`
+CI job has no Rust installed and proves it on every run. `cargo test` rewrites the file as
+a side effect, and CI fails on a diff, so a Rust type cannot move without its mirror moving
+with it. Committed generated code plus a diff check is what makes drift impossible rather
+than merely discouraged.
+
+One file rather than one per type: a module per type means an import graph between
+generated files, which is a second thing to get right for no gain at this size.
+
+The types being generated live in the shell rather than in `core`, because invariant 1 caps
+`core` at serde and thiserror — see [ADR 0010](adr/0010-boundary-types-in-the-shell.md).
 
 (`tauri-specta` produces fully typed `invoke` wrappers and is nicer. It is also more
 machinery. Start with `ts-rs`; upgrade if the command surface grows.)
