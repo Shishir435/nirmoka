@@ -89,10 +89,17 @@ impl Tree {
 
     /// Turn a raw id from outside this process into one that indexes this tree.
     ///
-    /// Ids handed to a frontend come back as plain integers, and nothing stops
-    /// one arriving after a rescan replaced the tree it referred to. This is
-    /// where that becomes an error instead of a panic or, worse, a row from an
-    /// unrelated node.
+    /// Ids handed to a frontend come back as plain integers, so this is where an
+    /// out-of-range one becomes an error rather than a panic.
+    ///
+    /// **It is a bounds check, not a staleness check.** Every tree numbers its
+    /// nodes from zero, so an id left over from a scan that has since been
+    /// replaced will resolve here if the new tree happens to be long enough —
+    /// and it will name a different file. What prevents that today is that a new
+    /// scan clears the previous result and the UI goes back to the root, so no
+    /// id outlives the tree that issued it. Navigation that survives a rescan
+    /// (roadmap step 8) needs a generation token on the id; this signature is
+    /// where it would go.
     pub fn node_id(&self, raw: u32) -> Result<NodeId> {
         let id = NodeId(raw);
         if id.index() < self.nodes.len() {
@@ -178,10 +185,10 @@ mod tests {
         let root = tree.node_id(0).expect("index 0 exists");
         assert_eq!(tree.get(root).unwrap().name, "root");
 
-        let stale = tree.node_id(9_999);
+        let out_of_range = tree.node_id(9_999);
         assert!(
-            matches!(stale, Err(CoreError::UnknownNode(9_999))),
-            "an id from a tree that no longer exists must not resolve"
+            matches!(out_of_range, Err(CoreError::UnknownNode(9_999))),
+            "an id past the end must be refused rather than indexed"
         );
     }
 

@@ -137,35 +137,56 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
     let root = validate_scan_root(Path::new(root)).map_err(|error| error.to_string())?;
     let cancel = CancelToken::new();
 
-    {
-        let mut scan = state.scan();
-        if let Some(active) = &scan.active {
-            return Err(format!(
-                "a scan of {} is already running",
-                active.root.display()
-            ));
-        }
-
-        scan.active = Some(ActiveScan {
-            root: root.clone(),
-            cancel: cancel.clone(),
-        });
-        // The previous result goes now, not when the new one lands. Leaving it
-        // in place would let `rows` answer from the old tree while the UI says
-        // it is scanning something else.
-        scan.result = None;
-    }
+    claim(&state, root.clone(), cancel.clone())?;
 
     let worker_app = app.clone();
     let worker_root = root.clone();
 
-    thread::Builder::new()
+    let spawned = thread::Builder::new()
         .name("nirmoka-scan".into())
         .stack_size(WORKER_STACK_BYTES)
-        .spawn(move || run(worker_app, worker_root, cancel))
-        .map_err(|error| format!("could not start the scan thread: {error}"))?;
+        .spawn(move || run(worker_app, worker_root, cancel));
+
+    if let Err(error) = spawned {
+        release(&state);
+        return Err(format!("could not start the scan thread: {error}"));
+    }
 
     Ok(root)
+}
+
+/// Mark a scan as running, refusing if one already is.
+///
+/// Split out from [`start`] because the pairing with [`release`] is the part
+/// worth testing, and `start` needs an `AppHandle` that only exists inside a
+/// running application.
+fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<(), String> {
+    let mut scan = state.scan();
+
+    if let Some(active) = &scan.active {
+        return Err(format!(
+            "a scan of {} is already running",
+            active.root.display()
+        ));
+    }
+
+    scan.active = Some(ActiveScan { root, cancel });
+    // The previous result goes now, not when the new one lands. Leaving it in
+    // place would let `rows` answer from the old tree while the UI says it is
+    // scanning something else.
+    scan.result = None;
+
+    Ok(())
+}
+
+/// Give up a claim nothing is going to honour.
+///
+/// Without this, a worker thread that fails to spawn leaves an active scan that
+/// no thread will ever clear: every later scan is refused as "already running",
+/// and the stop button trips a token nobody is watching. The window would have
+/// to be restarted to scan anything again.
+fn release(state: &AppState) {
+    state.scan().active = None;
 }
 
 /// Stop the running scan. Returns whether there was one.
@@ -252,6 +273,48 @@ mod tests {
     }
 
     #[test]
+    fn a_second_scan_is_refused_while_one_is_running() {
+        let state = AppState::new();
+        claim(&state, "/fixtures/root".into(), CancelToken::new()).expect("the first claim");
+
+        let error = claim(&state, "/fixtures/other".into(), CancelToken::new())
+            .expect_err("the second claim");
+        assert!(error.contains("already running"), "got: {error}");
+    }
+
+    #[test]
+    fn a_claim_nothing_honours_is_released_rather_than_stranded() {
+        let state = AppState::new();
+        claim(&state, "/fixtures/root".into(), CancelToken::new()).expect("the first claim");
+
+        // What `start` does when the thread fails to spawn. Without it the app
+        // refuses every later scan until the window is restarted.
+        release(&state);
+
+        assert!(state.scan().active.is_none());
+        claim(&state, "/fixtures/root".into(), CancelToken::new())
+            .expect("scanning must still be possible after a failed spawn");
+    }
+
+    #[test]
+    fn cancelling_with_nothing_running_says_so() {
+        assert!(!cancel(&AppState::new()), "there was no scan to stop");
+    }
+
+    #[test]
+    fn cancelling_trips_the_token_the_worker_was_given() {
+        let state = AppState::new();
+        let token = CancelToken::new();
+        claim(&state, "/fixtures/root".into(), token.clone()).expect("a claim");
+
+        assert!(cancel(&state));
+        assert!(
+            token.is_cancelled(),
+            "the stop button must trip the token the scan is watching"
+        );
+    }
+
+    #[test]
     fn the_first_entry_reports_immediately() {
         let recorder = Recorder::default();
         let mut sink = ProgressSink::new(&recorder);
@@ -292,8 +355,13 @@ mod tests {
         sink.next_report = sink.seen + 1;
         sink.open_dir(item("nested"));
 
+        // Built with PathBuf rather than written out, because the separator is
+        // the platform's: this is `/fixtures/root\nested` on Windows, and a
+        // literal here would assert that Nirmoka only runs on Unix.
+        let expected = PathBuf::from("/fixtures/root").join("nested");
+
         let seen = recorder.seen.lock().unwrap();
-        assert_eq!(seen[1].current_path, "/fixtures/root/nested");
+        assert_eq!(seen[1].current_path, expected.display().to_string());
     }
 
     #[test]
