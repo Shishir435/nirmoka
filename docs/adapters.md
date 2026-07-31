@@ -3,9 +3,6 @@
 An adapter teaches Nirmoka to drive one disk tool. This document is the contract every
 adapter must satisfy.
 
-> **Draft.** The trait below is a design sketch, not shipped code. It will change as the
-> first two adapters are written. Treat it as the intended shape.
-
 ## Responsibilities
 
 An adapter is responsible for:
@@ -20,50 +17,74 @@ An adapter is responsible for:
 An adapter is **not** responsible for rendering, sorting, selection state, or confirmation
 dialogs. Those live in `core/` and the UI, once, for all backends.
 
-## Trait sketch
+## The trait
+
+Detection, capabilities, and scanning are implemented. `delete` arrives in roadmap step 10,
+with its own validation and its own tests; it is deliberately absent rather than stubbed,
+so nothing can depend on a signature that has not been designed yet.
 
 ```rust
-#[async_trait]
 pub trait Adapter: Send + Sync {
-    /// Stable identifier: "mole", "ncdu", "gdu".
+    /// Stable machine identifier: "ncdu", "mole", "gdu".
     fn id(&self) -> &'static str;
 
-    /// Human-readable name for the backend picker.
+    /// Name shown in the backend picker.
     fn display_name(&self) -> &'static str;
 
-    /// Is the backend present on this machine, and at what version?
-    async fn detect(&self) -> Result<Detection, AdapterError>;
+    /// Version range this adapter has been tested against.
+    fn supported_versions(&self) -> &'static str;
 
-    /// What this backend can do. Called after successful detection.
+    /// Is the backend installed, and is its version one we understand?
+    fn detect(&self) -> Result<Detection, AdapterError>;
+
+    /// What this backend can do. Meaningful only after a successful detect.
     fn capabilities(&self) -> Capabilities;
 
-    /// Stream a scan of `root`. Emits ncdu-format nodes as they arrive.
-    async fn scan(
+    /// Walk `root`, streaming entries into `sink` as the backend produces them.
+    fn scan(
         &self,
         root: &Path,
-        opts: ScanOptions,
-        sink: &mut dyn ScanSink,
-        cancel: CancellationToken,
+        options: &ScanOptions,
+        sink: &mut dyn WireSink,
+        cancel: &CancelToken,
     ) -> Result<ScanSummary, AdapterError>;
-
-    /// Remove `path`. Must validate before touching a subprocess argument.
-    /// Honours `mode`; returns Unsupported if the backend lacks that mode.
-    async fn delete(
-        &self,
-        path: &Path,
-        mode: DeleteMode,
-    ) -> Result<DeleteOutcome, AdapterError>;
-}
-
-pub enum DeleteMode {
-    /// Report what would be removed. Nothing is touched.
-    DryRun,
-    /// Recoverable removal. Requires Capabilities::trash.
-    Trash,
-    /// Irreversible removal.
-    Permanent,
 }
 ```
+
+Synchronous on purpose. A scan is one subprocess and one blocking read; an async runtime
+would be a dependency, a colour on every function, and a second scheduler beside the one
+Tauri already runs. Callers put `scan` on a worker thread and cancel it with the token.
+
+The parser and `WireSink` live in `crates/adapter` rather than in the ncdu adapter, because
+the format is part of this contract and two of three backends emit it natively. See
+[ADR 0008](adr/0008-wire-parser-in-adapter-crate.md).
+
+## Reading a scan
+
+`WireSink` receives entries during the parse. `open_dir` and `close_dir` bracket a
+directory's children, so a sink can keep a stack and never needs the tree in advance:
+
+```rust
+pub trait WireSink {
+    fn header(&mut self, _header: &WireHeader) {}
+    fn open_dir(&mut self, item: WireItem);
+    fn item(&mut self, item: WireItem);
+    fn close_dir(&mut self);
+}
+```
+
+`TreeSink` is the implementation almost everything wants: it builds a `nirmoka_core::Tree`,
+deduplicates hardlinks, and counts what it had to warn about.
+
+```rust
+let mut sink = TreeSink::new();
+let summary = adapter.scan(root, &ScanOptions::default(), &mut sink, &cancel)?;
+let stats = sink.stats();   // read errors, exclusions, deduplicated hardlinks
+let tree = sink.finish();   // sizes rolled up
+```
+
+Warnings are part of the result, not a log line. A total that omits twelve unreadable
+directories is a lie by omission, and `TreeStats` is how the UI can say so.
 
 ## Requirements
 
@@ -98,15 +119,23 @@ copying its data tables makes Nirmoka a derivative work. See
 
 ### Streaming, not buffering
 
-A scan of a large home directory produces a lot of nodes. `scan` streams into a `ScanSink`
-so the UI can paint the first rows within a few hundred milliseconds. Collecting the whole
-tree before returning makes the app feel broken on exactly the disks people most need it
-for.
+A scan of a large home directory produces a lot of nodes — 2.2 million on the machine this
+was developed on. `scan` streams into a `WireSink` so the UI can paint the first rows within
+a few hundred milliseconds. Collecting the whole tree before returning makes the app feel
+broken on exactly the disks people most need it for.
+
+The parser pulls from the backend's stdout and hands over each entry as it decodes, so the
+export text is never held in memory alongside the tree it becomes.
 
 ### Cancellation must actually kill the process
 
 When the user stops a scan, the subprocess must terminate, not be orphaned and left
 churning the disk. Every adapter needs a test for this.
+
+`RunningProcess` in `crates/adapter` does the work: it spawns with piped output, watches the
+`CancelToken` on its own thread, and kills the child when the token trips. A cancelled scan
+returns `AdapterError::Cancelled`, never a truncated success — the export a killed backend
+leaves behind would otherwise parse as a small disk.
 
 ### Degrade, don't lie
 
@@ -128,7 +157,9 @@ what the backend would delete.
 ### ncdu (cross-platform)
 
 - Binary: `ncdu`
-- Scan: `ncdu -o -` (export mode; the interactive TUI is not scriptable)
+- Scan: `ncdu --ignore-config -0 -o - <path>` (export mode; the interactive TUI is not
+  scriptable). `--ignore-config` matters: without it a user's `~/.config/ncdu/config`
+  silently changes what a scan means.
 - Preview: none — declare `dry_run: false`
 - Capabilities: scan and delete only
 - This is the baseline. If a feature cannot be expressed here, it belongs behind a
@@ -140,12 +171,32 @@ what the backend would delete.
 - Scan: ncdu-compatible export
 - Notable as the realistic Windows path
 
+## Fixtures and the contract suite
+
+`tests/contract` is one suite that every adapter must pass. It is driven by recorded backend
+output under `fixtures/<backend>/<version>/`, so it runs on machines with no backend
+installed — including Windows CI, where ncdu does not exist at all.
+
+```bash
+./scripts/record-ncdu-fixture.sh          # re-record after a backend upgrade
+cargo test -p nirmoka-contract-tests
+```
+
+Recorded output is never hand-written and never edited afterwards, with one exception: the
+scan root is rewritten to `/fixtures/<name>` so the recording machine's paths stay out of
+the repository. The point of a fixture is to capture the difference between what a backend
+documents and what it emits; a made-up one captures nothing.
+
+Fixtures are stored per backend version. A format drift should appear as a new directory
+beside the old one, not as a diff that quietly replaces the evidence.
+
 ## Adding a backend
 
 1. Read this document and [architecture.md](architecture.md).
 2. Create `adapter-<name>/`.
 3. Record real output from the backend into `fixtures/<name>/<version>/`.
 4. Implement the trait.
-5. Register the adapter in the registry.
+5. Register the adapter in the registry — `crates/cli`, the Tauri app, and
+   `tests/contract/src/lib.rs` must all build the same one.
 6. Run the shared contract suite — no adapter-specific test suite. If your backend needs
    a special case in the shared tests, the trait is probably wrong.
