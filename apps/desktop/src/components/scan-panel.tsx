@@ -10,6 +10,11 @@ import { formatBytes, formatCount, plural } from "@/lib/format";
  *  honest by construction. */
 const PAGE = 20;
 
+/** Registering the scan event listeners: a round trip into Rust, so it takes
+ *  time and can fail. */
+type Subscription =
+  { status: "pending" } | { status: "ready" } | { status: "failed"; message: string };
+
 type ScanState =
   | { status: "idle" }
   | { status: "scanning"; root: string; scanned: number; currentPath: string }
@@ -98,11 +103,11 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   const [path, setPath] = useState("");
   const [state, setState] = useState<ScanState>({ status: "idle" });
   const [page, setPage] = useState<RowPage | null>(null);
-  /** Whether the event listeners are registered. No scan may start before they
-   *  are: registration is a round trip into Rust, and a scan that finishes
-   *  first would deliver its terminal event to nobody, leaving this stuck on
-   *  "scanning" for a scan that already ended. */
-  const [listening, setListening] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription>({ status: "pending" });
+  /** Bumped to re-run the effect. Registration is a round trip that can fail;
+   *  without a way to ask again, one failure would disable scanning until the
+   *  window is reopened. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -149,16 +154,24 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
           ),
         ),
       ),
-    ]).then(() => {
-      if (live) setListening(true);
-    });
+    ]).then(
+      () => {
+        if (live) setSubscription({ status: "ready" });
+      },
+      (error: unknown) => {
+        // Nothing will report a scan's progress or its end, so scanning stays
+        // disabled — but silently disabled is a window that looks broken. Say
+        // what happened and offer the retry.
+        if (live) setSubscription({ status: "failed", message: String(error) });
+      },
+    );
 
     return () => {
       live = false;
-      setListening(false);
+      setSubscription({ status: "pending" });
       off.forEach((unsubscribe) => unsubscribe());
     };
-  }, [transport]);
+  }, [transport, attempt]);
 
   const start = useCallback(() => {
     setPage(null);
@@ -181,7 +194,7 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   const scanning = state.status === "scanning";
   // A scan needs both a backend that can run it and somewhere for its events to
   // land.
-  const ready = enabled && listening;
+  const ready = enabled && subscription.status === "ready";
 
   return (
     <section className="space-y-4">
@@ -213,6 +226,17 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
         <p className="text-muted-foreground text-sm">
           No usable backend. Install ncdu 2.x and reopen this window.
         </p>
+      )}
+
+      {enabled && subscription.status === "failed" && (
+        <div className="flex items-baseline gap-3">
+          <p className="text-destructive text-sm">
+            Could not subscribe to scan events: {subscription.message}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </Button>
+        </div>
       )}
 
       {state.status === "scanning" && (
