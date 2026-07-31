@@ -1,0 +1,12 @@
+[package]
+name = "nirmoka-adapter-mole"
+description = "Mole backend adapter. macOS-only cleanup abilities; not a scanner."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nirmoka-adapter = { workspace = true }
+nirmoka-core = { workspace = true }
