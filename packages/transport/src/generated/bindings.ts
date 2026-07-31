@@ -60,7 +60,17 @@ scannerInsteadOf: string | null,
  * configuration directory, where the choice is honoured for the session
  * and then forgotten — which the UI says rather than letting it surprise.
  */
-persistent: boolean, };
+persistent: boolean, 
+/**
+ * Why the last change could not be written down, if it could not be.
+ *
+ * A field rather than a failed call. The choice *did* take effect — it is
+ * applied in memory before the write is attempted — so returning an error
+ * would leave the picker rendering the previous backend while the process
+ * runs on the new one. Two different things happened and both have to
+ * arrive: the selection, and the fact that it will not survive a restart.
+ */
+saveError: string | null, };
 
 /**
  * What the active backend can do, so the UI can hide controls it cannot honour.

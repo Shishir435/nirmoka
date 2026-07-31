@@ -91,6 +91,12 @@ pub fn load_from(path: &Path) -> Preference {
 }
 
 /// The writable half, against an explicit path so it can be tested.
+///
+/// Writes a temporary file and renames it over the target, because the naive
+/// `fs::write` is a truncate followed by a write: a crash or a full disk between
+/// the two leaves a half-written file, `load_from` degrades it to the default,
+/// and the user's choice is gone. `rename` within a directory is atomic, so the
+/// file on disk is either the old preference or the new one and never neither.
 pub fn save_to(path: &Path, preference: &Preference) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -99,7 +105,17 @@ pub fn save_to(path: &Path, preference: &Preference) -> io::Result<()> {
     let json = serde_json::to_string_pretty(preference)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-    fs::write(path, format!("{json}\n"))
+    // Beside the target rather than in a temp directory: `rename` is only
+    // atomic within one filesystem, and `/tmp` is often a different one.
+    let staged = path.with_extension("json.tmp");
+    fs::write(&staged, format!("{json}\n"))?;
+
+    fs::rename(&staged, path).inspect_err(|_| {
+        // A rename that failed leaves the staged file behind. Nothing reads it,
+        // but leaving litter next to a settings file is how a directory
+        // accumulates files nobody can explain.
+        let _ = fs::remove_file(&staged);
+    })
 }
 
 #[cfg(test)]
@@ -176,6 +192,28 @@ mod tests {
         save_to(&path, &Preference::platform_default()).expect("written");
 
         assert_eq!(load_from(&path), Preference::platform_default());
+    }
+
+    /// A settings file is either the old preference or the new one.
+    ///
+    /// The failure this guards against is a truncate that succeeds and a write
+    /// that does not: `load_from` degrades a half-written file to the default,
+    /// so a crash mid-save would silently discard a choice the user had made
+    /// once and never touched again.
+    #[test]
+    fn a_save_leaves_no_half_written_file_behind() {
+        let dir = TempDir::new("atomic");
+        let path = dir.join(FILE);
+        let staged = path.with_extension("json.tmp");
+
+        save_to(&path, &Preference::of("ncdu")).expect("written");
+        save_to(&path, &Preference::of("mole")).expect("written");
+
+        assert!(
+            !staged.exists(),
+            "the staging file outlived the save that made it"
+        );
+        assert_eq!(load_from(&path), Preference::of("mole"));
     }
 
     #[test]

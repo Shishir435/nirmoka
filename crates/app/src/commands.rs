@@ -65,6 +65,9 @@ pub fn selection_of(state: &AppState) -> dto::BackendSelection {
             .map(|choice| choice.adapter.id().to_string()),
         scanner_instead_of: scanner.and_then(|choice| choice.instead_of),
         persistent: state.is_persistent(),
+        // Reading the selection never writes anything, so there is nothing here
+        // to have failed. Only `choose_backend_in` can fill this in.
+        save_error: None,
     }
 }
 
@@ -78,12 +81,19 @@ pub fn selection_of(state: &AppState) -> dto::BackendSelection {
 /// An id naming no registered backend is not rejected. It resolves to nothing,
 /// falls back, and says so; refusing it would mean the only way to recover from
 /// a hand-edited settings file is to hand-edit it again.
-pub fn choose_backend_in(
-    state: &AppState,
-    id: Option<String>,
-) -> Result<dto::BackendSelection, String> {
-    state.choose(nirmoka_adapter::Preference { chosen: id })?;
-    Ok(selection_of(state))
+///
+/// **Never fails.** A choice that could not be written down still took effect,
+/// so failing the call would leave the picker showing the previous backend while
+/// the process ran on the new one — the window and the program disagreeing about
+/// a setting the user is looking at. The write failure travels as
+/// `save_error` instead, alongside the selection it did not prevent.
+pub fn choose_backend_in(state: &AppState, id: Option<String>) -> dto::BackendSelection {
+    let outcome = state.choose(nirmoka_adapter::Preference { chosen: id });
+
+    dto::BackendSelection {
+        save_error: outcome.err(),
+        ..selection_of(state)
+    }
 }
 
 pub fn summary_of(state: &AppState) -> Option<dto::ScanSummary> {
@@ -165,10 +175,7 @@ pub fn backend_selection(state: State<'_, AppState>) -> dto::BackendSelection {
 }
 
 #[tauri::command]
-pub fn choose_backend(
-    state: State<'_, AppState>,
-    id: Option<String>,
-) -> Result<dto::BackendSelection, String> {
+pub fn choose_backend(state: State<'_, AppState>, id: Option<String>) -> dto::BackendSelection {
     choose_backend_in(&state, id)
 }
 
@@ -238,6 +245,55 @@ mod tests {
 
     fn state_with_a_scan() -> AppState {
         state_with_a_scan_of(SCAN, MAX_ROWS + 5)
+    }
+
+    /// The window and the process must never disagree about the setting.
+    ///
+    /// `choose` applies the preference in memory before it tries to write it,
+    /// so a call that returned an error on a failed write would leave the
+    /// picker rendering the old backend while scans ran on the new one. The
+    /// selection always comes back; the write failure rides along with it.
+    #[test]
+    fn choosing_always_returns_what_the_process_is_now_using() {
+        let state = AppState::with_preference(
+            nirmoka_adapter::Preference::platform_default(),
+            // No configuration directory, so nothing is written at all — the
+            // strongest version of "the save did not happen".
+            false,
+        );
+
+        let selection = choose_backend_in(&state, Some("mole".to_string()));
+
+        assert_eq!(selection.chosen.as_deref(), Some("mole"));
+        assert_eq!(
+            selection.chosen,
+            state.preference().chosen,
+            "the reported selection is not the one in force"
+        );
+        assert!(!selection.persistent, "and it says it will not survive");
+    }
+
+    /// An id naming nothing is a recoverable state, not a rejection: the only
+    /// other way out of a hand-edited settings file would be to edit it again.
+    #[test]
+    fn choosing_a_backend_that_does_not_exist_falls_back_rather_than_failing() {
+        let state = AppState::with_preference(nirmoka_adapter::Preference::default(), false);
+
+        let selection = choose_backend_in(&state, Some("not-a-backend".to_string()));
+        assert_eq!(selection.chosen.as_deref(), Some("not-a-backend"));
+
+        if let Some(scanner) = &selection.scanner {
+            assert_ne!(scanner, "not-a-backend");
+            assert_eq!(
+                selection.scanner_instead_of.as_deref(),
+                Some("not-a-backend")
+            );
+        }
+
+        // And it is reversible.
+        let cleared = choose_backend_in(&state, None);
+        assert!(cleared.chosen.is_none());
+        assert!(cleared.scanner_instead_of.is_none());
     }
 
     #[test]

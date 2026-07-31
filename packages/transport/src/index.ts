@@ -71,6 +71,11 @@ export interface Transport {
    * Resolves with the selection as it now stands rather than echoing the id:
    * a choice is honoured where it can be, and the caller needs to know what it
    * resolved to rather than what was requested.
+   *
+   * Does not reject on a failed write. The choice takes effect in memory before
+   * it is persisted, so a rejection would leave this window showing the old
+   * backend while the process used the new one. A write that failed comes back
+   * as `saveError` on the selection it did not prevent.
    */
   chooseBackend(id: string | null): Promise<BackendSelection>;
 
@@ -291,6 +296,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       // Only when a choice was made and something else ran.
       scannerInsteadOf: chosen !== null && chosen !== scanner ? chosen : null,
       persistent: true,
+      saveError: null,
     };
   };
 

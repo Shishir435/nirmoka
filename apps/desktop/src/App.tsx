@@ -5,6 +5,9 @@ import { resolveTransport, type Backend, type BackendSelection } from "@nirmoka/
 import { BackendList } from "@/components/backend-list";
 import { ScanPanel } from "@/components/scan-panel";
 
+/** A last-resort recovery has nowhere further to fall back to. */
+function noop() {}
+
 /**
  * Every backend call goes through `Transport`. Nothing in this tree knows that
  * Tauri exists — `resolveTransport()` hands back the real implementation inside
@@ -49,6 +52,13 @@ export function App() {
       transport
         .chooseBackend(id)
         .then(setSelection)
+        .catch(() => {
+          // The command does not reject on a failed write — that arrives as
+          // `saveError` on the selection. Reaching here means the round trip
+          // itself failed, so the selection on screen is of unknown accuracy
+          // and asking again is the only honest recovery.
+          transport.backendSelection().then(setSelection).catch(noop);
+        })
         .finally(() => setChoosing(false));
     },
     [transport],

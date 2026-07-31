@@ -115,6 +115,15 @@ function Resolution({ selection, backends }: { selection: BackendSelection; back
       {!selection.persistent && (
         <p>This machine has no configuration directory, so the choice lasts until you quit.</p>
       )}
+      {/* The choice took effect; only writing it down failed. Saying both is
+          the difference between a setting that did not apply and one that will
+          not survive a restart — the second needs no retry, just a warning. */}
+      {selection.saveError !== null && (
+        <p className="text-destructive">
+          Applied, but not saved — {selection.saveError}. It will go back to the default when you
+          quit.
+        </p>
+      )}
     </div>
   );
 }
