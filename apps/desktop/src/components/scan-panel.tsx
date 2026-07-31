@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { Row, RowPage, ScanSummary, Transport } from "@nirmoka/transport";
+import type { Row, RowPage, ScanSummary, Transport, Unsubscribe } from "@nirmoka/transport";
 
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatCount, plural } from "@/lib/format";
@@ -98,37 +98,65 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   const [path, setPath] = useState("");
   const [state, setState] = useState<ScanState>({ status: "idle" });
   const [page, setPage] = useState<RowPage | null>(null);
+  /** Whether the event listeners are registered. No scan may start before they
+   *  are: registration is a round trip into Rust, and a scan that finishes
+   *  first would deliver its terminal event to nobody, leaving this stuck on
+   *  "scanning" for a scan that already ended. */
+  const [listening, setListening] = useState(false);
 
   useEffect(() => {
-    const off = [
-      transport.onScanProgress((progress) =>
-        setState((current) =>
-          current.status === "scanning"
-            ? { ...current, scanned: progress.scanned, currentPath: progress.currentPath }
-            : current,
+    let live = true;
+    const off: Unsubscribe[] = [];
+
+    const register = (pending: Promise<Unsubscribe>) =>
+      pending.then((unsubscribe) => {
+        // The effect may have been torn down while this was in flight —
+        // StrictMode does exactly that on every mount in development.
+        if (live) off.push(unsubscribe);
+        else unsubscribe();
+      });
+
+    void Promise.all([
+      register(
+        transport.onScanProgress((progress) =>
+          setState((current) =>
+            current.status === "scanning"
+              ? { ...current, scanned: progress.scanned, currentPath: progress.currentPath }
+              : current,
+          ),
         ),
       ),
 
-      transport.onScanFinished((summary) => {
-        setState({ status: "done", summary });
-        // The window is requested only once the tree exists. Asking earlier
-        // would be answered from a tree that is still being built.
-        transport
-          .rows(null, 0, PAGE)
-          .then(setPage)
-          .catch((error: unknown) => setState({ status: "failed", message: String(error) }));
-      }),
+      register(
+        transport.onScanFinished((summary) => {
+          setState({ status: "done", summary });
+          // The window is requested only once the tree exists. Asking earlier
+          // would be answered from a tree that is still being built.
+          transport
+            .rows(null, 0, PAGE)
+            .then(setPage)
+            .catch((error: unknown) => setState({ status: "failed", message: String(error) }));
+        }),
+      ),
 
-      transport.onScanFailed((failure) =>
-        setState(
-          failure.cancelled
-            ? { status: "stopped", message: "Scan stopped." }
-            : { status: "failed", message: failure.message },
+      register(
+        transport.onScanFailed((failure) =>
+          setState(
+            failure.cancelled
+              ? { status: "stopped", message: "Scan stopped." }
+              : { status: "failed", message: failure.message },
+          ),
         ),
       ),
-    ];
+    ]).then(() => {
+      if (live) setListening(true);
+    });
 
-    return () => off.forEach((unsubscribe) => unsubscribe());
+    return () => {
+      live = false;
+      setListening(false);
+      off.forEach((unsubscribe) => unsubscribe());
+    };
   }, [transport]);
 
   const start = useCallback(() => {
@@ -150,6 +178,9 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   }, [transport]);
 
   const scanning = state.status === "scanning";
+  // A scan needs both a backend that can run it and somewhere for its events to
+  // land.
+  const ready = enabled && listening;
 
   return (
     <section className="space-y-4">
@@ -158,7 +189,7 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
           value={path}
           onChange={(event) => setPath(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && path && !scanning && enabled) start();
+            if (event.key === "Enter" && path && !scanning && ready) start();
           }}
           placeholder="A directory to scan, e.g. /Users/you/Downloads"
           spellCheck={false}
@@ -171,7 +202,7 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
             Stop
           </Button>
         ) : (
-          <Button onClick={start} disabled={!enabled || path.length === 0}>
+          <Button onClick={start} disabled={!ready || path.length === 0}>
             Scan
           </Button>
         )}

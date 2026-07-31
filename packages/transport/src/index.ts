@@ -78,28 +78,31 @@ export interface Transport {
    */
   rows(parentId: number | null, offset: number, limit: number): Promise<RowPage>;
 
-  onScanProgress(handler: (progress: ScanProgress) => void): Unsubscribe;
-  onScanFinished(handler: (summary: ScanSummary) => void): Unsubscribe;
-  onScanFailed(handler: (failure: ScanFailure) => void): Unsubscribe;
+  /**
+   * Subscriptions resolve when the listener is REGISTERED, not when an event
+   * arrives.
+   *
+   * Registering is a round trip into Rust, and a scan started before it
+   * completes can finish before anyone is listening — the terminal event lands
+   * with no subscriber and the window sits on "scanning" forever. Callers must
+   * not start a scan until these have resolved; `ScanPanel` keeps its button
+   * disabled until then.
+   */
+  onScanProgress(handler: (progress: ScanProgress) => void): Promise<Unsubscribe>;
+  onScanFinished(handler: (summary: ScanSummary) => void): Promise<Unsubscribe>;
+  onScanFailed(handler: (failure: ScanFailure) => void): Promise<Unsubscribe>;
 }
 
 /**
- * Tauri's `listen` is async, but a React effect must hand back its cleanup
- * synchronously. This bridges the two, including the case that actually
- * happens: StrictMode unsubscribing before the listener has been registered.
+ * Registers a listener and resolves with its cleanup.
+ *
+ * The returned unsubscribe is safe to call before registration finishes, which
+ * is the case that actually happens: StrictMode mounting and unmounting an
+ * effect faster than the round trip completes.
  */
-function subscribe<T>(event: string, handler: (payload: T) => void): Unsubscribe {
-  let cancelled = false;
-
-  const pending = listen<T>(event, (message) => handler(message.payload)).then((unlisten) => {
-    if (cancelled) unlisten();
-    return unlisten;
-  });
-
-  return () => {
-    cancelled = true;
-    void pending.then((unlisten) => unlisten()).catch(() => {});
-  };
+async function subscribe<T>(event: string, handler: (payload: T) => void): Promise<Unsubscribe> {
+  const unlisten = await listen<T>(event, (message) => handler(message.payload));
+  return () => unlisten();
 }
 
 /** The real thing: every call is a command in `crates/app`. */
@@ -238,18 +241,18 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       };
     },
 
-    onScanProgress() {
+    async onScanProgress() {
       return () => {};
     },
 
-    onScanFinished(handler) {
+    async onScanFinished(handler) {
       onFinished = handler;
       return () => {
         onFinished = null;
       };
     },
 
-    onScanFailed() {
+    async onScanFailed() {
       return () => {};
     },
   };
