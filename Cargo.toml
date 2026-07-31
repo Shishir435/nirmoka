@@ -30,6 +30,11 @@ tauri-build = "2"
 # mirror of a Rust struct drifts silently; that is the whole problem here.
 ts-rs = "12"
 
+# Finds the user's home directory. Invariant 3: home, cache, and config
+# directories come from here, never from a `~/Library` or `/Users/` literal —
+# a literal is a path that only exists on the machine it was written on.
+directories = "6"
+
 [profile.release]
 strip = true
 lto = true

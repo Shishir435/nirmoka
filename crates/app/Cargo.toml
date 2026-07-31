@@ -22,6 +22,7 @@ tauri-build = { workspace = true }
 nirmoka-core = { workspace = true }
 nirmoka-adapter = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
+directories = { workspace = true }
 serde = { workspace = true }
 tauri = { workspace = true }
 ts-rs = { workspace = true }
