@@ -1,0 +1,35 @@
+//! The Tauri shell.
+//!
+//! This crate owns the window and the IPC surface, and nothing else. Detection,
+//! scanning, and the tree live in `nirmoka-core` and `nirmoka-adapter`, which
+//! know nothing about Tauri — that is what `nirmoka-cli` proves on every build.
+//!
+//! Keeping the shell thin is what makes ADR 0005 (the frontend is replaceable)
+//! true rather than aspirational: everything worth keeping is behind an
+//! interface that a different shell could call tomorrow.
+
+#![forbid(unsafe_code)]
+
+pub mod commands;
+pub mod dto;
+pub mod scan;
+pub mod state;
+
+use state::AppState;
+
+/// Build and run the desktop application.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(AppState::new())
+        .invoke_handler(tauri::generate_handler![
+            commands::list_backends,
+            commands::capabilities,
+            commands::start_scan,
+            commands::cancel_scan,
+            commands::scan_summary,
+            commands::rows,
+        ])
+        .run(tauri::generate_context!())
+        .expect("the Tauri application failed to start");
+}

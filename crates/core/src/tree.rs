@@ -87,6 +87,21 @@ impl Tree {
             .ok_or(CoreError::UnknownNode(id.raw()))
     }
 
+    /// Turn a raw id from outside this process into one that indexes this tree.
+    ///
+    /// Ids handed to a frontend come back as plain integers, and nothing stops
+    /// one arriving after a rescan replaced the tree it referred to. This is
+    /// where that becomes an error instead of a panic or, worse, a row from an
+    /// unrelated node.
+    pub fn node_id(&self, raw: u32) -> Result<NodeId> {
+        let id = NodeId(raw);
+        if id.index() < self.nodes.len() {
+            Ok(id)
+        } else {
+            Err(CoreError::UnknownNode(raw))
+        }
+    }
+
     pub fn children_of(&self, id: NodeId) -> &[NodeId] {
         self.children
             .get(id.index())
@@ -155,6 +170,20 @@ impl Tree {
 mod tests {
     use super::*;
     use crate::node::Node;
+
+    #[test]
+    fn a_raw_id_from_outside_is_checked_against_this_tree() {
+        let tree = sample();
+
+        let root = tree.node_id(0).expect("index 0 exists");
+        assert_eq!(tree.get(root).unwrap().name, "root");
+
+        let stale = tree.node_id(9_999);
+        assert!(
+            matches!(stale, Err(CoreError::UnknownNode(9_999))),
+            "an id from a tree that no longer exists must not resolve"
+        );
+    }
 
     fn sample() -> Tree {
         // /root

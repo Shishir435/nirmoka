@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window's permissions. Deliberately minimal: Nirmoka's own commands plus the events a scan reports through. Filesystem access belongs to the backend subprocess, not to the webview — see docs/architecture.md.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
