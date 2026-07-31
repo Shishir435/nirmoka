@@ -123,7 +123,10 @@ fn backends(json: bool) -> std::process::ExitCode {
 }
 
 fn print_table(reports: &[BackendReport]) {
-    println!("{:<10} {:<12} {:<10} {}", "BACKEND", "STATE", "VERSION", "DETAIL");
+    println!(
+        "{:<10} {:<12} {:<10} {}",
+        "BACKEND", "STATE", "VERSION", "DETAIL"
+    );
 
     for report in reports {
         let (state, version, detail) = match (&report.detection, &report.error) {
