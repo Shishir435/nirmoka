@@ -250,6 +250,35 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           detection: { state: "found", path: "/usr/local/bin/ncdu", version: "2.8.2" },
           error: null,
           usable: true,
+          capabilities: {
+            scan: true,
+            delete: true,
+            trash: false,
+            dryRun: false,
+            cleanupCategories: false,
+            uninstallApps: false,
+            systemStatus: false,
+          },
+        },
+        // A usable backend that cannot scan. Present in the mock because it is
+        // the case the UI gets wrong: without it, `pnpm dev` never renders the
+        // state where a detected backend does not drive the browser.
+        {
+          id: "mole",
+          displayName: "Mole",
+          supportedVersions: ">=1.48, <2.0",
+          detection: { state: "found", path: "/opt/homebrew/bin/mo", version: "1.48.1" },
+          error: null,
+          usable: true,
+          capabilities: {
+            scan: false,
+            delete: true,
+            trash: false,
+            dryRun: true,
+            cleanupCategories: true,
+            uninstallApps: true,
+            systemStatus: true,
+          },
         },
       ];
     },

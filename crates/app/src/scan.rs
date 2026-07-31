@@ -130,7 +130,7 @@ impl<R: Reporter> WireSink for ProgressSink<'_, R> {
 pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
     let state = app.state::<AppState>();
 
-    if state.usable_adapter().is_none() {
+    if state.scan_adapter().is_none() {
         return Err("no usable backend is installed".into());
     }
 
@@ -232,7 +232,7 @@ fn walk(
     root: &Path,
     cancel: &CancelToken,
 ) -> Result<ScanResult, dto::ScanFailure> {
-    let adapter = state.usable_adapter().ok_or_else(|| dto::ScanFailure {
+    let adapter = state.scan_adapter().ok_or_else(|| dto::ScanFailure {
         message: "no usable backend is installed".into(),
         cancelled: false,
     })?;

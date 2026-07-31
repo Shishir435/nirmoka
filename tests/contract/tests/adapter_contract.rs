@@ -23,6 +23,34 @@ fn for_each_adapter(mut check: impl FnMut(&dyn Adapter)) {
     }
 }
 
+/// Only the adapters that claim to scan.
+///
+/// The scan promises below — validate the root, honour a tripped token — are
+/// promises about *performing* a scan. A backend that declares `scan: false`
+/// keeps a different promise, checked by
+/// [`a_backend_that_cannot_scan_refuses_every_scan`]: it must refuse, whatever
+/// it is handed.
+///
+/// This is a capability branch rather than a special case. Nothing here names a
+/// backend, and an adapter that flips the flag moves between the two sets
+/// without either test changing.
+fn for_each_scanner(mut check: impl FnMut(&dyn Adapter)) {
+    let registry = registry();
+    let mut scanners = 0;
+
+    for adapter in registry.iter() {
+        if adapter.capabilities().scan {
+            scanners += 1;
+            check(adapter);
+        }
+    }
+
+    assert!(
+        scanners > 0,
+        "no registered backend can scan, which would make Nirmoka a disk browser with no disk"
+    );
+}
+
 #[test]
 fn identities_are_stable_machine_names() {
     // Ids end up in config files and logs, so they cannot be display strings.
@@ -58,9 +86,17 @@ fn capabilities_are_internally_coherent() {
         let caps = adapter.capabilities();
         let id = adapter.id();
 
-        // The floor. A backend that cannot do these two is not a disk tool.
-        assert!(caps.scan, "{id} cannot scan");
-        assert!(caps.delete, "{id} cannot delete");
+        // The floor is deletion, and only deletion.
+        //
+        // Scanning used to be asserted here too, on the assumption that every
+        // backend worth adapting walks a tree. Mole does not: `mo analyze
+        // --json` lists one directory's children, so the adapter declares
+        // `scan: false` rather than faking the rest. A backend that can neither
+        // scan nor delete is not a disk tool; one that can only delete is.
+        assert!(
+            caps.scan || caps.delete,
+            "{id} can neither scan nor delete, so it does nothing"
+        );
 
         // Every removal mode is a way of deleting, so claiming one without the
         // other is a flag that will fail at call time.
@@ -143,7 +179,7 @@ fn the_registry_agrees_with_the_adapters_it_holds() {
 fn a_scan_root_that_does_not_exist_is_refused() {
     // Validation happens at the adapter boundary, before a path can become a
     // subprocess argument — so this must hold even where no backend exists.
-    for_each_adapter(|adapter| {
+    for_each_scanner(|adapter| {
         let mut sink = TreeSink::new();
         let error = adapter
             .scan(
@@ -166,7 +202,7 @@ fn a_scan_root_that_does_not_exist_is_refused() {
 fn a_file_is_not_a_scan_root() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
 
-    for_each_adapter(|adapter| {
+    for_each_scanner(|adapter| {
         let mut sink = TreeSink::new();
         let error = adapter
             .scan(
@@ -192,7 +228,7 @@ fn an_already_cancelled_scan_does_not_run() {
     let cancel = CancelToken::new();
     cancel.cancel();
 
-    for_each_adapter(|adapter| {
+    for_each_scanner(|adapter| {
         let mut sink = TreeSink::new();
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
 
@@ -214,5 +250,48 @@ fn an_already_cancelled_scan_does_not_run() {
                 adapter.id()
             ),
         }
+    });
+}
+
+/// The other half of the capability split: a backend that says it cannot scan
+/// has to actually refuse.
+///
+/// "Degrade, don't lie" is only worth writing down if something checks it. The
+/// failure this prevents is the quiet one — an adapter that declares
+/// `scan: false` and then returns an empty tree, or a tree one level deep,
+/// which reads on screen as a disk with nothing on it.
+///
+/// The root here is a real, readable directory, so nothing else can be doing
+/// the refusing.
+#[test]
+fn a_backend_that_cannot_scan_refuses_every_scan() {
+    let real_directory = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    for_each_adapter(|adapter| {
+        if adapter.capabilities().scan {
+            return;
+        }
+
+        let mut sink = TreeSink::new();
+        let error = match adapter.scan(
+            real_directory,
+            &ScanOptions::default(),
+            &mut sink,
+            &CancelToken::new(),
+        ) {
+            Ok(summary) => panic!(
+                "{} declares scan: false and then returned a scan of {} entries",
+                adapter.id(),
+                summary.items
+            ),
+            Err(error) => error,
+        };
+
+        assert!(
+            matches!(error, AdapterError::Unsupported { .. }),
+            "{} declares scan: false but reported {error}, which does not tell a \
+             caller the ability is missing rather than broken",
+            adapter.id()
+        );
     });
 }

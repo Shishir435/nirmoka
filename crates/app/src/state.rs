@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::{Adapter, CancelToken, Registry};
+use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 use nirmoka_core::Tree;
 
@@ -21,7 +22,9 @@ use crate::dto;
 /// nobody until a user reported it.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
+    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
+    registry.register(Box::new(MoleAdapter::new()));
     registry
 }
 
@@ -93,16 +96,20 @@ impl AppState {
         self.registry.detect_all()
     }
 
-    /// The backend a scan would actually use: the first one detection says is
-    /// installed at a version this build understands.
+    /// The backend a scan would actually use: the first one that is installed
+    /// at a version this build understands **and** can scan.
+    ///
+    /// Both halves are load-bearing since Mole joined the registry. Mole is
+    /// usable on macOS and cannot scan, so "the first usable backend" and "the
+    /// backend that will run this scan" stopped being the same adapter — and
+    /// picking the wrong one would put a scan button in front of a backend that
+    /// answers `Unsupported`.
     ///
     /// Returns `None` rather than falling back to an untested version. See
     /// `docs/adapters.md` — an untested version is `UnsupportedVersion`, not an
     /// optimistic `Found`.
-    pub fn usable_adapter(&self) -> Option<&dyn Adapter> {
-        self.registry
-            .iter()
-            .find(|adapter| matches!(adapter.detect(), Ok(detection) if detection.is_usable()))
+    pub fn scan_adapter(&self) -> Option<&dyn Adapter> {
+        self.registry.first_scanner()
     }
 }
 
@@ -119,7 +126,7 @@ mod tests {
     #[test]
     fn the_registry_holds_the_backends_the_cli_reports() {
         let ids: Vec<_> = registry().iter().map(|adapter| adapter.id()).collect();
-        assert_eq!(ids, vec!["ncdu"]);
+        assert_eq!(ids, vec!["ncdu", "mole"]);
     }
 
     #[test]

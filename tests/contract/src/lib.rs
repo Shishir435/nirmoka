@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use nirmoka_adapter::Registry;
+use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
 /// Every adapter Nirmoka ships, in preference order.
@@ -16,7 +17,9 @@ use nirmoka_adapter_ncdu::NcduAdapter;
 /// about, which is exactly the drift a contract suite exists to catch.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
+    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
+    registry.register(Box::new(MoleAdapter::new()));
     registry
 }
 
@@ -28,16 +31,31 @@ pub fn fixtures_root() -> PathBuf {
         .expect("fixtures/ is committed at the repository root")
 }
 
-/// Every recorded export, as (backend, version, name, path).
+/// Every recorded **wire-format export**, as (backend, version, name, path).
 ///
 /// Driven by what is on disk rather than by a list in code: a fixture that is
 /// recorded but never asserted on is worse than no fixture, because it looks
 /// like coverage.
+///
+/// Not everything under `fixtures/` is an export. `fixtures/mole/` holds
+/// recorded `mo analyze --json` output, which Nirmoka never parses — it is the
+/// evidence for why the Mole adapter declares `scan: false`, kept so an upgrade
+/// re-tests the finding instead of leaving it as a claim in a comment.
+///
+/// The filter asks the registry rather than matching on a directory name, so a
+/// backend that gains the ability to emit the wire format joins this suite by
+/// flipping its capability flag and nothing else.
 pub fn all_fixtures() -> Vec<Fixture> {
+    let exporters: Vec<String> = registry()
+        .iter()
+        .filter(|adapter| adapter.capabilities().scan)
+        .map(|adapter| adapter.id().to_string())
+        .collect();
+
     let mut fixtures = Vec::new();
 
     for backend in read_dir(&fixtures_root()) {
-        if !backend.is_dir() {
+        if !backend.is_dir() || !exporters.contains(&name_of(&backend)) {
             continue;
         }
         for version in read_dir(&backend) {

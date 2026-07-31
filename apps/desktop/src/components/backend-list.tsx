@@ -24,6 +24,34 @@ function describe(detection: Detection | null, error: string | null): string {
   }
 }
 
+/**
+ * What this backend is for, in the words of its own capability flags.
+ *
+ * Without it, a usable Mole sits in the list next to a usable ncdu looking
+ * identical, while only one of them can answer the button above. Naming the
+ * abilities is how "degrade, don't lie" reaches the screen — the alternative is
+ * a user concluding the app ignores a backend it has detected.
+ */
+function Abilities({ backend }: { backend: Backend }) {
+  if (!backend.usable) return null;
+
+  const abilities = [
+    backend.capabilities.scan && "scan",
+    backend.capabilities.cleanupCategories && "clean",
+    backend.capabilities.uninstallApps && "uninstall",
+    backend.capabilities.systemStatus && "status",
+  ].filter(Boolean);
+
+  if (abilities.length === 0) return null;
+
+  return (
+    <p className="text-muted-foreground mt-0.5 text-xs">
+      {abilities.join(" · ")}
+      {!backend.capabilities.scan && " — cannot scan, so it does not drive the browser above"}
+    </p>
+  );
+}
+
 function State({ backend }: { backend: Backend }) {
   if (backend.usable && backend.detection?.state === "found") {
     return <Badge variant="secondary">{backend.detection.version}</Badge>;
@@ -54,6 +82,7 @@ export function BackendList({ backends }: { backends: Backend[] | null }) {
             <p className="text-muted-foreground truncate font-mono text-xs">
               {describe(backend.detection, backend.error)}
             </p>
+            <Abilities backend={backend} />
           </div>
           <State backend={backend} />
         </li>

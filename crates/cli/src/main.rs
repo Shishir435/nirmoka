@@ -22,6 +22,7 @@ mod scan;
 
 use clap::{Parser, Subcommand};
 use nirmoka_adapter::Registry;
+use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
 #[derive(Parser)]
@@ -55,7 +56,9 @@ enum Command {
 /// test suite checks that they agree.
 pub fn build_registry() -> Registry {
     let mut registry = Registry::new();
+    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
+    registry.register(Box::new(MoleAdapter::new()));
     registry
 }
 

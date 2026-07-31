@@ -32,7 +32,10 @@ export function App() {
     };
   }, [transport]);
 
-  const usable = backends?.some((backend) => backend.usable) ?? false;
+  // Usable is not enough: Mole is installed and usable on macOS and cannot
+  // scan, so a button enabled on `usable` alone would be enabled by a backend
+  // that answers `Unsupported`. The Rust side picks the same way.
+  const canScan = backends?.some((backend) => backend.usable && backend.capabilities.scan) ?? false;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12">
@@ -44,7 +47,7 @@ export function App() {
         </p>
       </header>
 
-      <ScanPanel transport={transport} enabled={usable} />
+      <ScanPanel transport={transport} enabled={canScan} />
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Backends</h2>

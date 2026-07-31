@@ -38,7 +38,7 @@ pub fn backends(state: &AppState) -> Vec<dto::Backend> {
 
 pub fn capabilities_of(state: &AppState) -> Result<dto::Capabilities, String> {
     state
-        .usable_adapter()
+        .scan_adapter()
         .map(|adapter| dto::Capabilities::from(adapter.capabilities()))
         .ok_or_else(|| "no usable backend is installed".to_string())
 }

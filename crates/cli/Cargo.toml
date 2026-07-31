@@ -16,6 +16,7 @@ path = "src/main.rs"
 # proof that nirmoka-core is framework-independent. See docs/adr/0005.
 [dependencies]
 nirmoka-adapter = { workspace = true }
+nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 nirmoka-core = { workspace = true }
 clap = { workspace = true }

@@ -16,5 +16,6 @@ path = "src/lib.rs"
 # INVARIANT: no `tauri`. This suite runs headless on every platform in CI.
 [dependencies]
 nirmoka-adapter = { workspace = true }
+nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 nirmoka-core = { workspace = true }
