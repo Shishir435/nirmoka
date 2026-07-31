@@ -118,8 +118,9 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] shadcn/ui initialised, button and badge added, full token set in `index.css`
 - [x] `pnpm tauri dev` opens a window showing real backend detection
 - [x] `rows` caps its own window size, so no caller can ask for the whole tree
-- [x] Node ids arriving from the webview are validated against the current tree rather
-      than trusted as indices
+- [x] Node ids are paired with the scan that issued them. An index alone identifies a
+      slot, not a node: every scan numbers its tree from zero, so an id kept across a
+      rescan would name a different directory rather than fail
 
 ## Step 8 — Tree view
 

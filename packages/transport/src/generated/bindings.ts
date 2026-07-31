@@ -77,7 +77,13 @@ share: number, };
  * needs it to size a scrollbar without asking for the whole directory, which is
  * invariant 5 in one field.
  */
-export type RowPage = { parentId: number, 
+export type RowPage = { 
+/**
+ * Which scan these rows came from. Pass it back with any id taken from
+ * them; a page from a scan that has since been replaced is refused rather
+ * than answered from a tree that reused the same numbers.
+ */
+scanId: number, parentId: number, 
 /**
  * Absolute path of the parent, for the breadcrumb.
  */
@@ -107,7 +113,12 @@ currentPath: string, };
 /**
  * A finished scan. Everything here is a fact about a completed walk.
  */
-export type ScanSummary = { rootId: number, rootPath: string, totalBytes: number, entries: number, directories: number, backendId: string, backendVersion: string | null, 
+export type ScanSummary = { 
+/**
+ * Identifies this scan for the lifetime of the process. Node ids are only
+ * meaningful together with it.
+ */
+scanId: number, rootId: number, rootPath: string, totalBytes: number, entries: number, directories: number, backendId: string, backendVersion: string | null, 
 /**
  * Counts of what the totals could not account for. A total that quietly
  * omits twelve unreadable directories is a lie by omission.

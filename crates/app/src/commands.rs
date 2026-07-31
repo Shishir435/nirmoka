@@ -18,7 +18,7 @@ use tauri::{AppHandle, State};
 
 use crate::dto;
 use crate::scan;
-use crate::state::AppState;
+use crate::state::{AppState, ScanId};
 
 /// The most rows one call may return.
 ///
@@ -53,10 +53,17 @@ pub fn summary_of(state: &AppState) -> Option<dto::ScanSummary> {
 
 /// One window of children, largest first.
 ///
-/// `parent_id` of `None` means the scan root, so the frontend can ask for the
-/// first screen without having read the summary first.
+/// `scan_id` is the one the row or summary carrying `parent_id` came from. An
+/// index alone does not identify a node: every scan numbers its tree from zero,
+/// so an id left over from a replaced scan resolves against the new tree
+/// whenever that tree is long enough — and names a different directory. The pair
+/// identifies a node; the index on its own identifies a slot.
+///
+/// `parent_id` of `None` means the scan root, so the frontend can ask for its
+/// first screen with nothing but the id of the scan that just finished.
 pub fn rows_of(
     state: &AppState,
+    scan_id: ScanId,
     parent_id: Option<u32>,
     offset: u32,
     limit: u32,
@@ -67,9 +74,14 @@ pub fn rows_of(
         .as_ref()
         .ok_or_else(|| "no scan has completed yet".to_string())?;
 
+    if result.id != scan_id {
+        return Err(format!(
+            "scan {scan_id} has been replaced by scan {}; ask again from its root",
+            result.id
+        ));
+    }
+
     let parent = match parent_id {
-        // An id from the webview is untrusted: it may be stale from a tree a
-        // rescan has already replaced.
         Some(raw) => result
             .tree
             .node_id(raw)
@@ -80,7 +92,13 @@ pub fn rows_of(
             .ok_or_else(|| "the scan produced an empty tree".to_string())?,
     };
 
-    Ok(dto::page(&result.tree, parent, offset, limit.min(MAX_ROWS)))
+    Ok(dto::page(
+        result.id,
+        &result.tree,
+        parent,
+        offset,
+        limit.min(MAX_ROWS),
+    ))
 }
 
 #[tauri::command]
@@ -114,11 +132,12 @@ pub fn scan_summary(state: State<'_, AppState>) -> Option<dto::ScanSummary> {
 #[tauri::command]
 pub fn rows(
     state: State<'_, AppState>,
+    scan_id: ScanId,
     parent_id: Option<u32>,
     offset: u32,
     limit: u32,
 ) -> Result<dto::RowPage, String> {
-    rows_of(&state, parent_id, offset, limit)
+    rows_of(&state, scan_id, parent_id, offset, limit)
 }
 
 #[cfg(test)]
@@ -128,17 +147,22 @@ mod tests {
     use super::*;
     use crate::state::ScanResult;
 
-    fn state_with_a_scan() -> AppState {
+    const SCAN: ScanId = 7;
+
+    /// A tree of `size` files under a root, recorded as scan `id`.
+    fn state_with_a_scan_of(id: ScanId, size: u32) -> AppState {
         let mut tree = Tree::new("/fixtures/root");
         let root = tree.push(None, Node::directory("root"));
-        for index in 0..(MAX_ROWS + 5) {
+        for index in 0..size {
             tree.push(Some(root), Node::file(format!("file-{index}"), 1));
         }
         tree.rollup();
 
         let state = AppState::new();
         state.scan().result = Some(ScanResult {
+            id,
             summary: dto::ScanSummary::new(
+                id,
                 &tree,
                 &nirmoka_adapter::ScanSummary::default(),
                 Default::default(),
@@ -149,15 +173,19 @@ mod tests {
         state
     }
 
+    fn state_with_a_scan() -> AppState {
+        state_with_a_scan_of(SCAN, MAX_ROWS + 5)
+    }
+
     #[test]
     fn rows_before_a_scan_says_so_rather_than_returning_nothing() {
-        let error = rows_of(&AppState::new(), None, 0, 10).unwrap_err();
+        let error = rows_of(&AppState::new(), SCAN, None, 0, 10).unwrap_err();
         assert!(error.contains("no scan"), "got: {error}");
     }
 
     #[test]
     fn a_limit_larger_than_the_cap_cannot_pull_the_whole_tree() {
-        let page = rows_of(&state_with_a_scan(), None, 0, u32::MAX).expect("a page");
+        let page = rows_of(&state_with_a_scan(), SCAN, None, 0, u32::MAX).expect("a page");
 
         assert_eq!(page.rows.len(), MAX_ROWS as usize);
         assert_eq!(
@@ -168,9 +196,35 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_node_id_is_refused() {
-        let error = rows_of(&state_with_a_scan(), Some(u32::MAX), 0, 10).unwrap_err();
+    fn a_node_id_past_the_end_is_refused() {
+        let error = rows_of(&state_with_a_scan(), SCAN, Some(u32::MAX), 0, 10).unwrap_err();
         assert!(error.contains("unknown node"), "got: {error}");
+    }
+
+    /// The reason ids travel with a scan id at all.
+    ///
+    /// Every tree numbers its nodes from zero, so an id from a replaced scan
+    /// still lands inside the new tree. Bounds checking cannot tell the
+    /// difference: node 3 exists in both, and it is a different file.
+    #[test]
+    fn an_id_from_a_replaced_scan_is_refused_even_though_the_index_exists() {
+        let state = state_with_a_scan_of(2, 10);
+
+        let page = rows_of(&state, 2, Some(3), 0, 10).expect("the current scan answers");
+        assert_eq!(page.scan_id, 2);
+
+        let error = rows_of(&state, 1, Some(3), 0, 10)
+            .expect_err("an id from the previous scan must not resolve");
+        assert!(error.contains("has been replaced"), "got: {error}");
+    }
+
+    #[test]
+    fn a_page_carries_the_scan_it_came_from() {
+        let page = rows_of(&state_with_a_scan(), SCAN, None, 0, 5).expect("a page");
+        assert_eq!(
+            page.scan_id, SCAN,
+            "a caller cannot pair ids with a scan it was never told about"
+        );
     }
 
     #[test]
@@ -179,6 +233,7 @@ mod tests {
 
         let summary = summary_of(&state_with_a_scan()).expect("a summary");
         assert_eq!(summary.backend_id, "ncdu");
+        assert_eq!(summary.scan_id, SCAN);
         assert_eq!(summary.total_bytes, u64::from(MAX_ROWS + 5));
     }
 }

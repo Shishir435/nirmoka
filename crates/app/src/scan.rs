@@ -16,7 +16,7 @@ use nirmoka_adapter::{validate_scan_root, CancelToken, ScanOptions};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::dto;
-use crate::state::{ActiveScan, AppState, ScanResult};
+use crate::state::{ActiveScan, AppState, ScanId, ScanResult};
 
 /// Emitted periodically while a scan runs.
 pub const EVENT_PROGRESS: &str = "scan://progress";
@@ -137,7 +137,7 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
     let root = validate_scan_root(Path::new(root)).map_err(|error| error.to_string())?;
     let cancel = CancelToken::new();
 
-    claim(&state, root.clone(), cancel.clone())?;
+    let id = claim(&state, root.clone(), cancel.clone())?;
 
     let worker_app = app.clone();
     let worker_root = root.clone();
@@ -145,7 +145,7 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
     let spawned = thread::Builder::new()
         .name("nirmoka-scan".into())
         .stack_size(WORKER_STACK_BYTES)
-        .spawn(move || run(worker_app, worker_root, cancel));
+        .spawn(move || run(worker_app, id, worker_root, cancel));
 
     if let Err(error) = spawned {
         release(&state);
@@ -160,7 +160,7 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
 /// Split out from [`start`] because the pairing with [`release`] is the part
 /// worth testing, and `start` needs an `AppHandle` that only exists inside a
 /// running application.
-fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<(), String> {
+fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<ScanId, String> {
     let mut scan = state.scan();
 
     if let Some(active) = &scan.active {
@@ -170,13 +170,14 @@ fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<(), Str
         ));
     }
 
-    scan.active = Some(ActiveScan { root, cancel });
+    let id = scan.issue_id();
+    scan.active = Some(ActiveScan { id, root, cancel });
     // The previous result goes now, not when the new one lands. Leaving it in
     // place would let `rows` answer from the old tree while the UI says it is
     // scanning something else.
     scan.result = None;
 
-    Ok(())
+    Ok(id)
 }
 
 /// Give up a claim nothing is going to honour.
@@ -200,9 +201,9 @@ pub fn cancel(state: &AppState) -> bool {
     }
 }
 
-fn run(app: AppHandle, root: PathBuf, cancel: CancelToken) {
+fn run(app: AppHandle, id: ScanId, root: PathBuf, cancel: CancelToken) {
     let state = app.state::<AppState>();
-    let outcome = walk(&state, &app, &root, &cancel);
+    let outcome = walk(&state, &app, id, &root, &cancel);
 
     let mut scan = state.scan();
     scan.active = None;
@@ -224,6 +225,7 @@ fn run(app: AppHandle, root: PathBuf, cancel: CancelToken) {
 fn walk(
     state: &AppState,
     app: &AppHandle,
+    id: ScanId,
     root: &Path,
     cancel: &CancelToken,
 ) -> Result<ScanResult, dto::ScanFailure> {
@@ -243,9 +245,9 @@ fn walk(
     let sink = sink.into_inner();
     let stats = sink.stats();
     let tree = sink.finish();
-    let summary = dto::ScanSummary::new(&tree, &summary, stats, adapter.id());
+    let summary = dto::ScanSummary::new(id, &tree, &summary, stats, adapter.id());
 
-    Ok(ScanResult { tree, summary })
+    Ok(ScanResult { id, tree, summary })
 }
 
 #[cfg(test)]
@@ -294,6 +296,20 @@ mod tests {
         assert!(state.scan().active.is_none());
         claim(&state, "/fixtures/root".into(), CancelToken::new())
             .expect("scanning must still be possible after a failed spawn");
+    }
+
+    #[test]
+    fn each_scan_gets_an_id_no_earlier_scan_used() {
+        let state = AppState::new();
+
+        let first = claim(&state, "/fixtures/root".into(), CancelToken::new()).expect("first");
+        release(&state);
+        let second = claim(&state, "/fixtures/root".into(), CancelToken::new()).expect("second");
+
+        assert_ne!(
+            first, second,
+            "a reused id would let a node id from the previous scan resolve"
+        );
     }
 
     #[test]

@@ -130,10 +130,11 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
       register(
         transport.onScanFinished((summary) => {
           setState({ status: "done", summary });
-          // The window is requested only once the tree exists. Asking earlier
-          // would be answered from a tree that is still being built.
+          // The window is requested only once the tree exists, and against the
+          // scan that just produced it: asking without the id would be answered
+          // from whatever tree happens to be current by the time it arrives.
           transport
-            .rows(null, 0, PAGE)
+            .rows(summary.scanId, null, 0, PAGE)
             .then(setPage)
             .catch((error: unknown) => setState({ status: "failed", message: String(error) }));
         }),

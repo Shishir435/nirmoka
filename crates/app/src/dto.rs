@@ -240,6 +240,11 @@ impl Row {
     export_to = "../../../packages/transport/src/generated/bindings.ts"
 )]
 pub struct RowPage {
+    /// Which scan these rows came from. Pass it back with any id taken from
+    /// them; a page from a scan that has since been replaced is refused rather
+    /// than answered from a tree that reused the same numbers.
+    #[ts(type = "number")]
+    pub scan_id: u64,
     pub parent_id: u32,
     /// Absolute path of the parent, for the breadcrumb.
     pub path: String,
@@ -274,6 +279,10 @@ pub struct ScanProgress {
     export_to = "../../../packages/transport/src/generated/bindings.ts"
 )]
 pub struct ScanSummary {
+    /// Identifies this scan for the lifetime of the process. Node ids are only
+    /// meaningful together with it.
+    #[ts(type = "number")]
+    pub scan_id: u64,
     pub root_id: u32,
     pub root_path: String,
     #[ts(type = "number")]
@@ -298,6 +307,7 @@ pub struct ScanSummary {
 
 impl ScanSummary {
     pub(crate) fn new(
+        scan_id: u64,
         tree: &Tree,
         summary: &nirmoka_adapter::ScanSummary,
         stats: TreeStats,
@@ -310,6 +320,7 @@ impl ScanSummary {
             .unwrap_or(0);
 
         Self {
+            scan_id,
             root_id: root.map(|id| id.raw()).unwrap_or(0),
             root_path: summary.root.display().to_string(),
             total_bytes,
@@ -341,7 +352,13 @@ pub struct ScanFailure {
 }
 
 /// Build a page of rows from a parent's children, largest first.
-pub(crate) fn page(tree: &Tree, parent: nirmoka_core::NodeId, offset: u32, limit: u32) -> RowPage {
+pub(crate) fn page(
+    scan_id: u64,
+    tree: &Tree,
+    parent: nirmoka_core::NodeId,
+    offset: u32,
+    limit: u32,
+) -> RowPage {
     let parent_total = tree.get(parent).map(|node| node.total_bytes).unwrap_or(0);
     let children = tree.children_by_size(parent);
 
@@ -361,6 +378,7 @@ pub(crate) fn page(tree: &Tree, parent: nirmoka_core::NodeId, offset: u32, limit
         .collect();
 
     RowPage {
+        scan_id,
         parent_id: parent.raw(),
         path: tree
             .path_of(parent)
@@ -389,7 +407,7 @@ mod tests {
     #[test]
     fn a_row_reports_its_share_of_the_parent() {
         let tree = tree_with_two_children();
-        let page = page(&tree, tree.root().unwrap(), 0, 10);
+        let page = page(1, &tree, tree.root().unwrap(), 0, 10);
 
         assert_eq!(page.rows.len(), 2);
         assert_eq!(page.rows[0].name, "big");
@@ -404,14 +422,14 @@ mod tests {
         tree.push(Some(root), Node::file("empty", 0));
         tree.rollup();
 
-        let page = page(&tree, root, 0, 10);
+        let page = page(1, &tree, root, 0, 10);
         assert_eq!(page.rows[0].share, 0.0);
     }
 
     #[test]
     fn a_window_reports_the_full_child_count_not_the_window_size() {
         let tree = tree_with_two_children();
-        let page = page(&tree, tree.root().unwrap(), 1, 1);
+        let page = page(1, &tree, tree.root().unwrap(), 1, 1);
 
         assert_eq!(page.rows.len(), 1, "asked for one row");
         assert_eq!(page.rows[0].name, "small", "offset skipped the largest");
@@ -421,7 +439,7 @@ mod tests {
     #[test]
     fn an_offset_past_the_end_is_an_empty_page_not_an_error() {
         let tree = tree_with_two_children();
-        let page = page(&tree, tree.root().unwrap(), 99, 10);
+        let page = page(1, &tree, tree.root().unwrap(), 99, 10);
 
         assert!(page.rows.is_empty());
         assert_eq!(page.total, 2);

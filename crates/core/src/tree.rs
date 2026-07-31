@@ -94,12 +94,10 @@ impl Tree {
     ///
     /// **It is a bounds check, not a staleness check.** Every tree numbers its
     /// nodes from zero, so an id left over from a scan that has since been
-    /// replaced will resolve here if the new tree happens to be long enough —
-    /// and it will name a different file. What prevents that today is that a new
-    /// scan clears the previous result and the UI goes back to the root, so no
-    /// id outlives the tree that issued it. Navigation that survives a rescan
-    /// (roadmap step 8) needs a generation token on the id; this signature is
-    /// where it would go.
+    /// replaced resolves here whenever the new tree is long enough — and names a
+    /// different file. A `Tree` cannot tell: it has no idea another one ever
+    /// existed. Whoever hands ids out has to pair them with the scan that issued
+    /// them, which is what `nirmoka_app::state::ScanId` does.
     pub fn node_id(&self, raw: u32) -> Result<NodeId> {
         let id = NodeId(raw);
         if id.index() < self.nodes.len() {

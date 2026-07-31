@@ -25,14 +25,25 @@ pub fn registry() -> Registry {
     registry
 }
 
+/// Which scan a node id came from.
+///
+/// Node ids are indices into an arena, and every scan numbers its nodes from
+/// zero. Without this, an id held by the webview across a rescan still resolves
+/// against the replacement tree whenever that tree is long enough — and names a
+/// different file. Ids are only meaningful together with the scan that issued
+/// them, so they travel together.
+pub type ScanId = u64;
+
 /// A completed scan: the tree, and the facts about how it was produced.
 pub struct ScanResult {
+    pub id: ScanId,
     pub tree: Tree,
     pub summary: dto::ScanSummary,
 }
 
 /// A scan in flight. Holding the token is what makes the stop button real.
 pub struct ActiveScan {
+    pub id: ScanId,
     pub root: PathBuf,
     pub cancel: CancelToken,
 }
@@ -41,6 +52,17 @@ pub struct ActiveScan {
 pub struct ScanState {
     pub active: Option<ActiveScan>,
     pub result: Option<ScanResult>,
+    /// Never reused, never reset. A counter that wrapped would hand a new scan
+    /// an id an old one already used, which is the failure this exists to stop;
+    /// at u64, one scan per nanosecond runs out after five hundred years.
+    next_id: ScanId,
+}
+
+impl ScanState {
+    pub fn issue_id(&mut self) -> ScanId {
+        self.next_id += 1;
+        self.next_id
+    }
 }
 
 pub struct AppState {

@@ -71,12 +71,18 @@ export interface Transport {
    * One window of one directory's children, largest first. A `parentId` of
    * `null` asks for the scan root.
    *
+   * `scanId` comes from the summary or the page the `parentId` was read from.
+   * Both are required because a node id alone means nothing: every scan numbers
+   * its tree from zero, so an id kept across a rescan would quietly name a
+   * different directory. Passing the id of a scan that has been replaced is an
+   * error, not a wrong answer.
+   *
    * The tree lives in Rust. Never request the whole tree — a home directory can
    * be millions of nodes, and rendering that as DOM is the mistake that gets
    * blamed on the GUI framework. The Rust side caps `limit` whatever is asked
    * for.
    */
-  rows(parentId: number | null, offset: number, limit: number): Promise<RowPage>;
+  rows(scanId: number, parentId: number | null, offset: number, limit: number): Promise<RowPage>;
 
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
@@ -113,7 +119,8 @@ export function tauriTransport(): Transport {
     startScan: (rootPath) => invoke<string>("start_scan", { rootPath }),
     cancelScan: () => invoke<boolean>("cancel_scan"),
     scanSummary: () => invoke<ScanSummary | null>("scan_summary"),
-    rows: (parentId, offset, limit) => invoke<RowPage>("rows", { parentId, offset, limit }),
+    rows: (scanId, parentId, offset, limit) =>
+      invoke<RowPage>("rows", { scanId, parentId, offset, limit }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -148,6 +155,7 @@ export function resolveTransport(): Transport {
  */
 export function createMockTransport(overrides: Partial<Transport> = {}): Transport {
   const summary: ScanSummary = {
+    scanId: 1,
     rootId: 0,
     rootPath: "/fixtures/root",
     totalBytes: 4096,
@@ -231,8 +239,13 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return summary;
     },
 
-    async rows(parentId, offset, limit) {
+    async rows(scanId, parentId, offset, limit) {
+      if (scanId !== summary.scanId) {
+        throw new Error(`scan ${scanId} has been replaced by scan ${summary.scanId}`);
+      }
+
       return {
+        scanId,
         parentId: parentId ?? 0,
         path: summary.rootPath,
         offset,
