@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI for macOS, Linux, Windows</title>
+<meta name="description" content="Nirmoka is a free, open source desktop app that gives a graphical interface to trusted command-line disk analysers. See what is eating your disk space on macOS, Linux, and Windows — a GUI for ncdu, gdu, and Mole.">
+<link rel="canonical" href="https://nirmoka.vercel.app/">
+<meta name="author" content="Shishir435">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nirmoka.vercel.app/">
+<meta property="og:site_name" content="Nirmoka">
+<meta property="og:title" content="Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI">
+<meta property="og:description" content="A free, open source desktop GUI for disk analysis and cleanup. One app on macOS, Linux, and Windows, built on the CLI tools you already trust.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI">
+<meta name="twitter:description" content="A free, open source desktop GUI for disk analysis and cleanup. One app on macOS, Linux, and Windows.">
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐍</text></svg>">
+<link rel="stylesheet" href="/styles.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Nirmoka",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "description": "A free, open source cross-platform desktop GUI for disk analysis and cleanup, built as a frontend for command-line disk analysers including ncdu, gdu, and Mole.",
+  "url": "https://nirmoka.vercel.app/",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Shishir435" }
+}
+</script>
+</head>
+
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="wrap">
+  <nav aria-label="Primary">
+    <span class="brand">Nirmoka</span>
+    <ul>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#backends">Backends</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="main" class="wrap">
+
+  <section class="hero">
+    <p class="badge">Early development · Not yet installable</p>
+    <h1>See what's eating your disk.<br><span class="muted">On any operating system.</span></h1>
+    <p class="lede">
+      Nirmoka is a free, open source desktop app that puts a real graphical interface on the
+      disk-usage tools power users already trust. Point it at a folder, watch the tree fill
+      in, sort by size, and reclaim space — without memorising keybindings or squinting at
+      <code>du</code> output.
+    </p>
+    <p class="etymology">
+      <strong>निर्मोक</strong> <em>(nirmoka)</em> is Sanskrit for the skin a snake sheds — the
+      dead layer a living system leaves behind. That is exactly what this tool helps you find.
+    </p>
+  </section>
+
+  <section id="how">
+    <h2>A frontend, not another scanner</h2>
+    <p>
+      Nirmoka writes no disk scanner of its own. It runs an existing, proven command-line
+      tool as a separate process, reads its structured output, and renders it. Backends are
+      swappable behind an adapter layer, so no single upstream project can strand the app.
+    </p>
+    <div class="grid">
+      <article>
+        <h3>Cross-platform from day one</h3>
+        <p>One application on macOS, Linux, and Windows. Different platforms can use
+        different backends underneath, and the interface stays the same.</p>
+      </article>
+      <article>
+        <h3>Small enough to be honest</h3>
+        <p>Built with Tauri on the operating system's own webview, so the download is
+        measured in single-digit megabytes. A disk cleanup tool that eats 300 MB of disk
+        is a joke.</p>
+      </article>
+      <article>
+        <h3>Safe by default</h3>
+        <p>Destructive actions are previewable where the backend supports it. Deletion
+        routes through the backend's own protections rather than a fresh, untested set.</p>
+      </article>
+      <article>
+        <h3>Swappable by design</h3>
+        <p>Each backend declares what it can do. The interface adapts, and replacing a
+        backend is a contained change rather than a rewrite.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="backends">
+    <h2>Planned backends</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Backend</th><th>Platforms</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/tw93/Mole" rel="noopener">Mole</a></td>
+            <td>macOS</td>
+            <td>Rich cleanup, application uninstall, protected-path safety rules</td>
+          </tr>
+          <tr>
+            <td><a href="https://dev.yorhel.nl/ncdu" rel="noopener">ncdu</a></td>
+            <td>macOS, Linux, BSD</td>
+            <td>Baseline scan and delete, available everywhere</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/dundee/gdu" rel="noopener">gdu</a></td>
+            <td>macOS, Linux, Windows</td>
+            <td>Fast parallel scan, ncdu-compatible export</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      Nirmoka bundles none of these. It detects what you already have installed and tells
+      you how to get one if you have none.
+    </p>
+  </section>
+
+  <section id="faq">
+    <h2>Questions</h2>
+
+    <h3>Is Nirmoka free?</h3>
+    <p>Yes. Free, open source, and licensed under Apache-2.0. There is no paid tier.</p>
+
+    <h3>Is this a fork of Mole, ncdu, or gdu?</h3>
+    <p>
+      No. Nirmoka is an independent project that contains no code from any of them. It runs
+      them as separate processes on your machine and reads their documented output. It is
+      not affiliated with or endorsed by any of those projects.
+    </p>
+
+    <h3>Which backend do I need?</h3>
+    <p>
+      Any one of them. On macOS, Mole gives the most functionality. On Linux, ncdu is
+      almost certainly already installed. On Windows, gdu is the path.
+    </p>
+
+    <h3>Will it delete something important?</h3>
+    <p>
+      Every path is validated at the adapter boundary before it reaches a subprocess, and
+      the backend's own protections run as a second layer. Where a backend supports a dry
+      run, you see the exact list before anything is removed. Where it does not, Nirmoka
+      asks rather than pretending to preview.
+    </p>
+
+    <h3>When can I install it?</h3>
+    <p>
+      Not yet — the architecture is still being built. Watch the repository for the first
+      release.
+    </p>
+  </section>
+
+  <section class="cta">
+    <h2>Follow along</h2>
+    <p>
+      The architecture, adapter contract, and decision records are all public while the
+      project is still being designed.
+    </p>
+    <p class="links">
+      <a class="btn" href="https://github.com/Shishir435/nirmoka" rel="noopener">Source on GitHub</a>
+      <a class="btn ghost" href="https://github.com/Shishir435/nirmoka/tree/main/docs" rel="noopener">Read the docs</a>
+    </p>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p>
+    Nirmoka is licensed under Apache-2.0. Built by
+    <a href="https://github.com/Shishir435" rel="noopener">Shishir435</a>.
+  </p>
+  <p class="fine">
+    Mole, ncdu, and gdu are separate projects with their own licenses and trademarks,
+    referenced here only to identify them. Nirmoka is not affiliated with, endorsed by, or
+    sponsored by any of them.
+  </p>
+</footer>
+
+</body>
+</html>

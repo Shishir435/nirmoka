@@ -1,0 +1,33 @@
+# Rust / Tauri
+/target/
+**/target/
+Cargo.lock.bak
+/src-tauri/gen/
+/src-tauri/target/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Vercel
+.vercel/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# macOS
+.DS_Store
+
+# Local agent / assistant overrides
+CLAUDE.local.md
+AGENTS.local.md

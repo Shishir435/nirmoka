@@ -1,0 +1,120 @@
+# Architecture
+
+Nirmoka is a desktop frontend with swappable backends. It writes no disk scanner of its
+own. Every scan, every size number, and every deletion is performed by an existing,
+proven command-line tool running as a separate process.
+
+This document explains the layers and the rules that keep them separate.
+
+## Layers
+
+```
+┌───────────────────────────────────────────────┐
+│  ui/               React + TypeScript          │
+│  Rendering, navigation, treemap, keybindings.  │
+│  Knows nothing about any backend.              │
+└───────────────────────┬───────────────────────┘
+                        │  Tauri commands + events
+┌───────────────────────┴───────────────────────┐
+│  app/              Tauri glue                  │
+│  Command handlers, event streaming, window.    │
+└───────────────────────┬───────────────────────┘
+                        │  domain types
+┌───────────────────────┴───────────────────────┐
+│  core/             Domain + policy             │
+│  Tree model, sizes, selection, confirmation    │
+│  rules. Compiles without any adapter crate.    │
+└───────────────────────┬───────────────────────┘
+                        │  Adapter trait
+┌───────────────────────┴───────────────────────┐
+│  adapter/          Trait, registry, caps       │
+└───┬───────────────────┬───────────────────┬───┘
+    │                   │                   │
+┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐
+│adapter-mole│  │ adapter-ncdu │  │ adapter-gdu │
+└───┬────────┘  └───────┬──────┘  └─────────┬───┘
+    │ subprocess        │ subprocess        │ subprocess
+┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐
+│  mo(1)     │  │   ncdu(1)    │  │   gdu(1)    │
+└────────────┘  └──────────────┘  └─────────────┘
+```
+
+## Rules
+
+These are structural, not stylistic. Breaking one collapses the design.
+
+**1. `core/` must not depend on any adapter crate.**
+
+Enforced as a dependency rule in the workspace manifest, not as a convention. If `core`
+can name a backend, backend assumptions will leak into it, and the adapters stop being
+swappable in practice even though the trait still exists.
+
+**2. The wire format is ncdu's JSON export, not Mole's output.**
+
+Mole is the richest backend, so designing the interface around its output is the tempting
+mistake. Do that and the ncdu adapter becomes impossible to write — you will have built a
+Mole GUI with a backend-shaped hole in it. Building against the *narrowest* backend keeps
+the abstraction honest. The Mole adapter's job is translating down into the common format
+and reporting its extra abilities through capability flags.
+
+See [ADR 0002](adr/0002-wire-format-ncdu-json.md).
+
+**3. Every ability beyond "scan and delete" is a capability flag.**
+
+Backends differ enormously. ncdu browses and deletes. Mole additionally cleans by
+category, uninstalls applications, moves to Trash, and previews with a dry run. The UI
+queries capabilities and hides what the active backend cannot do, rather than offering a
+button that fails at call time.
+
+```rust
+pub struct Capabilities {
+    pub scan: bool,              // every backend
+    pub delete: bool,            // every backend
+    pub trash: bool,             // recoverable delete rather than permanent
+    pub dry_run: bool,           // preview the exact delete list first
+    pub cleanup_categories: bool,// named cleanup targets, not just paths
+    pub uninstall_apps: bool,    // application removal with leftovers
+    pub system_status: bool,     // health metrics
+}
+```
+
+**4. Adapters own path validation. The UI never builds a delete command.**
+
+A path travels from the UI to the adapter as data and is validated at the adapter
+boundary before it ever reaches a subprocess argument. The GUI layer is the least
+trustworthy place in the system to make a deletion decision, because it is the layer
+closest to user input and the furthest from the backend's safety rules.
+
+**5. Adapters version-pin their backend and fail closed.**
+
+Each adapter declares which backend versions it has been tested against, probes the
+installed version at startup, and refuses to run against an unknown one. Output formats
+drift silently, and a silently-changed field on a *delete* path is the worst possible
+place to discover that.
+
+**6. No backend binary is bundled.**
+
+Nirmoka detects what is installed and guides the user to install a backend if none is
+found. This avoids inheriting redistribution obligations from GPL-licensed backends, and
+it is more honest to users about what is actually executing on their machine.
+
+## Contract tests
+
+One test suite in `tests/contract/` runs against **every** adapter, using recorded real
+backend output stored in `fixtures/<backend>/<version>/`.
+
+Without this, the adapter pattern is documentation rather than architecture. If only the
+Mole path is exercised, the ncdu path breaks silently and is discovered on the day Mole
+breaks — which is the exact day the fallback was supposed to save you.
+
+Build the ncdu adapter **second, early**, while the trait is still cheap to change. If it
+is built last, Mole's assumptions will already be baked into `core/`.
+
+## Why the GUI layer is also replaceable
+
+The adapter boundary is a process boundary, which means the backend and the frontend can
+be swapped independently. If Tauri turns out to be the wrong choice, the product logic in
+`core/` survives the move. This is a deliberate side effect of the design, not an
+accident.
+
+See [ADR 0003](adr/0003-tech-stack-tauri.md).
