@@ -149,7 +149,7 @@ crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
 tests/contract/       one suite every adapter must pass, fixture-driven
 fixtures/             recorded backend output, per backend and version
 
-apps/desktop/         React frontend
+apps/desktop/         React frontend. The list is virtualized and paged — see ADR 0011
 packages/transport/   THE IPC boundary. Only module that knows about Tauri.
 
 site/                 static landing page, deployed to Vercel, outside pnpm workspace

@@ -21,10 +21,12 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   Backend,
   Capabilities,
+  Row,
   RowPage,
   ScanFailure,
   ScanProgress,
   ScanSummary,
+  Sort,
 } from "./types.js";
 
 export type * from "./types.js";
@@ -77,12 +79,23 @@ export interface Transport {
    * different directory. Passing the id of a scan that has been replaced is an
    * error, not a wrong answer.
    *
+   * `sort` orders the whole directory before the window is cut, which is why it
+   * is a request parameter rather than something the caller applies to the rows
+   * it received. Sorting a window client-side would order the forty rows on
+   * screen and leave the other hundred thousand where they were.
+   *
    * The tree lives in Rust. Never request the whole tree — a home directory can
    * be millions of nodes, and rendering that as DOM is the mistake that gets
    * blamed on the GUI framework. The Rust side caps `limit` whatever is asked
    * for.
    */
-  rows(scanId: number, parentId: number | null, offset: number, limit: number): Promise<RowPage>;
+  rows(
+    scanId: number,
+    parentId: number | null,
+    sort: Sort,
+    offset: number,
+    limit: number,
+  ): Promise<RowPage>;
 
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
@@ -119,8 +132,8 @@ export function tauriTransport(): Transport {
     startScan: (rootPath) => invoke<string>("start_scan", { rootPath }),
     cancelScan: () => invoke<boolean>("cancel_scan"),
     scanSummary: () => invoke<ScanSummary | null>("scan_summary"),
-    rows: (scanId, parentId, offset, limit) =>
-      invoke<RowPage>("rows", { scanId, parentId, offset, limit }),
+    rows: (scanId, parentId, sort, offset, limit) =>
+      invoke<RowPage>("rows", { scanId, parentId, sort, offset, limit }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -145,58 +158,85 @@ export function resolveTransport(): Transport {
   return isTauri() ? tauriTransport() : createMockTransport();
 }
 
+/** One node of the mock tree. Mirrors what the Rust arena holds per node. */
+interface MockNode {
+  id: number;
+  name: string;
+  kind: Row["kind"];
+  bytes: number;
+  readError?: boolean;
+  children: number[];
+}
+
+/**
+ * A small tree with the shapes the UI has to survive: a directory big enough to
+ * need virtualizing, one that cannot be read, and one that is genuinely empty.
+ *
+ * Sizes are round fixture numbers rather than plausible ones, because a mock
+ * that looks like a real scan is a mock somebody eventually mistakes for one.
+ */
+function mockTree(): Map<number, MockNode> {
+  const nodes: MockNode[] = [
+    { id: 0, name: "root", kind: "directory", bytes: 0, children: [1, 2, 3, 4] },
+    { id: 1, name: "big", kind: "file", bytes: 3 * 1024 * 1024, children: [] },
+    { id: 2, name: "many", kind: "directory", bytes: 0, children: [] },
+    { id: 3, name: "denied", kind: "directory", bytes: 0, readError: true, children: [] },
+    { id: 4, name: "empty", kind: "directory", bytes: 0, children: [] },
+  ];
+
+  // Enough to scroll: a list this long is the reason the window exists.
+  const many = nodes.find((node) => node.name === "many")!;
+  for (let index = 0; index < 500; index += 1) {
+    const id = 100 + index;
+    many.children.push(id);
+    nodes.push({
+      id,
+      name: `entry-${String(index).padStart(3, "0")}`,
+      kind: "file",
+      bytes: (index + 1) * 1024,
+      children: [],
+    });
+  }
+
+  return new Map(nodes.map((node) => [node.id, node]));
+}
+
 /**
  * In-memory Transport for UI development and tests.
  *
- * It reports a plausible ncdu and a two-file tree, and it does not pretend to
- * walk a disk: `startScan` completes immediately with numbers that are visibly a
- * fixture. A mock that looks like a real scan is a mock somebody eventually
- * mistakes for one.
+ * It reports a plausible ncdu and a fixture tree, and it does not pretend to
+ * walk a disk: `startScan` completes immediately with numbers that are visibly
+ * a fixture.
  */
 export function createMockTransport(overrides: Partial<Transport> = {}): Transport {
+  const nodes = mockTree();
+
+  /** Same bottom-up pass as `Tree::rollup`, so directory sizes are not invented. */
+  const totalOf = (id: number): number => {
+    const node = nodes.get(id);
+    if (!node) return 0;
+    return node.children.reduce((sum, child) => sum + totalOf(child), node.bytes);
+  };
+
+  const parents = new Map<number, number>();
+  for (const node of nodes.values()) {
+    for (const child of node.children) parents.set(child, node.id);
+  }
+
   const summary: ScanSummary = {
     scanId: 1,
     rootId: 0,
     rootPath: "/fixtures/root",
-    totalBytes: 4096,
-    entries: 3,
-    directories: 1,
+    totalBytes: totalOf(0),
+    entries: nodes.size,
+    directories: [...nodes.values()].filter((node) => node.kind === "directory").length,
     backendId: "ncdu",
     backendVersion: "2.8.2",
-    readErrors: 0,
+    readErrors: 1,
     excluded: 0,
     hardlinksDeduplicated: 0,
     hardlinkBytesSaved: 0,
   };
-
-  const rows = [
-    {
-      id: 1,
-      name: "big",
-      kind: "file",
-      ownBytes: 3072,
-      apparentBytes: 3072,
-      totalBytes: 3072,
-      readError: false,
-      hardlink: false,
-      excluded: false,
-      childCount: 0,
-      share: 0.75,
-    },
-    {
-      id: 2,
-      name: "small",
-      kind: "file",
-      ownBytes: 1024,
-      apparentBytes: 1024,
-      totalBytes: 1024,
-      readError: false,
-      hardlink: false,
-      excluded: false,
-      childCount: 0,
-      share: 0.25,
-    },
-  ] satisfies RowPage["rows"];
 
   let onFinished: ((summary: ScanSummary) => void) | null = null;
 
@@ -239,18 +279,69 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return summary;
     },
 
-    async rows(scanId, parentId, offset, limit) {
+    async rows(scanId, parentId, sort, offset, limit) {
       if (scanId !== summary.scanId) {
         throw new Error(`scan ${scanId} has been replaced by scan ${summary.scanId}`);
       }
 
+      const parent = nodes.get(parentId ?? summary.rootId);
+      if (!parent) throw new Error(`unknown node ${parentId}`);
+
+      const parentTotal = totalOf(parent.id);
+      const children = parent.children
+        .map((id) => nodes.get(id))
+        .filter((node): node is MockNode => node !== undefined)
+        .sort((a, b) => {
+          switch (sort) {
+            case "largestFirst":
+              return totalOf(b.id) - totalOf(a.id) || a.name.localeCompare(b.name);
+            case "smallestFirst":
+              return totalOf(a.id) - totalOf(b.id) || a.name.localeCompare(b.name);
+            case "nameAscending":
+              return a.name.localeCompare(b.name);
+            case "nameDescending":
+              return b.name.localeCompare(a.name);
+          }
+        });
+
+      const ancestors = [];
+      for (let cursor = parents.get(parent.id); cursor !== undefined;) {
+        const node = nodes.get(cursor);
+        if (!node) break;
+        ancestors.unshift({ id: node.id, name: node.name });
+        cursor = parents.get(node.id);
+      }
+
+      const path = [...ancestors.map((crumb) => crumb.name), parent.name]
+        .slice(1)
+        .reduce((joined, segment) => `${joined}/${segment}`, summary.rootPath);
+
       return {
         scanId,
-        parentId: parentId ?? 0,
-        path: summary.rootPath,
+        parentId: parent.id,
+        name: parent.name,
+        path,
+        ancestors,
+        readError: parent.readError ?? false,
+        sort,
         offset,
-        total: rows.length,
-        rows: rows.slice(offset, offset + limit),
+        total: children.length,
+        rows: children.slice(offset, offset + limit).map((node) => {
+          const total = totalOf(node.id);
+          return {
+            id: node.id,
+            name: node.name,
+            kind: node.kind,
+            ownBytes: node.bytes,
+            apparentBytes: node.bytes,
+            totalBytes: total,
+            readError: node.readError ?? false,
+            hardlink: false,
+            excluded: false,
+            childCount: node.children.length,
+            share: parentTotal === 0 ? 0 : total / parentTotal,
+          };
+        }),
       };
     },
 

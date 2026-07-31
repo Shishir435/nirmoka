@@ -20,6 +20,14 @@ usable: boolean, };
 export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
 
 /**
+ * One step on the way back out of a directory.
+ *
+ * The frontend holds a single node id, so without the chain there is no way to
+ * name the directory it descended from — "up" would mean rescanning.
+ */
+export type Crumb = { id: number, name: string, };
+
+/**
  * Whether a backend is installed, and whether this build understands it.
  *
  * `unsupportedVersion` stays a distinct state all the way to the UI. Collapsing
@@ -85,9 +93,32 @@ export type RowPage = {
  */
 scanId: number, parentId: number, 
 /**
- * Absolute path of the parent, for the breadcrumb.
+ * The parent's own name, which is what the breadcrumb's last segment says.
+ * Splitting it out of `path` here avoids the frontend guessing at a
+ * separator that differs by platform.
  */
-path: string, offset: number, total: number, rows: Array<Row>, };
+name: string, 
+/**
+ * Absolute path of the parent, for the header.
+ */
+path: string, 
+/**
+ * Root first, the parent itself excluded. Every entry is somewhere the user
+ * can click back to.
+ */
+ancestors: Array<Crumb>, 
+/**
+ * The parent could not be read, so an empty page means "not allowed to
+ * look" rather than "nothing here". The distinction is the difference
+ * between a bug report and a padlock icon.
+ */
+readError: boolean, 
+/**
+ * The order these rows are in, echoed back. The frontend can render the
+ * controls from the page it is showing instead of from what it last asked
+ * for, which are different things while a request is in flight.
+ */
+sort: Sort, offset: number, total: number, rows: Array<Row>, };
 
 /**
  * A scan that ended without a result.
@@ -124,3 +155,13 @@ scanId: number, rootId: number, rootPath: string, totalBytes: number, entries: n
  * omits twelve unreadable directories is a lie by omission.
  */
 readErrors: number, excluded: number, hardlinksDeduplicated: number, hardlinkBytesSaved: number, };
+
+/**
+ * How the frontend asked for a directory to be ordered.
+ *
+ * This is the one DTO that travels inwards as well as out, so it derives
+ * `Deserialize` too. Sorting stays in Rust because the frontend only ever holds
+ * a window: sorting a few dozen rows out of a hundred thousand would reorder
+ * the slice and call it a sort.
+ */
+export type Sort = "largestFirst" | "smallestFirst" | "nameAscending" | "nameDescending";

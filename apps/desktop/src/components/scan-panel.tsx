@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { Row, RowPage, ScanSummary, Transport, Unsubscribe } from "@nirmoka/transport";
+import type { ScanSummary, Sort, Transport, Unsubscribe } from "@nirmoka/transport";
 
+import { TreeView } from "@/components/tree-view";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatCount, plural } from "@/lib/format";
-
-/** How many rows the first screen asks for. The tree view in step 8 replaces
- *  this with a virtualized window; until then a fixed page keeps invariant 5
- *  honest by construction. */
-const PAGE = 20;
 
 /** Registering the scan event listeners: a round trip into Rust, so it takes
  *  time and can fail. */
@@ -22,60 +18,13 @@ type ScanState =
   | { status: "stopped"; message: string }
   | { status: "failed"; message: string };
 
-function Bar({ share }: { share: number }) {
-  return (
-    <div className="bg-muted h-1.5 w-24 overflow-hidden rounded-full">
-      <div className="bg-brand h-full rounded-full" style={{ width: `${share * 100}%` }} />
-    </div>
-  );
+/** Where in the finished tree the user is looking. `null` is the scan root. */
+interface View {
+  parentId: number | null;
+  sort: Sort;
 }
 
-/** Flags that mean "this number is not the whole story". Silence here would be
- *  a total that quietly omits what the backend could not read. */
-function Flags({ row }: { row: Row }) {
-  const notes = [
-    row.readError && "unreadable",
-    row.excluded && "excluded",
-    row.hardlink && "hardlink",
-  ].filter(Boolean);
-
-  if (notes.length === 0) return null;
-
-  return <span className="text-muted-foreground text-xs">{notes.join(" · ")}</span>;
-}
-
-function Rows({ page }: { page: RowPage }) {
-  if (page.rows.length === 0) {
-    return <p className="text-muted-foreground text-sm">Nothing under this directory.</p>;
-  }
-
-  return (
-    <div className="space-y-2">
-      <ul className="divide-border divide-y overflow-hidden rounded-lg border">
-        {page.rows.map((row) => (
-          <li key={row.id} className="flex items-center gap-4 px-4 py-2">
-            <span className="flex-1 truncate font-mono text-sm">
-              {row.name}
-              {row.kind === "directory" ? "/" : ""}
-            </span>
-            <Flags row={row} />
-            <Bar share={row.share} />
-            <span className="w-20 text-right font-mono text-sm tabular-nums">
-              {formatBytes(row.totalBytes)}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      {page.total > page.rows.length && (
-        <p className="text-muted-foreground text-xs">
-          Showing {page.rows.length} of {plural(page.total, "entry", "entries")}. The rest stay in
-          Rust until the tree view asks for them.
-        </p>
-      )}
-    </div>
-  );
-}
+const START_AT: View = { parentId: null, sort: "largestFirst" };
 
 function Summary({ summary }: { summary: ScanSummary }) {
   const warnings = [
@@ -99,10 +48,32 @@ function Summary({ summary }: { summary: ScanSummary }) {
   );
 }
 
+/**
+ * A count and a path, and deliberately no percentage.
+ *
+ * The backend does not know how many entries it is going to find, so a progress
+ * bar here would be an animation with a number attached to it. Counting up and
+ * naming the directory being walked is both truthful and more useful: it is how
+ * a user sees the scan is stuck on a network mount.
+ */
+function Progress({ scanned, currentPath }: { scanned: number; currentPath: string }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-sm">
+        Scanning {plural(scanned, "entry", "entries")}…{" "}
+        <span className="text-muted-foreground">
+          stopping kills the backend process, it does not just hide it
+        </span>
+      </p>
+      <p className="text-muted-foreground truncate font-mono text-xs">{currentPath}</p>
+    </div>
+  );
+}
+
 export function ScanPanel({ transport, enabled }: { transport: Transport; enabled: boolean }) {
   const [path, setPath] = useState("");
   const [state, setState] = useState<ScanState>({ status: "idle" });
-  const [page, setPage] = useState<RowPage | null>(null);
+  const [view, setView] = useState<View>(START_AT);
   const [subscription, setSubscription] = useState<Subscription>({ status: "pending" });
   /** Bumped to re-run the effect. Registration is a round trip that can fail;
    *  without a way to ask again, one failure would disable scanning until the
@@ -134,14 +105,11 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
 
       register(
         transport.onScanFinished((summary) => {
+          // A finished scan is a new tree with new node ids, so the view starts
+          // over at its root. Keeping the old parent id would point into a tree
+          // that no longer exists.
+          setView(START_AT);
           setState({ status: "done", summary });
-          // The window is requested only once the tree exists, and against the
-          // scan that just produced it: asking without the id would be answered
-          // from whatever tree happens to be current by the time it arrives.
-          transport
-            .rows(summary.scanId, null, 0, PAGE)
-            .then(setPage)
-            .catch((error: unknown) => setState({ status: "failed", message: String(error) }));
         }),
       ),
 
@@ -174,7 +142,7 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   }, [transport, attempt]);
 
   const start = useCallback(() => {
-    setPage(null);
+    setView(START_AT);
     setState({ status: "scanning", root: path, scanned: 0, currentPath: path });
 
     transport
@@ -240,15 +208,7 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
       )}
 
       {state.status === "scanning" && (
-        <div className="space-y-1">
-          <p className="text-sm">
-            Scanning {plural(state.scanned, "entry", "entries")}…{" "}
-            <span className="text-muted-foreground">
-              stopping kills the backend process, it does not just hide it
-            </span>
-          </p>
-          <p className="text-muted-foreground truncate font-mono text-xs">{state.currentPath}</p>
-        </div>
+        <Progress scanned={state.scanned} currentPath={state.currentPath} />
       )}
 
       {state.status === "stopped" && <p className="text-sm">{state.message}</p>}
@@ -258,7 +218,14 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
       {state.status === "done" && (
         <div className="space-y-4">
           <Summary summary={state.summary} />
-          {page ? <Rows page={page} /> : <p className="text-muted-foreground text-sm">Loading…</p>}
+          <TreeView
+            transport={transport}
+            summary={state.summary}
+            parentId={view.parentId}
+            sort={view.sort}
+            onNavigate={(parentId) => setView((current) => ({ ...current, parentId }))}
+            onSort={(sort) => setView((current) => ({ ...current, sort }))}
+          />
         </div>
       )}
     </section>

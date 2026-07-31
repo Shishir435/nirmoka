@@ -51,7 +51,7 @@ pub fn summary_of(state: &AppState) -> Option<dto::ScanSummary> {
         .map(|result| result.summary.clone())
 }
 
-/// One window of children, largest first.
+/// One window of one directory's children, in the requested order.
 ///
 /// `scan_id` is the one the row or summary carrying `parent_id` came from. An
 /// index alone does not identify a node: every scan numbers its tree from zero,
@@ -61,10 +61,14 @@ pub fn summary_of(state: &AppState) -> Option<dto::ScanSummary> {
 ///
 /// `parent_id` of `None` means the scan root, so the frontend can ask for its
 /// first screen with nothing but the id of the scan that just finished.
+///
+/// `sort` orders the whole directory before the window is cut. Sorting a window
+/// after the fact would only ever order the rows already on screen.
 pub fn rows_of(
     state: &AppState,
     scan_id: ScanId,
     parent_id: Option<u32>,
+    sort: dto::Sort,
     offset: u32,
     limit: u32,
 ) -> Result<dto::RowPage, String> {
@@ -96,6 +100,7 @@ pub fn rows_of(
         result.id,
         &result.tree,
         parent,
+        sort,
         offset,
         limit.min(MAX_ROWS),
     ))
@@ -134,10 +139,11 @@ pub fn rows(
     state: State<'_, AppState>,
     scan_id: ScanId,
     parent_id: Option<u32>,
+    sort: dto::Sort,
     offset: u32,
     limit: u32,
 ) -> Result<dto::RowPage, String> {
-    rows_of(&state, scan_id, parent_id, offset, limit)
+    rows_of(&state, scan_id, parent_id, sort, offset, limit)
 }
 
 #[cfg(test)]
@@ -148,6 +154,7 @@ mod tests {
     use crate::state::ScanResult;
 
     const SCAN: ScanId = 7;
+    const SORT: dto::Sort = dto::Sort::LargestFirst;
 
     /// A tree of `size` files under a root, recorded as scan `id`.
     fn state_with_a_scan_of(id: ScanId, size: u32) -> AppState {
@@ -179,13 +186,13 @@ mod tests {
 
     #[test]
     fn rows_before_a_scan_says_so_rather_than_returning_nothing() {
-        let error = rows_of(&AppState::new(), SCAN, None, 0, 10).unwrap_err();
+        let error = rows_of(&AppState::new(), SCAN, None, SORT, 0, 10).unwrap_err();
         assert!(error.contains("no scan"), "got: {error}");
     }
 
     #[test]
     fn a_limit_larger_than_the_cap_cannot_pull_the_whole_tree() {
-        let page = rows_of(&state_with_a_scan(), SCAN, None, 0, u32::MAX).expect("a page");
+        let page = rows_of(&state_with_a_scan(), SCAN, None, SORT, 0, u32::MAX).expect("a page");
 
         assert_eq!(page.rows.len(), MAX_ROWS as usize);
         assert_eq!(
@@ -197,7 +204,7 @@ mod tests {
 
     #[test]
     fn a_node_id_past_the_end_is_refused() {
-        let error = rows_of(&state_with_a_scan(), SCAN, Some(u32::MAX), 0, 10).unwrap_err();
+        let error = rows_of(&state_with_a_scan(), SCAN, Some(u32::MAX), SORT, 0, 10).unwrap_err();
         assert!(error.contains("unknown node"), "got: {error}");
     }
 
@@ -210,21 +217,54 @@ mod tests {
     fn an_id_from_a_replaced_scan_is_refused_even_though_the_index_exists() {
         let state = state_with_a_scan_of(2, 10);
 
-        let page = rows_of(&state, 2, Some(3), 0, 10).expect("the current scan answers");
+        let page = rows_of(&state, 2, Some(3), SORT, 0, 10).expect("the current scan answers");
         assert_eq!(page.scan_id, 2);
 
-        let error = rows_of(&state, 1, Some(3), 0, 10)
+        let error = rows_of(&state, 1, Some(3), SORT, 0, 10)
             .expect_err("an id from the previous scan must not resolve");
         assert!(error.contains("has been replaced"), "got: {error}");
     }
 
     #[test]
     fn a_page_carries_the_scan_it_came_from() {
-        let page = rows_of(&state_with_a_scan(), SCAN, None, 0, 5).expect("a page");
+        let page = rows_of(&state_with_a_scan(), SCAN, None, SORT, 0, 5).expect("a page");
         assert_eq!(
             page.scan_id, SCAN,
             "a caller cannot pair ids with a scan it was never told about"
         );
+    }
+
+    /// Sorting has to reorder the directory before the window is cut, so a
+    /// changed sort has to change what the *first* page contains — not just the
+    /// arrangement of rows already on screen.
+    #[test]
+    fn a_sort_reorders_the_directory_and_not_only_the_window() {
+        let state = state_with_a_scan_of(SCAN, 30);
+
+        let ascending =
+            rows_of(&state, SCAN, None, dto::Sort::NameAscending, 0, 3).expect("a page");
+        let descending =
+            rows_of(&state, SCAN, None, dto::Sort::NameDescending, 0, 3).expect("a page");
+
+        let names = |page: &dto::RowPage| -> Vec<String> {
+            page.rows.iter().map(|row| row.name.clone()).collect()
+        };
+
+        assert_eq!(names(&ascending), vec!["file-0", "file-1", "file-10"]);
+        assert_eq!(names(&descending), vec!["file-9", "file-8", "file-7"]);
+        assert_eq!(descending.sort, dto::Sort::NameDescending);
+    }
+
+    #[test]
+    fn a_page_knows_the_way_back_to_the_root() {
+        let state = state_with_a_scan_of(SCAN, 3);
+        let root = rows_of(&state, SCAN, None, SORT, 0, 3).expect("a page");
+        assert!(root.ancestors.is_empty(), "the root is the way back");
+
+        let child = root.rows[0].id;
+        let page = rows_of(&state, SCAN, Some(child), SORT, 0, 3).expect("a page");
+        assert_eq!(page.ancestors.len(), 1);
+        assert_eq!(page.ancestors[0].id, root.parent_id);
     }
 
     #[test]

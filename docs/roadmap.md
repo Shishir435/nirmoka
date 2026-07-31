@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 8 — the tree view.**
+**Current step: 9 — the Mole adapter.**
 
 ## Sequencing rules
 
@@ -122,15 +122,21 @@ for Tauri types inside `core` arrives before the boundary is established.
       slot, not a node: every scan numbers its tree from zero, so an id kept across a
       rescan would name a different directory rather than fail
 
-## Step 8 — Tree view
+## Step 8 — Tree view ✅
 
-- [ ] Virtualized list (TanStack Virtual) — invariant 5 applies from the first commit
-- [ ] IPC carries the visible window plus aggregates, never the whole tree — the `rows`
-      command and its cap already exist; step 8 is the UI that pages through them
-- [ ] Navigate in and out of directories
-- [ ] Sort by size and by name
-- [ ] Live scan progress that does not lie about completion
-- [ ] Designed empty, loading, error, and permission-denied states
+- [x] Virtualized list (TanStack Virtual) — invariant 5 applies from the first commit
+- [x] IPC carries the visible window plus aggregates, never the whole tree — `useDirectory`
+      holds a sparse array of `total` slots and asks for a 100-row chunk only when one of
+      its rows is scrolled into view
+- [x] Navigate in and out of directories. `RowPage.ancestors` carries the way back out, so
+      "up" is a click rather than a rescan
+- [x] Sort by size and by name, ordered in Rust before the window is cut —
+      see [ADR 0011](adr/0011-ordering-and-paging-are-server-side.md)
+- [x] Live scan progress that does not lie about completion: a count and the directory
+      being walked, and deliberately no percentage. The backend does not know the total,
+      so a progress bar would be an animation with a number attached
+- [x] Designed empty, loading, error, and permission-denied states. An unreadable directory
+      says so rather than rendering as an empty one
 
 ## Step 9 — Mole adapter
 

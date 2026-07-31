@@ -145,6 +145,32 @@ formatting it would make every regeneration a diff.
 Do not edit the generated file. See [ADR 0010](adr/0010-boundary-types-in-the-shell.md) for
 why these types are separate from the domain types they mirror.
 
+## Working on the tree view
+
+The list is virtualized and paged, and both halves matter.
+
+- `apps/desktop/src/hooks/use-directory.ts` holds one directory as a **sparse array** of
+  `total` slots. A slot is `undefined` until the chunk covering it has been asked for.
+- `apps/desktop/src/components/tree-view.tsx` renders only the rows TanStack Virtual says
+  are on screen, and calls `ensure(first, last)` from an effect so the chunks covering the
+  visible range get requested.
+- A row whose chunk has not landed renders as a placeholder of the right height. The
+  scrollbar is sized from `total`, which Rust reports for the whole directory.
+
+Two things that look like they belong in the component and do not:
+
+- **Sorting.** It is a parameter on `rows`, because the component holds a window. Sorting
+  the rows it happens to have would order the visible slice and leave the rest of the
+  directory alone — a screen that looks correctly sorted with the largest file missing from
+  it. See [ADR 0011](adr/0011-ordering-and-paging-are-server-side.md).
+- **The way back out.** `RowPage.ancestors` carries the chain from the root, so the
+  breadcrumb and the up button are rendered from the page rather than from a client-side
+  stack that a rescan would invalidate.
+
+`pnpm dev` alone runs against the mock transport, whose fixture tree includes a directory of
+500 entries, one that cannot be read, and one that is genuinely empty — the three states the
+list has to render differently. No backend or Rust toolchain needed.
+
 ## Adding a shadcn/ui component
 
 `apps/desktop` is already configured (`components.json`, Tailwind v4 CSS variables,
