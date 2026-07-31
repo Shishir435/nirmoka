@@ -162,9 +162,11 @@ jobs:
                 exit 1
               fi
               # Detection must name the binary that will run, not the command
-              # name it hoped to find.
-              if ! printf '%s' "$output" | grep -qE '^ncdu +ok +2\.[^ ]* +/'; then
-                echo "::error::expected an absolute path in the detail column"
+              # name it hoped to find. The `yes` between them is the SCANS
+              # column: a scanner that stopped declaring the ability would
+              # leave the window with a button and nothing behind it.
+              if ! printf '%s' "$output" | grep -qE '^ncdu +ok +2\.[^ ]* +yes +/'; then
+                echo "::error::expected ncdu to declare scan and report an absolute path"
                 exit 1
               fi
               ;;
@@ -179,6 +181,22 @@ jobs:
               fi
               ;;
           esac
+
+      # Mole is macOS-only and absent from every runner, but the capability is
+      # a static declaration rather than a detection result — so this holds on
+      # all three platforms, and fails if the adapter ever starts claiming it
+      # can scan. See docs/adr/0012-mole-is-not-a-scanner.md.
+      - name: A backend that cannot scan says so
+        if: matrix.ncdu_expect != 'skip'
+        shell: bash
+        run: |
+          output=$(cargo run -q -p nirmoka-cli -- backends || true)
+          printf '%s\n' "$output"
+
+          if ! printf '%s' "$output" | grep -qE '^mole +[a-z]+ +[^ ]+ +no( |$)'; then
+            echo "::error::mole must report no in the SCANS column"
+            exit 1
+          fi
 
       - name: Detect backends as JSON
         if: matrix.ncdu_expect != 'skip'
