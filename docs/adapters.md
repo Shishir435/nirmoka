@@ -10,7 +10,9 @@ An adapter is responsible for:
 1. **Detection** — is this backend installed, and where?
 2. **Version gating** — is the installed version one this adapter understands?
 3. **Capability reporting** — what can this backend actually do?
-4. **Scanning** — run the backend, stream results as ncdu-format JSON.
+4. **Scanning** — run the backend, stream results as ncdu-format JSON. Capability-gated:
+   a backend that cannot walk a tree declares `scan: false` and refuses, rather than
+   returning the part of one it could manage.
 5. **Deletion** — validate the path, then remove it via the backend's own safe path.
 6. **Cancellation** — kill the subprocess cleanly when the user stops a scan.
 
@@ -139,7 +141,10 @@ leaves behind would otherwise parse as a small disk.
 
 ### Degrade, don't lie
 
-If a backend cannot do something, report `Unsupported`. Do not emulate it. Specifically:
+If a backend cannot do something, report `Unsupported`. Do not emulate it. This applies to
+the headline abilities too — Mole cannot scan, and the adapter says so rather than returning
+the one level of tree it could produce. A tree one level deep presented as a complete one is
+a disk that looks empty. Specifically:
 if a backend has no dry-run mode, the adapter declares `dry_run: false` and the UI falls
 back to an explicit confirmation dialog. An adapter must never fake a preview by guessing
 what the backend would delete.
@@ -149,10 +154,21 @@ what the backend would delete.
 ### Mole (macOS)
 
 - Binary: `mo`
-- Scan: `mo analyze --json`
-- Preview: `mo clean --dry-run`, or the `MOLE_DRY_RUN=1` environment variable
-- Capabilities: everything — trash, dry run, cleanup categories, app uninstall, status
+- Scan: **none.** `mo analyze --json` lists one directory's direct children with recursive
+  sizes and stops; the analyzer takes no depth or recursion flag, so a tree would cost one
+  subprocess per directory. The adapter declares `scan: false` and returns `Unsupported`.
+  See [ADR 0012](adr/0012-mole-is-not-a-scanner.md) and `fixtures/mole/1.48.1/`
+- Preview: `mo clean --dry-run`, `mo uninstall --dry-run`. Human-readable text, not JSON —
+  the ability is real, rendering it as rows is a step 10 problem
+- Status: `mo status --json`
+- Capabilities: delete, dry run, cleanup categories, app uninstall, status. **Not** trash:
+  recoverability is undocumented, and claiming it would tell a user their files can be
+  brought back
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.
+
+Mole is the reason `Capabilities::MINIMAL` is not a floor: `scan: false, delete: true` sits
+below it. A backend has to be able to do _something_, and the contract suite asserts exactly
+that — not that it can do any particular thing.
 
 ### ncdu (cross-platform)
 
@@ -176,6 +192,11 @@ what the backend would delete.
 `tests/contract` is one suite that every adapter must pass. It is driven by recorded backend
 output under `fixtures/<backend>/<version>/`, so it runs on machines with no backend
 installed — including Windows CI, where ncdu does not exist at all.
+
+Only backends that declare `scan: true` contribute wire-format fixtures; the suite filters by
+that flag rather than by directory name. `fixtures/mole/` is recorded output that Nirmoka
+never parses — it is the evidence behind ADR 0012, asserted by
+`crates/adapter-mole/tests/analyzer_shape.rs` so an upgrade re-tests the finding.
 
 ```bash
 ./scripts/record-ncdu-fixture.sh          # re-record after a backend upgrade

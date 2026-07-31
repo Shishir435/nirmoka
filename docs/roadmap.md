@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 9 — the Mole adapter.**
+**Current step: 10 — deletion.**
 
 ## Sequencing rules
 
@@ -138,14 +138,27 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] Designed empty, loading, error, and permission-denied states. An unreadable directory
       says so rather than rendering as an empty one
 
-## Step 9 — Mole adapter
+## Step 9 — Mole adapter ✅
 
-- [ ] `crates/adapter-mole`, macOS-gated at the adapter level
-- [ ] Translate `mo analyze --json` down into the ncdu wire format
-- [ ] Extra abilities as `Capabilities` flags, not format extensions
-- [ ] Capability flags reaching the UI, hiding unsupported controls
-- [ ] Passes the step 6 contract suite unchanged
-- [ ] **If this required changing `core`, fix the trait now**
+- [x] `crates/adapter-mole`, macOS-gated at the adapter level
+- [x] ~~Translate `mo analyze --json` down into the ncdu wire format~~ — **not possible.**
+      `mo analyze --json` lists one directory's children, not a tree, and the analyzer
+      accepts no depth or recursion flag. Rebuilding a tree from it would take one
+      subprocess per directory. The adapter declares `scan: false` and returns
+      `Unsupported`; ncdu stays the scanner. Recorded evidence in `fixtures/mole/1.48.1/`,
+      reasoning in [ADR 0012](adr/0012-mole-is-not-a-scanner.md)
+- [x] Extra abilities as `Capabilities` flags, not format extensions
+- [x] Capability flags reaching the UI, hiding unsupported controls. `Capabilities` is now
+      per backend in `RegistryEntry`, `dto::Backend`, the CLI's `SCANS` column, and the
+      backend list — one set of flags for "the active backend" described neither once the
+      two stopped overlapping
+- [x] Passes the step 6 contract suite unchanged. The suite gained a capability split
+      (`for_each_scanner`, and a promise that a non-scanner refuses) rather than a
+      backend-specific case
+- [x] **If this required changing `core`, fix the trait now** — it did not. `core` and the
+      `Adapter` trait are both untouched by this step: `Capabilities` was already the
+      mechanism for "this backend cannot do that", and it turned out to cover the headline
+      ability too
 
 ## Step 10 — Deletion
 

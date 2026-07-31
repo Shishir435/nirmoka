@@ -94,6 +94,7 @@ pnpm nrmk scan . --json --depth 2 --limit 5
 pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
 
 ./scripts/record-ncdu-fixture.sh              # re-record fixtures after an ncdu upgrade
+./scripts/record-mole-fixture.sh              # re-record the evidence behind ADR 0012
 ```
 
 ## Verification
@@ -142,7 +143,7 @@ backends` and `-- scan <dir>` against a real backend. The shared suite in
 crates/core/          domain model, tree, sizes, policy — framework-independent
 crates/adapter/       Adapter trait, Capabilities, Detection, Registry
 crates/adapter-ncdu/  baseline backend (cross-platform)
-crates/adapter-mole/  macOS-only rich backend (step 9)
+crates/adapter-mole/  macOS-only cleanup backend. Does not scan — see ADR 0012
 crates/cli/           bin `nrmk` — headless harness, not shipped
 crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
 
