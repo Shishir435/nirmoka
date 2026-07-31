@@ -17,7 +17,7 @@ step and what is in scope.
 
 | Layer            | Technology                                                       |
 | ---------------- | ---------------------------------------------------------------- |
-| Shell            | Tauri v2 (arrives step 7)                                        |
+| Shell            | Tauri v2 — `crates/app`                                          |
 | Core, adapters   | Rust — `crates/*`                                                |
 | Frontend         | React 19 + TypeScript + Tailwind v4 + shadcn/ui — `apps/desktop` |
 | Wire format      | ncdu JSON export                                                 |
@@ -86,6 +86,9 @@ cargo run -p nirmoka-cli -- backends
 cargo run -p nirmoka-cli -- backends --json
 pnpm nrmk backends           # same thing via pnpm
 
+pnpm tauri dev               # the desktop shell (starts Vite itself)
+pnpm types                   # regenerate packages/transport/src/generated/bindings.ts
+
 pnpm nrmk scan ~/Downloads                    # real backend, largest first
 pnpm nrmk scan . --json --depth 2 --limit 5
 pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
@@ -102,6 +105,11 @@ warnings`, then `cargo test --workspace`.
 backends` and `-- scan <dir>` against a real backend. The shared suite in
   `tests/contract` must pass unchanged; needing a special case there means the trait is
   wrong.
+- **Boundary types (`crates/app/src/dto.rs`):** `pnpm types`, then commit the regenerated
+  `packages/transport/src/generated/bindings.ts`. CI fails on a diff, and so does the
+  pre-push hook.
+- **Shell changes:** `pnpm tauri dev` and use the window. A command that compiles and a
+  window that shows the result are different claims.
 - **Anything touching deletion:** tests first, no exceptions.
 - Never pipe a test or check run into `head`/`tail` — the pipeline reports the pager's exit
   code, so a red run reads green. Let it print in full, or capture to a file and check the
@@ -136,7 +144,7 @@ crates/adapter/       Adapter trait, Capabilities, Detection, Registry
 crates/adapter-ncdu/  baseline backend (cross-platform)
 crates/adapter-mole/  macOS-only rich backend (step 9)
 crates/cli/           bin `nrmk` — headless harness, not shipped
-crates/app/           Tauri shell (step 7)
+crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
 
 tests/contract/       one suite every adapter must pass, fixture-driven
 fixtures/             recorded backend output, per backend and version

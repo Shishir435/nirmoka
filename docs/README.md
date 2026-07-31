@@ -30,6 +30,7 @@ not in the room.
 | [0007](adr/0007-nrmk-cli-scope.md)               | `nrmk` is a development harness, not a product         |
 | [0008](adr/0008-wire-parser-in-adapter-crate.md) | The wire-format parser lives in the contract crate     |
 | [0009](adr/0009-disk-usage-is-the-number.md)     | Disk usage is the number; apparent size sits beside it |
+| [0010](adr/0010-boundary-types-in-the-shell.md)  | The types that cross to TypeScript live in the shell   |
 
 ## The four ideas that matter
 

@@ -1,0 +1,30 @@
+[package]
+name = "nirmoka-app"
+description = "The Tauri shell. A translation layer, and deliberately nothing more."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# The library holds everything; `main.rs` only calls `run()`. Tauri's mobile
+# entry point needs a library target, and it keeps `cargo test` honest — a
+# binary-only crate cannot be tested from outside.
+[lib]
+name = "nirmoka_app"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+nirmoka-core = { workspace = true }
+nirmoka-adapter = { workspace = true }
+nirmoka-adapter-ncdu = { workspace = true }
+serde = { workspace = true }
+tauri = { workspace = true }
+ts-rs = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

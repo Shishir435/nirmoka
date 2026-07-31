@@ -9,6 +9,14 @@
 | Rust | stable  | via `rustup`; `rust-toolchain.toml` selects the channel |
 | ncdu | 2.x     | the baseline backend; `brew install ncdu`               |
 
+On Linux the shell links against the system webview, which is a package rather than part of
+the OS:
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf
+```
+
 Optional: `mo` ([Mole](https://github.com/tw93/Mole)) for the macOS-only rich backend from
 step 9.
 
@@ -51,13 +59,19 @@ pnpm nrmk scan . --depth 2 --limit 5     # nest two levels, five entries each
 pnpm nrmk scan . --json                  # the same window, machine-readable
 pnpm nrmk scan / -x --exclude-caches     # one filesystem, skip CACHEDIR.TAG trees
 
+pnpm tauri dev              # the desktop shell; starts Vite for you
+pnpm tauri build            # a distributable bundle
+pnpm types                  # regenerate the TypeScript mirrors of the Rust DTOs
+
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 pnpm format
 ```
 
-From step 7, `pnpm tauri dev` launches the desktop app and starts Vite automatically.
+`pnpm tauri dev` runs `pnpm dev` for you and opens the window against it, so Vite does not
+need to be started separately. `pnpm dev` on its own still works and renders the UI against
+the mock transport — useful for styling without a backend or a Rust toolchain.
 
 ## Before pushing
 
@@ -113,6 +127,23 @@ pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json
 
 This is also the enforcement mechanism for invariant 1 — if `crates/core` ever gains a
 `tauri` dependency, this binary stops building. See [ADR 0005](adr/0005-frontend-port.md).
+
+## Changing a type that crosses to TypeScript
+
+The boundary types live in `crates/app/src/dto.rs` and their TypeScript mirrors are
+generated into `packages/transport/src/generated/bindings.ts`, which is committed.
+
+```bash
+pnpm types      # cargo test -p nirmoka-app export_bindings
+```
+
+`cargo test --workspace` rewrites the file too, so in practice the failure mode is a dirty
+working tree rather than a forgotten step. The pre-push hook and CI both reject a diff, so
+a Rust type cannot reach main without its mirror. Prettier ignores the generated directory —
+formatting it would make every regeneration a diff.
+
+Do not edit the generated file. See [ADR 0010](adr/0010-boundary-types-in-the-shell.md) for
+why these types are separate from the domain types they mirror.
 
 ## Adding a shadcn/ui component
 

@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 7 — the Tauri shell.**
+**Current step: 8 — the tree view.**
 
 ## Sequencing rules
 
@@ -102,21 +102,31 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] Driven from recorded fixtures, no live backend needed
 - [x] Wired into CI on all three platforms, including a Windows run with no backend at all
 
-## Step 7 — Tauri shell
+## Step 7 — Tauri shell ✅
 
-- [ ] `crates/app` — Tauri v2, thin translation layer only
-- [ ] Scans run on a worker thread with the `CancelToken` reaching a real stop button
-- [ ] `tauri.conf.json` pointing at `apps/desktop/dist`, pnpm as `beforeDevCommand`
-- [ ] `ts-rs` generating types into `packages/transport/src/generated/`, committed
-- [ ] CI check: regenerating types produces no diff
-- [ ] Real `tauriTransport()` in `packages/transport`, replacing the mock
-- [ ] shadcn/ui initialised, first components added
-- [ ] `pnpm tauri dev` opens a window showing real backend detection
+- [x] `crates/app` — Tauri v2, six commands, no logic of its own. Detection, sizes, and
+      ordering stay where the CLI and the contract suite can reach them.
+- [x] Scans run on a worker thread with the `CancelToken` reaching a real stop button.
+      Progress arrives as events every 25k entries rather than per entry.
+- [x] `tauri.conf.json` pointing at `apps/desktop/dist`, pnpm as `beforeDevCommand`
+- [x] `ts-rs` generating `packages/transport/src/generated/bindings.ts`, committed —
+      see [ADR 0010](adr/0010-boundary-types-in-the-shell.md)
+- [x] CI check: regenerating types produces no diff, and the `web` job builds the frontend
+      with no Rust toolchain installed
+- [x] Real `tauriTransport()` in `packages/transport`, with `resolveTransport()` falling
+      back to the mock outside the shell so `pnpm dev` still renders
+- [x] shadcn/ui initialised, button and badge added, full token set in `index.css`
+- [x] `pnpm tauri dev` opens a window showing real backend detection
+- [x] `rows` caps its own window size, so no caller can ask for the whole tree
+- [x] Node ids are paired with the scan that issued them. An index alone identifies a
+      slot, not a node: every scan numbers its tree from zero, so an id kept across a
+      rescan would name a different directory rather than fail
 
 ## Step 8 — Tree view
 
 - [ ] Virtualized list (TanStack Virtual) — invariant 5 applies from the first commit
-- [ ] IPC carries the visible window plus aggregates, never the whole tree
+- [ ] IPC carries the visible window plus aggregates, never the whole tree — the `rows`
+      command and its cap already exist; step 8 is the UI that pages through them
 - [ ] Navigate in and out of directories
 - [ ] Sort by size and by name
 - [ ] Live scan progress that does not lie about completion

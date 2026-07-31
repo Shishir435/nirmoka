@@ -87,6 +87,26 @@ impl Tree {
             .ok_or(CoreError::UnknownNode(id.raw()))
     }
 
+    /// Turn a raw id from outside this process into one that indexes this tree.
+    ///
+    /// Ids handed to a frontend come back as plain integers, so this is where an
+    /// out-of-range one becomes an error rather than a panic.
+    ///
+    /// **It is a bounds check, not a staleness check.** Every tree numbers its
+    /// nodes from zero, so an id left over from a scan that has since been
+    /// replaced resolves here whenever the new tree is long enough — and names a
+    /// different file. A `Tree` cannot tell: it has no idea another one ever
+    /// existed. Whoever hands ids out has to pair them with the scan that issued
+    /// them, which is what `nirmoka_app::state::ScanId` does.
+    pub fn node_id(&self, raw: u32) -> Result<NodeId> {
+        let id = NodeId(raw);
+        if id.index() < self.nodes.len() {
+            Ok(id)
+        } else {
+            Err(CoreError::UnknownNode(raw))
+        }
+    }
+
     pub fn children_of(&self, id: NodeId) -> &[NodeId] {
         self.children
             .get(id.index())
@@ -155,6 +175,20 @@ impl Tree {
 mod tests {
     use super::*;
     use crate::node::Node;
+
+    #[test]
+    fn a_raw_id_from_outside_is_checked_against_this_tree() {
+        let tree = sample();
+
+        let root = tree.node_id(0).expect("index 0 exists");
+        assert_eq!(tree.get(root).unwrap().name, "root");
+
+        let out_of_range = tree.node_id(9_999);
+        assert!(
+            matches!(out_of_range, Err(CoreError::UnknownNode(9_999))),
+            "an id past the end must be refused rather than indexed"
+        );
+    }
 
     fn sample() -> Tree {
         // /root

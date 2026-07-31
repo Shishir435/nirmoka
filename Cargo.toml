@@ -21,6 +21,15 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 
+# Shell-only. Confined to crates/app by invariant 1 — nothing else in the
+# workspace may depend on these, and crates/cli exists to prove it.
+tauri = "2"
+tauri-build = "2"
+
+# Generates the TypeScript mirrors of the boundary types. A hand-maintained
+# mirror of a Rust struct drifts silently; that is the whole problem here.
+ts-rs = "12"
+
 [profile.release]
 strip = true
 lto = true
