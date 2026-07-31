@@ -13,16 +13,31 @@
 //! Only ncdu 2.x. The JSON export format used as Nirmoka's wire format
 //! (`ncdu -o -`) is the version 2 shape; ncdu 1.x emits a different one, and a
 //! hypothetical 3.x is unknown until someone tests it.
+//!
+//! The gate is enforced on *every* operation, not only in the backend picker.
+//! ncdu 1.x emits the same JSON format *major* version as 2.x, so its export
+//! parses — an unversioned scan would silently produce plausible numbers from
+//! an untested backend.
 
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use nirmoka_adapter::{Adapter, AdapterError, Capabilities, Detection};
+use nirmoka_adapter::process::{find_in_path, RunningProcess};
+use nirmoka_adapter::wire;
+use nirmoka_adapter::{
+    validate_scan_root, Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions,
+    ScanSummary, WireSink,
+};
 
 const BINARY: &str = "ncdu";
 const SUPPORTED: &str = ">=2.0, <3.0";
+
+/// 64 KiB. An export of a large home directory is tens of megabytes arriving
+/// through a pipe; reading it in default-sized chunks is measurable overhead.
+const READ_BUFFER: usize = 64 * 1024;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NcduAdapter;
@@ -30,6 +45,24 @@ pub struct NcduAdapter;
 impl NcduAdapter {
     pub fn new() -> Self {
         Self
+    }
+
+    /// The binary path and version, or an error explaining which gate failed.
+    ///
+    /// Every operation goes through this. Detection is not a one-time startup
+    /// check: a user can upgrade ncdu while the app is open.
+    fn usable_binary(&self) -> Result<(PathBuf, String), AdapterError> {
+        match self.detect()? {
+            Detection::Found { path, version } => Ok((path, version)),
+            Detection::UnsupportedVersion { version, .. } => {
+                Err(AdapterError::UnsupportedVersion {
+                    binary: BINARY,
+                    version,
+                    supported: SUPPORTED,
+                })
+            }
+            Detection::NotInstalled => Err(AdapterError::NotInstalled { binary: BINARY }),
+        }
     }
 }
 
@@ -47,7 +80,13 @@ impl Adapter for NcduAdapter {
     }
 
     fn detect(&self) -> Result<Detection, AdapterError> {
-        let output = match Command::new(BINARY).arg("--version").output() {
+        // Resolved first so the reported path is the binary that will actually
+        // run. On a machine with ncdu in both /usr/bin and /opt/homebrew/bin,
+        // "ncdu" is not an answer the user can act on.
+        let resolved = find_in_path(BINARY);
+        let program = resolved.clone().unwrap_or_else(|| PathBuf::from(BINARY));
+
+        let output = match Command::new(&program).arg("--version").output() {
             Ok(output) => output,
             // A missing binary is a normal state, not an error. Anything else
             // (permission denied, exec format error) is worth surfacing.
@@ -76,16 +115,14 @@ impl Adapter for NcduAdapter {
             output: stdout.trim().to_string(),
         })?;
 
-        // TODO(step 3): resolve the absolute path instead of reporting the
-        // command name. Needs a cross-platform PATH search; not worth a
-        // dependency until the UI displays it.
-        let path = PathBuf::from(BINARY);
-
         if is_supported(&version) {
-            Ok(Detection::Found { path, version })
+            Ok(Detection::Found {
+                path: program,
+                version,
+            })
         } else {
             Ok(Detection::UnsupportedVersion {
-                path,
+                path: program,
                 version,
                 supported: SUPPORTED.to_string(),
             })
@@ -97,6 +134,99 @@ impl Adapter for NcduAdapter {
         // routing, and the adapter must not pretend otherwise — the UI falls
         // back to an explicit confirmation instead of a faked preview.
         Capabilities::MINIMAL
+    }
+
+    fn scan(
+        &self,
+        root: &Path,
+        options: &ScanOptions,
+        sink: &mut dyn WireSink,
+        cancel: &CancelToken,
+    ) -> Result<ScanSummary, AdapterError> {
+        let root = validate_scan_root(root)?;
+        let (binary, version) = self.usable_binary()?;
+
+        if cancel.is_cancelled() {
+            return Err(cancelled());
+        }
+
+        let mut command = Command::new(binary);
+        command
+            // Without this, a user's ~/.config/ncdu/config silently changes
+            // what a scan means — including turning on apparent-size mode or
+            // adding exclude patterns Nirmoka never asked for.
+            .arg("--ignore-config")
+            // No progress UI. `-o -` still draws one otherwise, into a terminal
+            // that is not there.
+            .arg("-0")
+            .arg("-o")
+            .arg("-");
+
+        if options.one_file_system {
+            command.arg("-x");
+        }
+        if options.exclude_caches {
+            command.arg("--exclude-caches");
+        }
+        for pattern in &options.exclude {
+            command.arg("--exclude").arg(pattern);
+        }
+
+        command.arg(&root);
+
+        let mut process =
+            RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+                binary: BINARY,
+                source,
+            })?;
+
+        let stdout = process
+            .take_stdout()
+            .expect("RunningProcess::spawn pipes stdout");
+
+        // Parsing happens while ncdu is still walking the disk. The sink sees
+        // entries during the scan, which is what invariant 5 needs on the other
+        // side of the boundary.
+        let parsed = wire::parse(BufReader::with_capacity(READ_BUFFER, stdout), sink);
+
+        let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+
+        // Order matters. A cancelled scan leaves a truncated export and a
+        // killed process; reporting either of those as the failure would blame
+        // the backend for something the user did.
+        if outcome.cancelled {
+            return Err(cancelled());
+        }
+
+        if !outcome.status.success() {
+            return Err(AdapterError::BackendFailed {
+                binary: BINARY,
+                status: outcome.status.code().unwrap_or(-1),
+                stderr: outcome.stderr,
+            });
+        }
+
+        let stats = parsed.map_err(|source| AdapterError::MalformedOutput {
+            binary: BINARY,
+            source,
+        })?;
+
+        Ok(ScanSummary {
+            root,
+            items: stats.items,
+            directories: stats.directories,
+            backend_version: Some(version),
+        })
+    }
+}
+
+fn cancelled() -> AdapterError {
+    AdapterError::Cancelled {
+        backend: "ncdu",
+        operation: "scan",
     }
 }
 
@@ -167,5 +297,22 @@ mod tests {
         let caps = NcduAdapter::new().capabilities();
         assert!(caps.scan);
         assert!(caps.delete);
+    }
+
+    #[test]
+    fn a_bad_scan_root_is_refused_before_anything_is_spawned() {
+        // Runs on every platform, including the ones with no ncdu: validation
+        // happens before the backend is consulted.
+        let mut sink = nirmoka_adapter::TreeSink::new();
+        let error = NcduAdapter::new()
+            .scan(
+                Path::new("nirmoka-no-such-directory"),
+                &ScanOptions::default(),
+                &mut sink,
+                &CancelToken::new(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, AdapterError::RefusedPath { .. }));
     }
 }
