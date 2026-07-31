@@ -123,10 +123,10 @@ fn backends(json: bool) -> std::process::ExitCode {
 }
 
 fn print_table(reports: &[BackendReport]) {
-    println!(
-        "{:<10} {:<12} {:<10} {}",
-        "BACKEND", "STATE", "VERSION", "DETAIL"
-    );
+    // Column widths here must match the row format at the bottom of this fn.
+    // DETAIL is inlined rather than passed as an argument because it is the
+    // last column and has no width spec (clippy::print_literal).
+    println!("{:<10} {:<12} {:<10} DETAIL", "BACKEND", "STATE", "VERSION");
 
     for report in reports {
         let (state, version, detail) = match (&report.detection, &report.error) {
