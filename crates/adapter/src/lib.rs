@@ -5,22 +5,29 @@
 //!
 //! # Current scope
 //!
-//! Step 2 of the roadmap defines detection and capabilities. `scan` and
-//! `delete` land in steps 4 and 9 respectively, once the ncdu wire format
-//! parser exists. They are deliberately absent rather than stubbed, so no
-//! caller can depend on a signature that has not been designed yet.
+//! Detection, capabilities, and scanning. `delete` lands in step 10 with its
+//! own validation and tests; it is deliberately absent rather than stubbed, so
+//! no caller can depend on a signature that has not been designed yet.
 
 #![forbid(unsafe_code)]
 
 pub mod capabilities;
 pub mod detect;
 pub mod error;
+pub mod process;
 pub mod registry;
+pub mod scan;
+pub mod wire;
+
+use std::path::Path;
 
 pub use capabilities::Capabilities;
 pub use detect::Detection;
 pub use error::AdapterError;
+pub use process::CancelToken;
 pub use registry::Registry;
+pub use scan::{validate_scan_root, ScanOptions, ScanSummary};
+pub use wire::{TreeSink, WireError, WireItem, WireSink};
 
 /// One external disk tool, wrapped.
 ///
@@ -49,4 +56,22 @@ pub trait Adapter: Send + Sync {
     /// What this backend can do. Only meaningful after a successful
     /// [`Adapter::detect`].
     fn capabilities(&self) -> Capabilities;
+
+    /// Walk `root`, streaming entries into `sink` as the backend produces them.
+    ///
+    /// # Requirements on implementors
+    ///
+    /// - Validate `root` before it becomes a subprocess argument.
+    /// - Emit the wire format, whatever the backend natively speaks.
+    /// - Stream. Collecting the backend's whole output before calling the sink
+    ///   makes the app feel broken on exactly the disks people need it for.
+    /// - Honour `cancel` by **killing the subprocess**, then return
+    ///   [`AdapterError::Cancelled`] rather than a truncated success.
+    fn scan(
+        &self,
+        root: &Path,
+        options: &ScanOptions,
+        sink: &mut dyn WireSink,
+        cancel: &CancelToken,
+    ) -> Result<ScanSummary, AdapterError>;
 }

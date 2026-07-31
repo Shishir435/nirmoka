@@ -13,4 +13,9 @@ authors.workspace = true
 [dependencies]
 nirmoka-core = { workspace = true }
 serde = { workspace = true }
+# The wire format is part of the contract, so its parser lives here rather than
+# in one adapter that the others would have to depend on. See docs/adr/0008.
+# `unbounded_depth` because serde_json stops at 128 levels of nesting and real
+# directory trees go deeper; crate::wire enforces its own limit instead.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
