@@ -18,8 +18,8 @@
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
 use nirmoka_adapter::{Capabilities as AdapterCapabilities, Detection as AdapterDetection};
-use nirmoka_core::{Node, NodeKind as CoreNodeKind, Tree};
-use serde::Serialize;
+use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 // Byte counts carry `#[ts(type = "number")]` throughout.
@@ -52,6 +52,52 @@ impl From<CoreNodeKind> for NodeKind {
             CoreNodeKind::Other => Self::Other,
         }
     }
+}
+
+/// How the frontend asked for a directory to be ordered.
+///
+/// This is the one DTO that travels inwards as well as out, so it derives
+/// `Deserialize` too. Sorting stays in Rust because the frontend only ever holds
+/// a window: sorting a few dozen rows out of a hundred thousand would reorder
+/// the slice and call it a sort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum Sort {
+    #[default]
+    LargestFirst,
+    SmallestFirst,
+    NameAscending,
+    NameDescending,
+}
+
+impl From<Sort> for CoreSort {
+    fn from(sort: Sort) -> Self {
+        match sort {
+            Sort::LargestFirst => Self::LargestFirst,
+            Sort::SmallestFirst => Self::SmallestFirst,
+            Sort::NameAscending => Self::NameAscending,
+            Sort::NameDescending => Self::NameDescending,
+        }
+    }
+}
+
+/// One step on the way back out of a directory.
+///
+/// The frontend holds a single node id, so without the chain there is no way to
+/// name the directory it descended from — "up" would mean rescanning.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct Crumb {
+    pub id: u32,
+    pub name: String,
 }
 
 /// Whether a backend is installed, and whether this build understands it.
@@ -246,8 +292,23 @@ pub struct RowPage {
     #[ts(type = "number")]
     pub scan_id: u64,
     pub parent_id: u32,
-    /// Absolute path of the parent, for the breadcrumb.
+    /// The parent's own name, which is what the breadcrumb's last segment says.
+    /// Splitting it out of `path` here avoids the frontend guessing at a
+    /// separator that differs by platform.
+    pub name: String,
+    /// Absolute path of the parent, for the header.
     pub path: String,
+    /// Root first, the parent itself excluded. Every entry is somewhere the user
+    /// can click back to.
+    pub ancestors: Vec<Crumb>,
+    /// The parent could not be read, so an empty page means "not allowed to
+    /// look" rather than "nothing here". The distinction is the difference
+    /// between a bug report and a padlock icon.
+    pub read_error: bool,
+    /// The order these rows are in, echoed back. The frontend can render the
+    /// controls from the page it is showing instead of from what it last asked
+    /// for, which are different things while a request is in flight.
+    pub sort: Sort,
     pub offset: u32,
     pub total: u32,
     pub rows: Vec<Row>,
@@ -351,16 +412,18 @@ pub struct ScanFailure {
     pub cancelled: bool,
 }
 
-/// Build a page of rows from a parent's children, largest first.
+/// Build a page of rows from one directory's children.
 pub(crate) fn page(
     scan_id: u64,
     tree: &Tree,
     parent: nirmoka_core::NodeId,
+    sort: Sort,
     offset: u32,
     limit: u32,
 ) -> RowPage {
-    let parent_total = tree.get(parent).map(|node| node.total_bytes).unwrap_or(0);
-    let children = tree.children_by_size(parent);
+    let node = tree.get(parent).ok();
+    let parent_total = node.map(|node| node.total_bytes).unwrap_or(0);
+    let children = tree.children_sorted(parent, sort.into());
 
     let rows = children
         .iter()
@@ -377,13 +440,28 @@ pub(crate) fn page(
         })
         .collect();
 
+    let ancestors = tree
+        .ancestors_of(parent)
+        .into_iter()
+        .filter_map(|id| {
+            Some(Crumb {
+                id: id.raw(),
+                name: tree.get(id).ok()?.name.clone(),
+            })
+        })
+        .collect();
+
     RowPage {
         scan_id,
         parent_id: parent.raw(),
+        name: node.map(|node| node.name.clone()).unwrap_or_default(),
         path: tree
             .path_of(parent)
             .map(|path| path.display().to_string())
             .unwrap_or_default(),
+        ancestors,
+        read_error: node.is_some_and(|node| node.read_error),
+        sort,
         offset,
         total: children.len() as u32,
         rows,
@@ -407,7 +485,7 @@ mod tests {
     #[test]
     fn a_row_reports_its_share_of_the_parent() {
         let tree = tree_with_two_children();
-        let page = page(1, &tree, tree.root().unwrap(), 0, 10);
+        let page = page(1, &tree, tree.root().unwrap(), Sort::LargestFirst, 0, 10);
 
         assert_eq!(page.rows.len(), 2);
         assert_eq!(page.rows[0].name, "big");
@@ -422,14 +500,71 @@ mod tests {
         tree.push(Some(root), Node::file("empty", 0));
         tree.rollup();
 
-        let page = page(1, &tree, root, 0, 10);
+        let page = page(1, &tree, root, Sort::LargestFirst, 0, 10);
         assert_eq!(page.rows[0].share, 0.0);
+    }
+
+    #[test]
+    fn a_page_is_ordered_the_way_it_was_asked_for_and_says_which_way_that_was() {
+        let tree = tree_with_two_children();
+        let root = tree.root().unwrap();
+
+        let smallest = page(1, &tree, root, Sort::SmallestFirst, 0, 10);
+        assert_eq!(smallest.rows[0].name, "small");
+        assert_eq!(smallest.sort, Sort::SmallestFirst);
+
+        let by_name = page(1, &tree, root, Sort::NameDescending, 0, 10);
+        assert_eq!(by_name.rows[0].name, "small");
+        assert_eq!(by_name.sort, Sort::NameDescending);
+    }
+
+    #[test]
+    fn a_page_carries_the_way_back_out() {
+        let mut tree = Tree::new("/fixtures/root");
+        let root = tree.push(None, Node::directory("root"));
+        let nested = tree.push(Some(root), Node::directory("nested"));
+        tree.push(Some(nested), Node::file("leaf", 10));
+        tree.rollup();
+
+        let page = page(1, &tree, nested, Sort::LargestFirst, 0, 10);
+
+        assert_eq!(page.name, "nested");
+        assert_eq!(page.ancestors.len(), 1);
+        assert_eq!(page.ancestors[0].name, "root");
+        assert_eq!(page.ancestors[0].id, root.raw());
+
+        let at_root = page_of_root(&tree);
+        assert!(
+            at_root.ancestors.is_empty(),
+            "the scan root has nowhere further out to go"
+        );
+    }
+
+    fn page_of_root(tree: &Tree) -> RowPage {
+        page(1, tree, tree.root().unwrap(), Sort::LargestFirst, 0, 10)
+    }
+
+    /// An unreadable directory looks exactly like an empty one from the row
+    /// count alone, and the two want different words on screen.
+    #[test]
+    fn a_directory_that_could_not_be_read_says_so_rather_than_looking_empty() {
+        let mut tree = Tree::new("/fixtures/root");
+        let root = tree.push(None, Node::directory("root"));
+        let mut denied = Node::directory("denied");
+        denied.read_error = true;
+        let denied = tree.push(Some(root), denied);
+        tree.rollup();
+
+        let page = page(1, &tree, denied, Sort::LargestFirst, 0, 10);
+        assert!(page.rows.is_empty());
+        assert!(page.read_error);
+        assert!(!page_of_root(&tree).read_error);
     }
 
     #[test]
     fn a_window_reports_the_full_child_count_not_the_window_size() {
         let tree = tree_with_two_children();
-        let page = page(1, &tree, tree.root().unwrap(), 1, 1);
+        let page = page(1, &tree, tree.root().unwrap(), Sort::LargestFirst, 1, 1);
 
         assert_eq!(page.rows.len(), 1, "asked for one row");
         assert_eq!(page.rows[0].name, "small", "offset skipped the largest");
@@ -439,10 +574,26 @@ mod tests {
     #[test]
     fn an_offset_past_the_end_is_an_empty_page_not_an_error() {
         let tree = tree_with_two_children();
-        let page = page(1, &tree, tree.root().unwrap(), 99, 10);
+        let page = page(1, &tree, tree.root().unwrap(), Sort::LargestFirst, 99, 10);
 
         assert!(page.rows.is_empty());
         assert_eq!(page.total, 2);
+    }
+
+    /// The one DTO the frontend sends *in*, so the spelling is a contract rather
+    /// than a display detail: a `Sort` Rust cannot deserialize is a `rows` call
+    /// that fails with a deserialization error instead of returning a page.
+    #[test]
+    fn a_sort_arrives_spelled_the_way_the_bindings_say_it_is() {
+        for (variant, wire) in [
+            (Sort::LargestFirst, "\"largestFirst\""),
+            (Sort::SmallestFirst, "\"smallestFirst\""),
+            (Sort::NameAscending, "\"nameAscending\""),
+            (Sort::NameDescending, "\"nameDescending\""),
+        ] {
+            assert_eq!(serde_json::to_string(&variant).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<Sort>(wire).unwrap(), variant);
+        }
     }
 
     #[test]
