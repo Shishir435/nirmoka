@@ -12,6 +12,7 @@
 
 pub mod commands;
 pub mod dto;
+pub mod path;
 pub mod scan;
 pub mod state;
 

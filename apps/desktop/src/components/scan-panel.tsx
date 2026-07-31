@@ -167,13 +167,16 @@ export function ScanPanel({ transport, enabled }: { transport: Transport; enable
   return (
     <section className="space-y-4">
       <div className="flex gap-2">
+        {/* The example is `~/Downloads` rather than a `/Users/you/…` literal:
+            the tilde is expanded on the Rust side, reads the same on every
+            platform, and does not suggest a layout only macOS has. */}
         <input
           value={path}
           onChange={(event) => setPath(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && path && !scanning && ready) start();
           }}
-          placeholder="A directory to scan, e.g. /Users/you/Downloads"
+          placeholder="A directory to scan, e.g. ~/Downloads"
           spellCheck={false}
           disabled={scanning}
           className="border-input bg-background focus-visible:ring-ring/50 h-9 flex-1 rounded-md border px-3 font-mono text-sm outline-none focus-visible:ring-[3px] disabled:opacity-50"

@@ -134,7 +134,10 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
         return Err("no usable backend is installed".into());
     }
 
-    let root = validate_scan_root(Path::new(root)).map_err(|error| error.to_string())?;
+    // What arrives here is text a human typed, not a path a program passed, so
+    // `~` still means what a shell would have made of it before any program
+    // saw it. Everything after this line deals in real paths.
+    let root = validate_scan_root(&crate::path::expand_home(root)).map_err(|e| e.to_string())?;
     let cancel = CancelToken::new();
 
     let id = claim(&state, root.clone(), cancel.clone())?;
