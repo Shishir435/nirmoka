@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 1 — core types and `nrmk` skeleton.**
+**Current step: 4 — parse the ncdu JSON export into `Tree`.**
 
 ## Sequencing rules
 
@@ -34,17 +34,19 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] `AGENTS.md` + `CLAUDE.md` symlink with the five invariants
 - [x] CI: cross-platform Rust matrix, web build, grep-enforced invariants
 - [x] `pnpm install` clean, `pnpm typecheck` and `pnpm build` green
+- [x] Pre-push hook running the same checks CI does, sharing
+      `scripts/check-invariants.sh` so the two cannot drift
 
-## Step 1 — Core types and `nrmk`
+## Step 1 — Core types and `nrmk` ✅
 
 - [x] `crates/core`: `Node`, `NodeKind`, `Tree` (arena), `format_bytes`, `CoreError`
 - [x] `Tree::rollup` bottom-up size aggregation, `Tree::path_of`, `children_by_size`
 - [x] `crates/cli`: `nrmk backends`, table and `--json` output
-- [ ] Install Rust and get `cargo test --workspace` green
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] First CI run green on all three platforms
+- [x] Rust 1.97.1 installed; `cargo test --workspace` green (17 tests)
+- [x] `cargo clippy --all-targets -- -D warnings` clean
+- [x] CI green on macOS, Linux, and Windows
 
-## Step 2 — Adapter contract
+## Step 2 — Adapter contract ✅
 
 - [x] `Adapter` trait: `id`, `display_name`, `supported_versions`, `detect`, `capabilities`
 - [x] `Capabilities` with seven flags and a `MINIMAL` constant
@@ -57,9 +59,13 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] Detect the binary, parse `ncdu --version`, gate to 2.x
 - [x] Reject error text as a version (the "stderr as data" failure)
 - [x] `Capabilities::MINIMAL` — no dry run, no Trash, and no pretending otherwise
+- [x] `nrmk backends` verified against real ncdu 2.8.2 on macOS — reports `ok`
+- [x] Version gate verified against a real ncdu 1.19 on Ubuntu CI — reports
+      `unsupported` and exits non-zero. Ubuntu 24.04 shipping the 1.x series makes this
+      a free regression test rather than a mock.
 - [ ] Resolve the absolute binary path cross-platform (currently reports the command name)
-- [ ] `nrmk backends` verified against real ncdu 2.8.2 on macOS
-- [ ] Same, on Linux in CI
+- [ ] Exercise a usable 2.x backend on Linux — currently only the rejection path is
+      covered there, because apt has no 2.x package
 
 ## Step 4 — ncdu wire format
 
