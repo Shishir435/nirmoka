@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 4 — parse the ncdu JSON export into `Tree`.**
+**Current step: 7 — the Tauri shell.**
 
 ## Sequencing rules
 
@@ -52,9 +52,10 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] `Capabilities` with seven flags and a `MINIMAL` constant
 - [x] `Detection` with a distinct `UnsupportedVersion` state
 - [x] `Registry`, push-based to avoid a dependency cycle
-- [ ] `AdapterError` exercised by tests for each variant
+- [x] `AdapterError` exercised by tests for each variant, including the `NotInstalled`,
+      `UnsupportedVersion`, `MalformedOutput`, and `Cancelled` variants added by steps 4–5
 
-## Step 3 — ncdu adapter: detection
+## Step 3 — ncdu adapter: detection ✅
 
 - [x] Detect the binary, parse `ncdu --version`, gate to 2.x
 - [x] Reject error text as a version (the "stderr as data" failure)
@@ -63,37 +64,48 @@ for Tauri types inside `core` arrives before the boundary is established.
 - [x] Version gate verified against a real ncdu 1.19 on Ubuntu CI — reports
       `unsupported` and exits non-zero. Ubuntu 24.04 shipping the 1.x series makes this
       a free regression test rather than a mock.
-- [ ] Resolve the absolute binary path cross-platform (currently reports the command name)
-- [ ] Exercise a usable 2.x backend on Linux — currently only the rejection path is
-      covered there, because apt has no 2.x package
+- [x] Resolve the absolute binary path cross-platform, with `PATHEXT` handling on Windows
+      and an executable-bit check on Unix. CI asserts the reported path is absolute.
+- [x] Exercise a usable 2.x backend on Linux, from upstream's static build. apt has no 2.x
+      package, so without this entry Linux only ever covered the rejection path.
 
-## Step 4 — ncdu wire format
+## Step 4 — ncdu wire format ✅
 
-- [ ] Parse ncdu JSON export v2 (`ncdu -o -`) into `Tree`
-- [ ] Record fixtures under `fixtures/ncdu/2.8.2/`
-- [ ] Handle hardlinks, sparse files, and read errors without silently under-reporting
-- [ ] Streaming parse — no buffering the whole tree before returning
-- [ ] Malformed-input tests: truncated JSON, wrong version, empty file
+- [x] Parse ncdu JSON export v2 (`ncdu -o -`) into `Tree`. The format version is 1.2;
+      the "v2" in ncdu's docs is the release series, not the format.
+- [x] Record fixtures under `fixtures/ncdu/2.8.2/` via `scripts/record-ncdu-fixture.sh`
+- [x] Handle hardlinks, sparse files, and read errors without silently under-reporting.
+      Disk usage is the number and apparent size travels beside it — see ADR 0009.
+- [x] Streaming parse — entries reach the sink during the decode, nothing buffers
+- [x] Malformed-input tests: truncated JSON, wrong format version, empty file, trailing
+      data, an item with no name, a reader that fails mid-stream
+- [x] Nesting deeper than serde_json's 128-level limit, capped at 256 so a hostile export
+      cannot overflow a 2 MB worker stack
 
-## Step 5 — `nrmk scan` end to end ⭐
+## Step 5 — `nrmk scan` end to end ⭐ ✅
 
 **The boundary is proven when this works.**
 
-- [ ] `Adapter::scan` added to the trait, streaming into a sink
-- [ ] Cancellation that actually kills the subprocess, with a test
-- [ ] `nrmk scan <path> --json`
-- [ ] `nrmk scan <path>` human table, largest first
-- [ ] Runs on a real home directory without exhausting memory
+- [x] `Adapter::scan` added to the trait, streaming into a sink
+- [x] Cancellation that actually kills the subprocess, with a test that checks the pid is
+      gone rather than only that the call returned
+- [x] `nrmk scan <path> --json`
+- [x] `nrmk scan <path>` human table, largest first, with flags for unreadable, excluded,
+      and deduplicated-hardlink entries
+- [x] `nrmk scan --from-export <file>` for parsing a recorded export with no backend
+- [x] Runs on a real home directory without exhausting memory: 2.2M entries, 399 MB peak
+      RSS, 50s — the time is ncdu's, not the parser's
 
-## Step 6 — Contract test suite
+## Step 6 — Contract test suite ✅
 
-- [ ] `tests/contract/` — one suite every adapter must pass
-- [ ] Driven from recorded fixtures, no live backend needed
-- [ ] Wired into CI on all three platforms
+- [x] `tests/contract/` — one suite every adapter must pass
+- [x] Driven from recorded fixtures, no live backend needed
+- [x] Wired into CI on all three platforms, including a Windows run with no backend at all
 
 ## Step 7 — Tauri shell
 
 - [ ] `crates/app` — Tauri v2, thin translation layer only
+- [ ] Scans run on a worker thread with the `CancelToken` reaching a real stop button
 - [ ] `tauri.conf.json` pointing at `apps/desktop/dist`, pnpm as `beforeDevCommand`
 - [ ] `ts-rs` generating types into `packages/transport/src/generated/`, committed
 - [ ] CI check: regenerating types produces no diff

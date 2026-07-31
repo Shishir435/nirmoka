@@ -85,6 +85,12 @@ cargo fmt --all
 cargo run -p nirmoka-cli -- backends
 cargo run -p nirmoka-cli -- backends --json
 pnpm nrmk backends           # same thing via pnpm
+
+pnpm nrmk scan ~/Downloads                    # real backend, largest first
+pnpm nrmk scan . --json --depth 2 --limit 5
+pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
+
+./scripts/record-ncdu-fixture.sh              # re-record fixtures after an ncdu upgrade
 ```
 
 ## Verification
@@ -93,7 +99,9 @@ pnpm nrmk backends           # same thing via pnpm
 warnings`, then `cargo test --workspace`.
 - **Frontend changes:** `pnpm typecheck && pnpm build`.
 - **Adapter changes:** `cargo test --workspace`, then `cargo run -p nirmoka-cli --
-backends` against a real backend.
+backends` and `-- scan <dir>` against a real backend. The shared suite in
+  `tests/contract` must pass unchanged; needing a special case there means the trait is
+  wrong.
 - **Anything touching deletion:** tests first, no exceptions.
 - Never pipe a test or check run into `head`/`tail` — the pipeline reports the pager's exit
   code, so a red run reads green. Let it print in full, or capture to a file and check the
@@ -129,6 +137,9 @@ crates/adapter-ncdu/  baseline backend (cross-platform)
 crates/adapter-mole/  macOS-only rich backend (step 9)
 crates/cli/           bin `nrmk` — headless harness, not shipped
 crates/app/           Tauri shell (step 7)
+
+tests/contract/       one suite every adapter must pass, fixture-driven
+fixtures/             recorded backend output, per backend and version
 
 apps/desktop/         React frontend
 packages/transport/   THE IPC boundary. Only module that knows about Tauri.

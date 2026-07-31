@@ -19,15 +19,17 @@ Each ADR records one significant choice, the alternatives that were rejected, an
 consequences accepted along with it. They are written to be readable by someone who was
 not in the room.
 
-| ADR                                       | Decision                                           |
-| ----------------------------------------- | -------------------------------------------------- |
-| [0001](adr/0001-adapter-pattern.md)       | Drive existing CLI tools through an adapter layer  |
-| [0002](adr/0002-wire-format-ncdu-json.md) | Use ncdu's JSON export as the internal wire format |
-| [0003](adr/0003-tech-stack-tauri.md)      | Build the desktop app with Tauri v2                |
-| [0004](adr/0004-license-apache-2.md)      | License Nirmoka under Apache-2.0                   |
-| [0005](adr/0005-frontend-port.md)         | Keep the frontend replaceable with a second port   |
-| [0006](adr/0006-monorepo-layout.md)       | One repo, two package managers, split by language  |
-| [0007](adr/0007-nrmk-cli-scope.md)        | `nrmk` is a development harness, not a product     |
+| ADR                                              | Decision                                               |
+| ------------------------------------------------ | ------------------------------------------------------ |
+| [0001](adr/0001-adapter-pattern.md)              | Drive existing CLI tools through an adapter layer      |
+| [0002](adr/0002-wire-format-ncdu-json.md)        | Use ncdu's JSON export as the internal wire format     |
+| [0003](adr/0003-tech-stack-tauri.md)             | Build the desktop app with Tauri v2                    |
+| [0004](adr/0004-license-apache-2.md)             | License Nirmoka under Apache-2.0                       |
+| [0005](adr/0005-frontend-port.md)                | Keep the frontend replaceable with a second port       |
+| [0006](adr/0006-monorepo-layout.md)              | One repo, two package managers, split by language      |
+| [0007](adr/0007-nrmk-cli-scope.md)               | `nrmk` is a development harness, not a product         |
+| [0008](adr/0008-wire-parser-in-adapter-crate.md) | The wire-format parser lives in the contract crate     |
+| [0009](adr/0009-disk-usage-is-the-number.md)     | Disk usage is the number; apparent size sits beside it |
 
 ## The four ideas that matter
 

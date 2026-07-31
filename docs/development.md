@@ -36,6 +36,7 @@ Verify the whole thing works:
 cargo test --workspace
 pnpm typecheck && pnpm build
 pnpm nrmk backends          # should report ncdu with your installed version
+pnpm nrmk scan .            # a real scan of this repository
 ```
 
 ## Daily commands
@@ -44,6 +45,11 @@ pnpm nrmk backends          # should report ncdu with your installed version
 pnpm dev                    # frontend dev server, :5173 (strict port)
 pnpm nrmk backends          # real backend detection, no GUI needed
 pnpm nrmk backends --json
+
+pnpm nrmk scan ~/Downloads               # largest first
+pnpm nrmk scan . --depth 2 --limit 5     # nest two levels, five entries each
+pnpm nrmk scan . --json                  # the same window, machine-readable
+pnpm nrmk scan / -x --exclude-caches     # one filesystem, skip CACHEDIR.TAG trees
 
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
@@ -98,6 +104,13 @@ pnpm nrmk backends --json | jq
 It exits non-zero when no usable backend is found, so scripts and CI can distinguish "no
 backend installed" from "detection succeeded".
 
+`scan` works without any backend at all when pointed at a recorded export, which is how the
+parser gets debugged on a machine that cannot install ncdu:
+
+```bash
+pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json
+```
+
 This is also the enforcement mechanism for invariant 1 — if `crates/core` ever gains a
 `tauri` dependency, this binary stops building. See [ADR 0005](adr/0005-frontend-port.md).
 
@@ -112,6 +125,39 @@ pnpm dlx shadcn@latest add button
 ```
 
 Components land in `src/components/ui/`.
+
+## Fixtures and the contract suite
+
+`tests/contract` runs one suite against every adapter, driven by real backend output
+recorded under `fixtures/`. It needs no backend installed, which is what lets it run on
+Windows CI.
+
+```bash
+cargo test -p nirmoka-contract-tests
+./scripts/record-ncdu-fixture.sh     # re-record after upgrading ncdu
+```
+
+The recording script builds a small tree containing the cases that break parsers — a
+hardlink, a sparse file, a symlink, an unreadable directory, an empty directory — runs the
+real backend over it, and rewrites only the scan root so the recording machine's paths stay
+out of the repository.
+
+Fixtures live under `fixtures/<backend>/<version>/`. After a backend upgrade, record into
+the new version directory and keep the old one: a format drift should be visible as two
+directories side by side.
+
+## Scanning a whole home directory
+
+The parser holds the tree in Rust and hands the frontend only what it asks for, so a large
+scan is expected to work rather than to be avoided:
+
+```bash
+/usr/bin/time -l ./target/release/nrmk scan "$HOME" --limit 10
+```
+
+On the development machine that is 2.2M entries, 399 MB peak RSS, and about 50 seconds —
+almost all of it ncdu walking the disk. If that number grows sharply after a change to
+`Node` or `Tree`, the cost is per-node and worth understanding before it reaches the UI.
 
 ## Troubleshooting
 
