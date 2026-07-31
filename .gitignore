@@ -31,3 +31,6 @@ dist/
 # Local agent / assistant overrides
 CLAUDE.local.md
 AGENTS.local.md
+
+# Generated Rust -> TS types are committed; their build artifacts are not.
+!packages/transport/src/generated/

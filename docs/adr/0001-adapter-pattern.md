@@ -14,7 +14,7 @@ available:
 
 Writing a scanner from scratch means reimplementing hardlink deduplication, sparse-file
 handling, permission errors, filesystem-boundary detection, cancellation, and per-platform
-metadata quirks — before showing a single pixel. Worse, the *valuable* part of a tool like
+metadata quirks — before showing a single pixel. Worse, the _valuable_ part of a tool like
 Mole is not its traversal loop, it is years of curated knowledge about which paths are safe
 to delete on macOS. That is not reproducible in a side project, and attempting it would
 make the app less safe, not more.

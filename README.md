@@ -6,7 +6,7 @@ Nirmoka is a free, open source desktop app that gives a real graphical interface
 disk-usage tools power users already trust. Point it at a directory, watch the tree fill in,
 sort by size, and reclaim space — without memorising keybindings or parsing `du` output.
 
-> **निर्मोक** (*nirmoka*) is Sanskrit for the skin a snake sheds — the dead layer a living
+> **निर्मोक** (_nirmoka_) is Sanskrit for the skin a snake sheds — the dead layer a living
 > system leaves behind. That is exactly what this tool helps you find and remove.
 
 **Status: early development.** Nothing is installable yet. Watch the repo if you want to know
@@ -61,11 +61,11 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and
 
 ## Planned backends
 
-| Backend | Platforms | Role |
-|---|---|---|
-| [Mole](https://github.com/tw93/Mole) | macOS | Rich cleanup, app uninstall, protected-path safety rules |
-| [ncdu](https://dev.yorhel.nl/ncdu) | macOS, Linux, BSD | Baseline scan + delete, everywhere |
-| [gdu](https://github.com/dundee/gdu) | macOS, Linux, Windows | Fast parallel scan, ncdu-compatible export |
+| Backend                              | Platforms             | Role                                                     |
+| ------------------------------------ | --------------------- | -------------------------------------------------------- |
+| [Mole](https://github.com/tw93/Mole) | macOS                 | Rich cleanup, app uninstall, protected-path safety rules |
+| [ncdu](https://dev.yorhel.nl/ncdu)   | macOS, Linux, BSD     | Baseline scan + delete, everywhere                       |
+| [gdu](https://github.com/dundee/gdu) | macOS, Linux, Windows | Fast parallel scan, ncdu-compatible export               |
 
 Nirmoka does not bundle any of these. It detects what you already have installed and
 tells you how to get one if you have none.
@@ -81,8 +81,25 @@ tells you how to get one if you have none.
 
 - [Architecture](docs/architecture.md) — how the layers fit together
 - [Adapter contract](docs/adapters.md) — what a backend must provide
-- [Roadmap](docs/roadmap.md) — what is planned, in order
+- [Monorepo layout](docs/monorepo.md) — two languages, two package managers
+- [Development setup](docs/development.md) — prerequisites and daily commands
+- [Roadmap](docs/roadmap.md) — the step-by-step tracker
 - [Decision records](docs/adr/) — why each major choice was made
+
+## Development
+
+Requires Node ≥ 22, pnpm, Rust (stable), and ncdu 2.x.
+
+```bash
+pnpm install
+cargo check --workspace --all-targets
+cargo test --workspace
+
+pnpm nrmk backends    # detect installed disk backends
+pnpm dev              # frontend dev server
+```
+
+See [docs/development.md](docs/development.md) for the full setup.
 
 ## Contributing
 

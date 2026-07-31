@@ -1,0 +1,16 @@
+[package]
+name = "nirmoka-adapter"
+description = "Backend adapter contract for Nirmoka. Trait and capabilities only, no implementations."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# This crate must not depend on any concrete `nirmoka-adapter-*` crate — that
+# would be a dependency cycle. Concrete adapters are assembled into a Registry
+# by whoever owns `main` (nirmoka-cli today, the Tauri app later).
+[dependencies]
+nirmoka-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

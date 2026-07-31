@@ -53,7 +53,7 @@ swappable in practice even though the trait still exists.
 
 Mole is the richest backend, so designing the interface around its output is the tempting
 mistake. Do that and the ncdu adapter becomes impossible to write — you will have built a
-Mole GUI with a backend-shaped hole in it. Building against the *narrowest* backend keeps
+Mole GUI with a backend-shaped hole in it. Building against the _narrowest_ backend keeps
 the abstraction honest. The Mole adapter's job is translating down into the common format
 and reporting its extra abilities through capability flags.
 
@@ -89,10 +89,23 @@ closest to user input and the furthest from the backend's safety rules.
 
 Each adapter declares which backend versions it has been tested against, probes the
 installed version at startup, and refuses to run against an unknown one. Output formats
-drift silently, and a silently-changed field on a *delete* path is the worst possible
+drift silently, and a silently-changed field on a _delete_ path is the worst possible
 place to discover that.
 
-**6. No backend binary is bundled.**
+**6. `crates/core` must not depend on Tauri either.**
+
+The adapter trait is only half the shape. `core` sits between two ports and depends on
+neither side, which is what makes the _frontend_ replaceable as well as the backend.
+`crates/cli` (`nrmk`) links `core` with no Tauri anywhere, so a violation is a build
+failure rather than a review miss. See [ADR 0005](adr/0005-frontend-port.md).
+
+**7. `packages/transport` is the only module that may import `@tauri-apps/*`.**
+
+Components import from `@nirmoka/transport`. If a component calls `invoke()` directly, the
+React code is welded to Tauri and the escape route becomes fiction. Leaving Tauri should
+rewrite one file, not the app. CI greps for violations.
+
+**8. No backend binary is bundled.**
 
 Nirmoka detects what is installed and guides the user to install a backend if none is
 found. This avoids inheriting redistribution obligations from GPL-licensed backends, and

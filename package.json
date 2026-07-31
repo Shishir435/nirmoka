@@ -1,0 +1,27 @@
+{
+  "name": "nirmoka",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A cross-platform desktop GUI for disk analysis and cleanup",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/Shishir435/nirmoka",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @nirmoka/desktop dev",
+    "build": "pnpm --filter @nirmoka/desktop build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,css,html,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md,css,html,yml,yaml}\"",
+    "nrmk": "cargo run -p nirmoka-cli --",
+    "rs:check": "cargo check --workspace --all-targets",
+    "rs:test": "cargo test --workspace",
+    "rs:lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rs:fmt": "cargo fmt --all"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}

@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 10 blocks postinstall scripts by default. Only allow the ones that
+# genuinely need to compile a native binary.
+onlyBuiltDependencies:
+  - esbuild

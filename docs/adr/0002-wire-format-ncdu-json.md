@@ -12,7 +12,7 @@ Every adapter must hand `core/` the same shape of data. Three candidate formats:
 3. Adopt ncdu's documented JSON export format.
 
 The temptation is option 2. Mole produces the most information, so its format appears to
-lose the least. That reasoning is backwards. An interface shaped around the *richest*
+lose the least. That reasoning is backwards. An interface shaped around the _richest_
 backend cannot be satisfied by a poorer one — the ncdu adapter would have to invent or
 omit fields, and every gap would leak upward into `core/` as a special case. The result is
 a Mole GUI with a backend-shaped hole, and the swap only works on paper.
@@ -25,7 +25,7 @@ Reasons:
 
 - It is a published, versioned specification rather than an internal detail.
 - ncdu and gdu emit it natively, so two of three adapters need no translation.
-- It is the *narrowest* useful format, which forces the abstraction to stay honest.
+- It is the _narrowest_ useful format, which forces the abstraction to stay honest.
 
 Mole's adapter translates `mo analyze --json` down into it. Everything Mole can do beyond
 the format is exposed through capability flags rather than by widening the format.

@@ -1,0 +1,23 @@
+[package]
+name = "nirmoka-cli"
+description = "Headless driver for Nirmoka core. Development and CI harness, not a shipped product."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "nrmk"
+path = "src/main.rs"
+
+# INVARIANT: no `tauri` here, ever. This binary existing and building is the
+# proof that nirmoka-core is framework-independent. See docs/adr/0005.
+[dependencies]
+nirmoka-adapter = { workspace = true }
+nirmoka-adapter-ncdu = { workspace = true }
+nirmoka-core = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

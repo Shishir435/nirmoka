@@ -1,80 +1,151 @@
 # Roadmap
 
-Ordered by dependency, not by excitement. Each milestone should be usable before the next
-one starts.
+Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
+work lands, and keep the **Current step** line accurate.
 
-## M0 — Claim and plan (current)
+**Current step: 1 — core types and `nrmk` skeleton.**
 
-- [x] Name chosen and verified unclaimed on GitHub, npm, crates.io, Vercel, Cloudflare
-- [x] License chosen: Apache-2.0
-- [x] Attribution written
-- [x] Architecture and adapter contract drafted
-- [ ] GitHub repository created and linked to Vercel
-- [ ] `nirmoka.vercel.app` serving the landing page
+## Sequencing rules
 
-## M1 — One backend, end to end
+Three ordering decisions are load-bearing. Changing them costs more than it saves.
 
-The goal is a window that shows a real directory tree, not a polished one.
+**ncdu adapter before Mole adapter.** ncdu is the narrowest backend and runs everywhere.
+Building it first keeps the wire format honest and produces platform-neutral code on a
+single macOS machine. Mole is macOS-only and far richer; leading with it bakes macOS
+assumptions into `core` and leaves the ncdu path unimplementable.
 
-- [ ] Tauri v2 project scaffold, workspace with `core` / `adapter` / `adapter-ncdu` / `app`
-- [ ] ncdu adapter: detect, version gate, scan, stream
-- [ ] ncdu JSON export parser
-- [ ] Minimal tree view — name, size, sorted descending
+**`nrmk scan` working before any UI exists.** This proves `core` is framework-independent
+while violating that is still impossible. Build the UI first and the temptation to reach
+for Tauri types inside `core` arrives before the boundary is established.
+
+**Second adapter before the UI is polished.** If adding `adapter-mole` requires changing
+`core`, the trait was wrong — and it is far cheaper to learn that at step 9 than at step 15.
+
+---
+
+## Step 0 — Workspace skeleton ✅
+
+- [x] Name verified unclaimed: GitHub, npm, crates.io, Vercel, Cloudflare
+- [x] Apache-2.0 license, `NOTICE.md` attribution for Mole / ncdu / gdu
+- [x] Architecture, adapter contract, ADRs 0001–0007
+- [x] GitHub repo created, landing page deployed to `nirmoka.vercel.app`
+- [x] Cargo workspace: `core`, `adapter`, `adapter-ncdu`, `cli`
+- [x] pnpm workspace: `apps/desktop`, `packages/transport`
+- [x] `AGENTS.md` + `CLAUDE.md` symlink with the five invariants
+- [x] CI: cross-platform Rust matrix, web build, grep-enforced invariants
+- [x] `pnpm install` clean, `pnpm typecheck` and `pnpm build` green
+
+## Step 1 — Core types and `nrmk`
+
+- [x] `crates/core`: `Node`, `NodeKind`, `Tree` (arena), `format_bytes`, `CoreError`
+- [x] `Tree::rollup` bottom-up size aggregation, `Tree::path_of`, `children_by_size`
+- [x] `crates/cli`: `nrmk backends`, table and `--json` output
+- [ ] Install Rust and get `cargo test --workspace` green
+- [ ] `cargo clippy -- -D warnings` clean
+- [ ] First CI run green on all three platforms
+
+## Step 2 — Adapter contract
+
+- [x] `Adapter` trait: `id`, `display_name`, `supported_versions`, `detect`, `capabilities`
+- [x] `Capabilities` with seven flags and a `MINIMAL` constant
+- [x] `Detection` with a distinct `UnsupportedVersion` state
+- [x] `Registry`, push-based to avoid a dependency cycle
+- [ ] `AdapterError` exercised by tests for each variant
+
+## Step 3 — ncdu adapter: detection
+
+- [x] Detect the binary, parse `ncdu --version`, gate to 2.x
+- [x] Reject error text as a version (the "stderr as data" failure)
+- [x] `Capabilities::MINIMAL` — no dry run, no Trash, and no pretending otherwise
+- [ ] Resolve the absolute binary path cross-platform (currently reports the command name)
+- [ ] `nrmk backends` verified against real ncdu 2.8.2 on macOS
+- [ ] Same, on Linux in CI
+
+## Step 4 — ncdu wire format
+
+- [ ] Parse ncdu JSON export v2 (`ncdu -o -`) into `Tree`
+- [ ] Record fixtures under `fixtures/ncdu/2.8.2/`
+- [ ] Handle hardlinks, sparse files, and read errors without silently under-reporting
+- [ ] Streaming parse — no buffering the whole tree before returning
+- [ ] Malformed-input tests: truncated JSON, wrong version, empty file
+
+## Step 5 — `nrmk scan` end to end ⭐
+
+**The boundary is proven when this works.**
+
+- [ ] `Adapter::scan` added to the trait, streaming into a sink
+- [ ] Cancellation that actually kills the subprocess, with a test
+- [ ] `nrmk scan <path> --json`
+- [ ] `nrmk scan <path>` human table, largest first
+- [ ] Runs on a real home directory without exhausting memory
+
+## Step 6 — Contract test suite
+
+- [ ] `tests/contract/` — one suite every adapter must pass
+- [ ] Driven from recorded fixtures, no live backend needed
+- [ ] Wired into CI on all three platforms
+
+## Step 7 — Tauri shell
+
+- [ ] `crates/app` — Tauri v2, thin translation layer only
+- [ ] `tauri.conf.json` pointing at `apps/desktop/dist`, pnpm as `beforeDevCommand`
+- [ ] `ts-rs` generating types into `packages/transport/src/generated/`, committed
+- [ ] CI check: regenerating types produces no diff
+- [ ] Real `tauriTransport()` in `packages/transport`, replacing the mock
+- [ ] shadcn/ui initialised, first components added
+- [ ] `pnpm tauri dev` opens a window showing real backend detection
+
+## Step 8 — Tree view
+
+- [ ] Virtualized list (TanStack Virtual) — invariant 5 applies from the first commit
+- [ ] IPC carries the visible window plus aggregates, never the whole tree
 - [ ] Navigate in and out of directories
-- [ ] Cancel a running scan
+- [ ] Sort by size and by name
+- [ ] Live scan progress that does not lie about completion
+- [ ] Designed empty, loading, error, and permission-denied states
 
-**ncdu first, not Mole.** ncdu is the narrowest backend, so building against it first
-prevents Mole's richer output from shaping the interface. This is the single most
-important sequencing decision in the project.
+## Step 9 — Mole adapter
 
-## M2 — Prove the abstraction
+- [ ] `crates/adapter-mole`, macOS-gated at the adapter level
+- [ ] Translate `mo analyze --json` down into the ncdu wire format
+- [ ] Extra abilities as `Capabilities` flags, not format extensions
+- [ ] Capability flags reaching the UI, hiding unsupported controls
+- [ ] Passes the step 6 contract suite unchanged
+- [ ] **If this required changing `core`, fix the trait now**
 
-- [ ] Mole adapter: detect, version gate, translate `mo analyze --json` into ncdu format
-- [ ] Capability flags wired through to the UI
-- [ ] Backend picker, with auto-detection and a manual override
-- [ ] Contract test suite running against both adapters from recorded fixtures
-- [ ] A clear, non-scary screen for "no supported backend installed"
+## Step 10 — Deletion
 
-If adding the second adapter requires changing `core/`, the trait was wrong. Fix the trait
-here, while it is still cheap.
+Nothing here ships without tests.
 
-## M3 — Deletion
-
-Nothing in this milestone ships without tests.
-
-- [ ] Path validation at the adapter boundary
+- [ ] Path validation at the adapter boundary: absolute, canonicalised, symlinks resolved,
+      inside the scan root, not system-critical
 - [ ] Dry-run preview where the backend supports it
-- [ ] Confirmation flow for backends that do not
-- [ ] Trash where available, permanent delete clearly marked where not
+- [ ] Explicit confirmation where it does not
+- [ ] Trash where available, permanent clearly marked where not
 - [ ] Undo affordance for trashed items
-- [ ] Operation log the user can actually read
+- [ ] A readable operation log
 
-## M4 — The part worth caring about
+## Step 11 — Ship
 
-- [ ] Treemap view
-- [ ] Keyboard-first navigation, with the shortcuts discoverable
-- [ ] Live scan progress that does not lie about how far along it is
-- [ ] Empty, loading, error, and permission-denied states designed rather than defaulted
-- [ ] Dark and light themes
-- [ ] Actually good typography and alignment for size columns
-
-## M5 — Ship
-
-- [ ] Windows via the gdu adapter
+- [ ] `adapter-gdu` for the Windows path
 - [ ] Signed macOS build
 - [ ] Linux AppImage or Flatpak
-- [ ] CI: build all three platforms, run contract tests
-- [ ] Documentation site fleshed out
+- [ ] CI builds installers for all three platforms
+- [ ] Pin `rust-toolchain.toml` to an exact version
 - [ ] First tagged release
+
+---
 
 ## Explicitly out of scope
 
-Writing these down now, so they can be declined quickly later:
+Written down so they can be declined quickly later.
 
-- **A built-in disk scanner.** The entire premise is that scanning is a solved problem.
-- **Bundled backend binaries.** Detect and guide; do not redistribute.
-- **Background monitoring, menu bar agents, scheduled cleanups.** This is a tool you open
-  when you need it.
-- **Reimplementing any backend's curated cleanup lists.** Legally risky and immediately
-  stale.
-- **Mobile.** Tauri can technically target it. There is no disk to browse there.
+- **A built-in disk scanner.** The premise is that scanning is solved.
+- **Bundled backend binaries.** Detect and guide; do not redistribute. Avoids inheriting
+  GPL distribution obligations and is more honest about what executes.
+- **`nrmk` as a shipped product.** It is a dev and CI harness. A CLI wrapping a CLI muddies
+  the product story. See ADR 0007.
+- **Reimplementing any backend's curated cleanup lists.** Legally risky under GPL-3.0 and
+  immediately stale.
+- **Background monitoring, menu bar agents, scheduled cleanups.** This is a tool you open.
+- **Mobile.** Tauri can target it. There is no disk to browse there.

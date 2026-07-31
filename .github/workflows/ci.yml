@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Cross-platform from step 0. Only `check` and `test` — building the GUI on
+  # three platforms comes later. The point right now is that a compile break on
+  # Linux or Windows is caught for free while developing on a Mac.
+  rust:
+    name: rust / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Check
+        run: cargo check --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  # The headless harness must work against a real backend. This is also the
+  # proof that the whole stack runs with no display server.
+  nrmk:
+    name: nrmk against real ncdu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Install ncdu
+        run: sudo apt-get update && sudo apt-get install -y ncdu
+
+      - name: Detect backends
+        run: cargo run -p nirmoka-cli -- backends
+
+      - name: Detect backends as JSON
+        run: cargo run -p nirmoka-cli -- backends --json
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  # Architectural invariants, enforced by grep rather than by good intentions.
+  # Each of these encodes a rule from docs/architecture.md that is otherwise
+  # only a paragraph someone has to remember.
+  invariants:
+    name: architecture invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: core must not depend on a GUI framework
+        run: |
+          if grep -qE '^\s*tauri' crates/core/Cargo.toml crates/adapter/Cargo.toml; then
+            echo "::error::core/adapter must not depend on tauri. See docs/adr/0005."
+            exit 1
+          fi
+
+      - name: core must not contain platform conditionals
+        run: |
+          # Matches the attribute form only, and drops comment lines — the rule
+          # is documented inside core/src/lib.rs, which must not trip its own guard.
+          if grep -rn 'cfg(target_os' crates/core/src | grep -vE ':[[:space:]]*(//|/\*)'; then
+            echo "::error::No #[cfg(target_os)] in core. Platform specifics belong in adapters."
+            exit 1
+          fi
+
+      - name: no absolute developer paths
+        run: |
+          if grep -rnE '"/(Users|home)/' crates/ --include='*.rs'; then
+            echo "::error::Hardcoded developer path. Use the directories crate."
+            exit 1
+          fi
+
+      - name: transport is the only module that knows about tauri
+        run: |
+          hits=$(grep -rln '@tauri-apps' apps packages --include='*.ts' --include='*.tsx' \
+            | grep -v '^packages/transport/' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::@tauri-apps imported outside packages/transport:"
+            echo "$hits"
+            exit 1
+          fi

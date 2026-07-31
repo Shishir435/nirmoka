@@ -5,11 +5,13 @@ cleanup.
 
 ## Start here
 
-| Document | What it covers |
-|---|---|
-| [Architecture](architecture.md) | The layers, the rules that keep them separate, and why |
-| [Adapter contract](adapters.md) | What a backend must provide to be usable |
-| [Roadmap](roadmap.md) | Planned milestones, in dependency order, plus what is out of scope |
+| Document                            | What it covers                                         |
+| ----------------------------------- | ------------------------------------------------------ |
+| [Architecture](architecture.md)     | The layers, the rules that keep them separate, and why |
+| [Adapter contract](adapters.md)     | What a backend must provide to be usable               |
+| [Monorepo layout](monorepo.md)      | Two languages, two package managers, how they coexist  |
+| [Development setup](development.md) | Prerequisites, daily commands, troubleshooting         |
+| [Roadmap](roadmap.md)               | The step-by-step tracker, plus what is out of scope    |
 
 ## Decision records
 
@@ -17,14 +19,17 @@ Each ADR records one significant choice, the alternatives that were rejected, an
 consequences accepted along with it. They are written to be readable by someone who was
 not in the room.
 
-| ADR | Decision |
-|---|---|
-| [0001](adr/0001-adapter-pattern.md) | Drive existing CLI tools through an adapter layer |
+| ADR                                       | Decision                                           |
+| ----------------------------------------- | -------------------------------------------------- |
+| [0001](adr/0001-adapter-pattern.md)       | Drive existing CLI tools through an adapter layer  |
 | [0002](adr/0002-wire-format-ncdu-json.md) | Use ncdu's JSON export as the internal wire format |
-| [0003](adr/0003-tech-stack-tauri.md) | Build the desktop app with Tauri v2 |
-| [0004](adr/0004-license-apache-2.md) | License Nirmoka under Apache-2.0 |
+| [0003](adr/0003-tech-stack-tauri.md)      | Build the desktop app with Tauri v2                |
+| [0004](adr/0004-license-apache-2.md)      | License Nirmoka under Apache-2.0                   |
+| [0005](adr/0005-frontend-port.md)         | Keep the frontend replaceable with a second port   |
+| [0006](adr/0006-monorepo-layout.md)       | One repo, two package managers, split by language  |
+| [0007](adr/0007-nrmk-cli-scope.md)        | `nrmk` is a development harness, not a product     |
 
-## The three ideas that matter
+## The four ideas that matter
 
 If you read nothing else:
 
@@ -35,6 +40,10 @@ reproduce years of curated knowledge about which paths are safe to delete.
 **The wire format is the narrowest backend's, not the richest.** Building against ncdu's
 export format rather than Mole's richer output is what keeps the abstraction honest.
 Backends' extra abilities are capability flags, never format extensions.
+
+**`core` depends on neither side.** Not on a backend, not on a GUI framework. That is one
+hexagon with two ports, which is why the frontend is as replaceable as the backend, and why
+`nrmk` exists to make a violation a build failure.
 
 **Deletion is the whole risk surface.** Paths are validated at the adapter boundary before
 they ever become subprocess arguments, backends' own safety rules are called rather than
