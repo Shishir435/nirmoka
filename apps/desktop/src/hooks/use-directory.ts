@@ -68,12 +68,24 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
   /** Bumped when a chunk lands, to repaint rows that were placeholders. */
   const [, setLoaded] = useState(0);
 
+  /**
+   * Which directory-and-order `rows.current` currently holds.
+   *
+   * Every request captures this and is discarded on arrival if it no longer
+   * matches. Comparing the page against the header instead would not be enough:
+   * a chunk still in flight when the user navigates away comes back describing
+   * the directory it was asked for — the comparison passes — and writes into
+   * the array that now belongs to a different one.
+   */
+  const generation = useRef(0);
+
   const { scanId, parentId, sort } = request ?? {};
 
   useEffect(() => {
     if (!request) return;
 
     let live = true;
+    const era = (generation.current += 1);
     rows.current = [];
     inFlight.current.clear();
     setState({ status: "loading" });
@@ -81,7 +93,7 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
     transport
       .rows(request.scanId, request.parentId, request.sort, 0, CHUNK)
       .then((page) => {
-        if (!live) return;
+        if (!live || generation.current !== era) return;
 
         rows.current = new Array<Row | undefined>(page.total);
         page.rows.forEach((row, index) => {
@@ -128,6 +140,8 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
       const first = Math.floor(Math.max(0, start) / CHUNK);
       const last = Math.floor(Math.min(end, state.header.total - 1) / CHUNK);
 
+      const era = generation.current;
+
       for (let chunk = first; chunk <= last; chunk += 1) {
         const offset = chunk * CHUNK;
         if (inFlight.current.has(offset) || rows.current[offset] !== undefined) continue;
@@ -136,9 +150,10 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
         transport
           .rows(request.scanId, request.parentId, request.sort, offset, CHUNK)
           .then((page) => {
-            // A page from a directory the user has since left, or a sort they
-            // have since changed, would overwrite rows it does not describe.
-            if (page.parentId !== state.header.parentId || page.sort !== state.header.sort) return;
+            // Rows the user has since navigated away from would land in the
+            // array that now belongs to a different directory. The page itself
+            // cannot say so — it correctly describes what was asked for.
+            if (generation.current !== era) return;
 
             page.rows.forEach((row, index) => {
               rows.current[offset + index] = row;

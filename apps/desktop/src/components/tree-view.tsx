@@ -221,7 +221,12 @@ export function TreeView({
 }
 
 function RowLine({ row, onOpen }: { row: Row; onOpen: () => void }) {
-  const openable = row.kind === "directory" && row.childCount > 0;
+  // Every directory opens, including the ones with nothing in them. Gating on
+  // `childCount > 0` would make the two states worth distinguishing — empty,
+  // and unreadable — the two the user cannot reach: an unreadable directory has
+  // no children precisely because it could not be read, and refusing to open it
+  // leaves the reason unsaid.
+  const openable = row.kind === "directory";
 
   const content = (
     <>
@@ -230,7 +235,7 @@ function RowLine({ row, onOpen }: { row: Row; onOpen: () => void }) {
         {row.kind === "directory" ? "/" : ""}
       </span>
       <Flags row={row} />
-      {openable && (
+      {row.childCount > 0 && (
         <span className="text-muted-foreground shrink-0 text-xs">
           {formatCount(row.childCount)}
         </span>
