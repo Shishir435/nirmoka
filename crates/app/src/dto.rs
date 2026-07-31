@@ -192,6 +192,46 @@ impl From<&RegistryEntry> for Backend {
     }
 }
 
+/// Which backend the user picked, and which one will actually run a scan.
+///
+/// Two fields rather than one because they are genuinely different facts, and
+/// the gap between them is the thing the picker has to explain. Choosing Mole on
+/// macOS is honoured everywhere Mole can do the job — and ncdu still scans,
+/// because Mole cannot. A UI showing only `chosen` would claim the scan came
+/// from a backend that never ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct BackendSelection {
+    /// The backend id the user picked, or `null` for the platform default.
+    ///
+    /// `null` is a real setting rather than an absent one: it keeps following
+    /// the default when a later release changes it, which a value written on
+    /// first run would not.
+    pub chosen: Option<String>,
+
+    /// Backend ids in this platform's default order, best first. Includes
+    /// backends that are not installed and ones with no adapter yet, so the UI
+    /// can show where a choice sits without guessing the ordering.
+    pub default_order: Vec<String>,
+
+    /// The backend a scan will run on, or `null` if nothing installed can scan.
+    pub scanner: Option<String>,
+
+    /// Set when `scanner` is not the backend that was chosen. Naming who was
+    /// asked for is what stops a fallback from reading as the setting being
+    /// ignored.
+    pub scanner_instead_of: Option<String>,
+
+    /// Whether a change outlives the process. False on a machine with no
+    /// configuration directory, where the choice is honoured for the session
+    /// and then forgotten — which the UI says rather than letting it surprise.
+    pub persistent: bool,
+}
+
 /// What the active backend can do, so the UI can hide controls it cannot honour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

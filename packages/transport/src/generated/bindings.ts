@@ -22,6 +22,47 @@ usable: boolean,
 capabilities: Capabilities, };
 
 /**
+ * Which backend the user picked, and which one will actually run a scan.
+ *
+ * Two fields rather than one because they are genuinely different facts, and
+ * the gap between them is the thing the picker has to explain. Choosing Mole on
+ * macOS is honoured everywhere Mole can do the job — and ncdu still scans,
+ * because Mole cannot. A UI showing only `chosen` would claim the scan came
+ * from a backend that never ran.
+ */
+export type BackendSelection = { 
+/**
+ * The backend id the user picked, or `null` for the platform default.
+ *
+ * `null` is a real setting rather than an absent one: it keeps following
+ * the default when a later release changes it, which a value written on
+ * first run would not.
+ */
+chosen: string | null, 
+/**
+ * Backend ids in this platform's default order, best first. Includes
+ * backends that are not installed and ones with no adapter yet, so the UI
+ * can show where a choice sits without guessing the ordering.
+ */
+defaultOrder: Array<string>, 
+/**
+ * The backend a scan will run on, or `null` if nothing installed can scan.
+ */
+scanner: string | null, 
+/**
+ * Set when `scanner` is not the backend that was chosen. Naming who was
+ * asked for is what stops a fallback from reading as the setting being
+ * ignored.
+ */
+scannerInsteadOf: string | null, 
+/**
+ * Whether a change outlives the process. False on a machine with no
+ * configuration directory, where the choice is honoured for the session
+ * and then forgotten — which the UI says rather than letting it surprise.
+ */
+persistent: boolean, };
+
+/**
  * What the active backend can do, so the UI can hide controls it cannot honour.
  */
 export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };

@@ -25,8 +25,8 @@ nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
+# Promoted from dev-dependencies by the settings file: the backend choice is
+# stored as JSON, so reading it is production code rather than test scaffolding.
+serde_json = { workspace = true }
 tauri = { workspace = true }
 ts-rs = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }

@@ -130,8 +130,8 @@ impl<R: Reporter> WireSink for ProgressSink<'_, R> {
 pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
     let state = app.state::<AppState>();
 
-    if state.scan_adapter().is_none() {
-        return Err("no usable backend is installed".into());
+    if state.scanner().is_none() {
+        return Err("no usable backend can scan".into());
     }
 
     // What arrives here is text a human typed, not a path a program passed, so
@@ -232,10 +232,17 @@ fn walk(
     root: &Path,
     cancel: &CancelToken,
 ) -> Result<ScanResult, dto::ScanFailure> {
-    let adapter = state.scan_adapter().ok_or_else(|| dto::ScanFailure {
-        message: "no usable backend is installed".into(),
-        cancelled: false,
-    })?;
+    // Resolved here rather than passed in from `start`, so the backend that runs
+    // is the one selected when the walk begins. It is also the one named in the
+    // summary — `backendId` has to report what actually scanned, which is not
+    // always what the user picked.
+    let adapter = state
+        .scanner()
+        .ok_or_else(|| dto::ScanFailure {
+            message: "no usable backend can scan".into(),
+            cancelled: false,
+        })?
+        .adapter;
 
     let mut sink = ProgressSink::new(app);
     let summary = adapter

@@ -14,6 +14,7 @@ pub mod commands;
 pub mod dto;
 pub mod path;
 pub mod scan;
+pub mod settings;
 pub mod state;
 
 use state::AppState;
@@ -26,6 +27,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_backends,
             commands::capabilities,
+            commands::backend_selection,
+            commands::choose_backend,
             commands::start_scan,
             commands::cancel_scan,
             commands::scan_summary,

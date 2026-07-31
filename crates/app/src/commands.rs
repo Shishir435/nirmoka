@@ -36,11 +36,54 @@ pub fn backends(state: &AppState) -> Vec<dto::Backend> {
     state.detect_all().iter().map(dto::Backend::from).collect()
 }
 
+/// What the backend running a scan can do.
+///
+/// Scoped to the scanner rather than to the chosen backend, because the controls
+/// this gates sit on the browser: they act on the tree a scan produced, so the
+/// backend that produced it is the one whose abilities apply. Deletion in step
+/// 10 asks a different question and gets its own resolution.
 pub fn capabilities_of(state: &AppState) -> Result<dto::Capabilities, String> {
     state
-        .scan_adapter()
-        .map(|adapter| dto::Capabilities::from(adapter.capabilities()))
+        .scanner()
+        .map(|choice| dto::Capabilities::from(choice.adapter.capabilities()))
         .ok_or_else(|| "no usable backend is installed".to_string())
+}
+
+/// The backend choice, and what it actually resolves to.
+pub fn selection_of(state: &AppState) -> dto::BackendSelection {
+    let preference = state.preference();
+    let scanner = state.scanner();
+
+    dto::BackendSelection {
+        chosen: preference.chosen,
+        default_order: nirmoka_adapter::default_order()
+            .iter()
+            .map(|id| id.to_string())
+            .collect(),
+        scanner: scanner
+            .as_ref()
+            .map(|choice| choice.adapter.id().to_string()),
+        scanner_instead_of: scanner.and_then(|choice| choice.instead_of),
+        persistent: state.is_persistent(),
+    }
+}
+
+/// Pick a backend, or pass `None` to go back to the platform default.
+///
+/// Returns the selection as it now stands rather than the id that was passed in.
+/// The caller needs to know what the choice *resolved* to — picking Mole on
+/// macOS is accepted and still leaves ncdu scanning — and a round trip that
+/// echoed the input would leave the UI to work that out for itself.
+///
+/// An id naming no registered backend is not rejected. It resolves to nothing,
+/// falls back, and says so; refusing it would mean the only way to recover from
+/// a hand-edited settings file is to hand-edit it again.
+pub fn choose_backend_in(
+    state: &AppState,
+    id: Option<String>,
+) -> Result<dto::BackendSelection, String> {
+    state.choose(nirmoka_adapter::Preference { chosen: id })?;
+    Ok(selection_of(state))
 }
 
 pub fn summary_of(state: &AppState) -> Option<dto::ScanSummary> {
@@ -114,6 +157,19 @@ pub fn list_backends(state: State<'_, AppState>) -> Vec<dto::Backend> {
 #[tauri::command]
 pub fn capabilities(state: State<'_, AppState>) -> Result<dto::Capabilities, String> {
     capabilities_of(&state)
+}
+
+#[tauri::command]
+pub fn backend_selection(state: State<'_, AppState>) -> dto::BackendSelection {
+    selection_of(&state)
+}
+
+#[tauri::command]
+pub fn choose_backend(
+    state: State<'_, AppState>,
+    id: Option<String>,
+) -> Result<dto::BackendSelection, String> {
+    choose_backend_in(&state, id)
 }
 
 /// Returns the canonical root actually being scanned, which differs from what

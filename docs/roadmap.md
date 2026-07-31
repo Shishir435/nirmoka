@@ -160,6 +160,32 @@ for Tauri types inside `core` arrives before the boundary is established.
       mechanism for "this backend cannot do that", and it turned out to cover the headline
       ability too
 
+## Step 9.5 — Backend selection ✅
+
+Unplanned, and forced by step 9. Once two backends stopped overlapping, "the backend" had no
+single referent and registration order — a constant compiled into `main` — was deciding
+something that belongs to the user and to the platform.
+
+- [x] `Registry::resolve(ability, preference)`: the user's choice, then the platform default,
+      then registration order, each filtered by whether the adapter can do the thing
+- [x] Platform defaults — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`; else
+      `ncdu, gdu, mole`. Matched on `std::env::consts::OS`, so every platform's default is
+      testable from every platform rather than only from the job that runs there
+- [x] A preference is not an override: choosing Mole on macOS is honoured for cleanup and
+      falls back to ncdu for scanning, and `Choice::instead_of` names the displaced backend
+      so the fallback is stated rather than looking like the setting was ignored
+- [x] The reason a preference went unmet is never guessed. "Cannot scan" and "is not
+      installed" have different fixes; the window reads the reason from detection it already
+      has, and the CLI states the fact and points at `nrmk backends`
+- [x] Stored in `settings.json` via `directories`. A corrupt or missing file degrades to the
+      default rather than refusing to start
+- [x] Picker in the window, shown only with two or more usable backends. `nrmk --backend <id>`
+      for the harness, which deliberately does not read the GUI's settings file
+- [x] CI asserts against the binaries: preferring a backend that cannot scan must still
+      report `SCANS WITH ncdu`, name the unmet preference, and complete a real scan — on
+      macOS where Mole is installed and cannot scan, and on Linux where it is absent
+- [x] [ADR 0013](adr/0013-the-backend-is-a-choice.md)
+
 ## Step 10 — Deletion
 
 Nothing here ships without tests.

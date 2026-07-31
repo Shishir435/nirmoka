@@ -20,6 +20,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import type {
   Backend,
+  BackendSelection,
   Capabilities,
   Row,
   RowPage,
@@ -51,8 +52,27 @@ export interface Transport {
   /** Which disk backends are installed, and which of them are usable. */
   listBackends(): Promise<Backend[]>;
 
-  /** Capabilities of the active backend, for hiding unsupported controls. */
+  /** Capabilities of the backend that runs scans, for hiding controls. */
   capabilities(): Promise<Capabilities>;
+
+  /**
+   * Which backend the user picked, and which one will actually scan.
+   *
+   * Both, because they differ: Mole is the macOS default and cannot scan, so
+   * choosing it leaves ncdu scanning. `scannerInsteadOf` names who was asked
+   * for, which is what keeps a fallback from reading as a setting being
+   * ignored.
+   */
+  backendSelection(): Promise<BackendSelection>;
+
+  /**
+   * Pick a backend, or pass `null` to go back to the platform default.
+   *
+   * Resolves with the selection as it now stands rather than echoing the id:
+   * a choice is honoured where it can be, and the caller needs to know what it
+   * resolved to rather than what was requested.
+   */
+  chooseBackend(id: string | null): Promise<BackendSelection>;
 
   /**
    * Begin a scan. Resolves with the canonical root actually being scanned,
@@ -129,6 +149,8 @@ export function tauriTransport(): Transport {
   return {
     listBackends: () => invoke<Backend[]>("list_backends"),
     capabilities: () => invoke<Capabilities>("capabilities"),
+    backendSelection: () => invoke<BackendSelection>("backend_selection"),
+    chooseBackend: (id) => invoke<BackendSelection>("choose_backend", { id }),
     startScan: (rootPath) => invoke<string>("start_scan", { rootPath }),
     cancelScan: () => invoke<boolean>("cancel_scan"),
     scanSummary: () => invoke<ScanSummary | null>("scan_summary"),
@@ -240,6 +262,38 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
   let onFinished: ((summary: ScanSummary) => void) | null = null;
 
+  /**
+   * The mock reports a macOS pair, so it uses the macOS default order.
+   *
+   * Resolution mirrors `Registry::resolve`: the choice first, then this order,
+   * and at every step only among backends that can do the job. A mock that
+   * simply echoed the chosen id would render a state the real app cannot reach —
+   * "Mole is scanning" — and the UI built against it would be wrong.
+   */
+  const DEFAULT_ORDER = ["mole", "ncdu", "gdu"];
+  let chosen: string | null = null;
+
+  const selection = async (): Promise<BackendSelection> => {
+    const scanners = (await base.listBackends())
+      .filter((backend) => backend.usable && backend.capabilities.scan)
+      .map((backend) => backend.id);
+
+    const scanner =
+      (chosen !== null && scanners.includes(chosen) ? chosen : null) ??
+      DEFAULT_ORDER.find((id) => scanners.includes(id)) ??
+      scanners[0] ??
+      null;
+
+    return {
+      chosen,
+      defaultOrder: DEFAULT_ORDER,
+      scanner,
+      // Only when a choice was made and something else ran.
+      scannerInsteadOf: chosen !== null && chosen !== scanner ? chosen : null,
+      persistent: true,
+    };
+  };
+
   const base: Transport = {
     async listBackends() {
       return [
@@ -293,6 +347,13 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
         uninstallApps: false,
         systemStatus: false,
       };
+    },
+
+    backendSelection: selection,
+
+    async chooseBackend(id) {
+      chosen = id;
+      return selection();
     },
 
     async startScan(rootPath) {

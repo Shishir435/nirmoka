@@ -19,6 +19,25 @@ An adapter is responsible for:
 An adapter is **not** responsible for rendering, sorting, selection state, or confirmation
 dialogs. Those live in `core/` and the UI, once, for all backends.
 
+## Which adapter runs
+
+Not registration order. `Registry::resolve(ability, preference)` picks, in three passes,
+each filtered by whether the adapter is usable _and_ declares the ability being asked for:
+
+1. **The user's choice**, honoured wherever the backend can do the job.
+2. **The platform default** — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`; everywhere
+   else `ncdu, gdu, mole`.
+3. **Registration order**, so a backend no default names is still reachable.
+
+A preference is a preference, not an override. Choosing Mole on macOS is honoured for
+cleanup and uninstall and falls back to ncdu for scanning, because Mole cannot scan — and
+the returned `Choice::instead_of` names the backend that was displaced so the fallback can
+be stated rather than looking like the setting was ignored.
+
+An id naming no registered backend is skipped, not an error: `gdu` sits in every default
+order and has no adapter until roadmap step 11. See
+[ADR 0013](adr/0013-the-backend-is-a-choice.md).
+
 ## The trait
 
 Detection, capabilities, and scanning are implemented. `delete` arrives in roadmap step 10,

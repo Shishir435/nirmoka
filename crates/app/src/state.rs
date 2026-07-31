@@ -8,21 +8,25 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use nirmoka_adapter::registry::RegistryEntry;
-use nirmoka_adapter::{Adapter, CancelToken, Registry};
+use nirmoka_adapter::{Ability, CancelToken, Choice, Preference, Registry};
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 use nirmoka_core::Tree;
 
-use crate::dto;
+use crate::{dto, settings};
 
 /// The registry every entry point builds.
 ///
 /// `nirmoka-cli` and `tests/contract` build the same one. They must agree — a
 /// backend that works in the CLI and is missing in the app would be found by
 /// nobody until a user reported it.
+///
+/// Order here is *registration* order, which is the last tiebreak and not the
+/// preference. What picks a backend is `Registry::resolve`: the user's choice,
+/// then the platform default. Adding an adapter at the top of this list changes
+/// nothing about which one runs.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
-    // ncdu first: preference order, and the only one of the two that scans.
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry
@@ -71,13 +75,32 @@ impl ScanState {
 pub struct AppState {
     registry: Registry,
     scan: Mutex<ScanState>,
+    /// The user's backend choice, loaded once at startup and written back on
+    /// every change. Held here rather than re-read per call because a settings
+    /// file read on the path of every command would be a file system round trip
+    /// to answer a question whose answer this process already owns.
+    preference: Mutex<Preference>,
+    /// Whether the choice is being persisted. False when this machine has no
+    /// configuration directory, which the UI says out loud rather than letting
+    /// the setting silently evaporate on quit.
+    persistent: bool,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        Self::with_preference(settings::load(), settings::settings_path().is_some())
+    }
+
+    /// A state with a dictated preference and no persistence.
+    ///
+    /// Tests use this so they assert against a preference they set rather than
+    /// against whatever the developer running them happens to have chosen.
+    pub fn with_preference(preference: Preference, persistent: bool) -> Self {
         Self {
             registry: registry(),
             scan: Mutex::new(ScanState::default()),
+            preference: Mutex::new(preference),
+            persistent,
         }
     }
 
@@ -96,20 +119,56 @@ impl AppState {
         self.registry.detect_all()
     }
 
-    /// The backend a scan would actually use: the first one that is installed
-    /// at a version this build understands **and** can scan.
+    /// The backend the user picked, or `None` for the platform default.
+    pub fn preference(&self) -> Preference {
+        self.preference
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Whether a change to the preference outlives this process.
+    pub fn is_persistent(&self) -> bool {
+        self.persistent
+    }
+
+    /// Record a backend choice, and write it down.
     ///
-    /// Both halves are load-bearing since Mole joined the registry. Mole is
-    /// usable on macOS and cannot scan, so "the first usable backend" and "the
-    /// backend that will run this scan" stopped being the same adapter — and
-    /// picking the wrong one would put a scan button in front of a backend that
-    /// answers `Unsupported`.
+    /// The in-memory choice is updated even when the write fails, so a machine
+    /// with no writable configuration directory still honours the setting for
+    /// the session. The error is returned rather than swallowed — a preference
+    /// that appears to take and is gone next launch is worse than one that
+    /// says it could not be saved.
+    pub fn choose(&self, preference: Preference) -> Result<(), String> {
+        *self
+            .preference
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = preference.clone();
+
+        if self.persistent {
+            settings::save(&preference)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The backend that will run `ability`, and who was asked for instead.
     ///
-    /// Returns `None` rather than falling back to an untested version. See
-    /// `docs/adapters.md` — an untested version is `UnsupportedVersion`, not an
-    /// optimistic `Found`.
-    pub fn scan_adapter(&self) -> Option<&dyn Adapter> {
-        self.registry.first_scanner()
+    /// Never a backend that would answer `Unsupported`, and never one at an
+    /// untested version — see `docs/adapters.md`. A `None` here is the UI's cue
+    /// to disable a control rather than to offer one that fails on click.
+    pub fn resolve(&self, ability: Ability) -> Option<Choice<'_>> {
+        self.registry.resolve(ability, &self.preference())
+    }
+
+    /// The backend a scan would actually run on.
+    ///
+    /// A separate question from "did the user pick a backend" since Mole joined
+    /// the registry: Mole is usable on macOS, is the macOS default, and cannot
+    /// scan. Picking it for a scan would put the button in front of an adapter
+    /// that answers `Unsupported`.
+    pub fn scanner(&self) -> Option<Choice<'_>> {
+        self.resolve(Ability::Scan)
     }
 }
 
@@ -123,6 +182,10 @@ impl Default for AppState {
 mod tests {
     use super::*;
 
+    fn state() -> AppState {
+        AppState::with_preference(Preference::platform_default(), false)
+    }
+
     #[test]
     fn the_registry_holds_the_backends_the_cli_reports() {
         let ids: Vec<_> = registry().iter().map(|adapter| adapter.id()).collect();
@@ -131,10 +194,55 @@ mod tests {
 
     #[test]
     fn a_fresh_state_has_no_scan_and_no_result() {
-        let state = AppState::new();
+        let state = state();
         let scan = state.scan();
 
         assert!(scan.active.is_none());
         assert!(scan.result.is_none());
+    }
+
+    #[test]
+    fn a_state_starts_on_the_platform_default() {
+        assert!(state().preference().chosen.is_none());
+    }
+
+    /// A choice with nowhere to be written still applies to this session.
+    ///
+    /// The alternative — refusing the change because it cannot be persisted —
+    /// would make the picker dead on any machine without a config directory.
+    #[test]
+    fn a_choice_takes_effect_even_when_it_cannot_be_stored() {
+        let state = state();
+        assert!(!state.is_persistent());
+
+        state
+            .choose(Preference::of("mole"))
+            .expect("no write, no error");
+        assert_eq!(state.preference().chosen.as_deref(), Some("mole"));
+
+        state
+            .choose(Preference::platform_default())
+            .expect("cleared");
+        assert!(state.preference().chosen.is_none());
+    }
+
+    /// Whatever is installed on the machine running this, a resolved scanner is
+    /// always one that says it can scan. That is the promise the button rests on.
+    #[test]
+    fn a_resolved_scanner_can_always_actually_scan() {
+        let state = AppState::with_preference(Preference::of("mole"), false);
+
+        if let Some(choice) = state.scanner() {
+            assert!(
+                choice.adapter.capabilities().scan,
+                "{} was handed a scan it cannot do",
+                choice.adapter.id()
+            );
+            assert_ne!(
+                choice.adapter.id(),
+                "mole",
+                "mole must never be resolved for a scan, even when chosen"
+            );
+        }
     }
 }
