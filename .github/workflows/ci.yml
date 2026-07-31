@@ -14,16 +14,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Cross-platform from step 0. Only `check` and `test` — building the GUI on
-  # three platforms comes later. The point right now is that a compile break on
-  # Linux or Windows is caught for free while developing on a Mac.
+  # One job per platform, compiling the workspace exactly once.
+  #
+  # The ncdu detection assertions live here rather than in a separate job on
+  # purpose: a standalone job would need its own runner and its own cache, so
+  # ubuntu and macos would each build the whole workspace twice for no gain.
   rust:
     name: rust / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          # Ubuntu 24.04 still ships the ncdu 1.x series, which emits a
+          # different JSON export shape. That makes this runner a free
+          # real-world test that the version gate rejects it.
+          - os: ubuntu-latest
+            ncdu_install: sudo apt-get update && sudo apt-get install -y ncdu
+            ncdu_expect: unsupported
+          # Homebrew ships ncdu 2.x, so this is the usable-backend case.
+          - os: macos-latest
+            ncdu_install: brew install ncdu
+            ncdu_expect: ok
+          # ncdu has no Windows build — it is a curses application. gdu is the
+          # planned Windows backend (roadmap step 11), so this platform only
+          # proves the workspace compiles and its tests pass.
+          - os: windows-latest
+            ncdu_expect: skip
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -43,24 +60,56 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-  # The headless harness must work against a real backend. This is also the
-  # proof that the whole stack runs with no display server.
-  nrmk:
-    name: nrmk against real ncdu
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2.9.1
-
       - name: Install ncdu
-        run: sudo apt-get update && sudo apt-get install -y ncdu
+        if: matrix.ncdu_expect != 'skip'
+        run: ${{ matrix.ncdu_install }}
 
+      - name: Report installed ncdu
+        if: matrix.ncdu_expect != 'skip'
+        run: ncdu --version
+
+      # `backends` exits non-zero when nothing usable is found, so the exit
+      # code is asserted explicitly per platform rather than assumed. This is
+      # also the proof that the whole stack runs with no display server.
       - name: Detect backends
-        run: cargo run -p nirmoka-cli -- backends
+        if: matrix.ncdu_expect != 'skip'
+        shell: bash
+        run: |
+          set +e
+          output=$(cargo run -q -p nirmoka-cli -- backends)
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+          echo "exit status: $status"
+
+          case "${{ matrix.ncdu_expect }}" in
+            ok)
+              if [ "$status" -ne 0 ]; then
+                echo "::error::expected a usable backend, got exit $status"
+                exit 1
+              fi
+              if ! printf '%s' "$output" | grep -qE '^ncdu +ok +2\.'; then
+                echo "::error::expected ncdu reported as ok at 2.x"
+                exit 1
+              fi
+              ;;
+            unsupported)
+              if [ "$status" -eq 0 ]; then
+                echo "::error::ncdu 1.x must not be accepted — the version gate failed"
+                exit 1
+              fi
+              if ! printf '%s' "$output" | grep -q 'unsupported'; then
+                echo "::error::expected ncdu reported as unsupported"
+                exit 1
+              fi
+              ;;
+          esac
 
       - name: Detect backends as JSON
-        run: cargo run -p nirmoka-cli -- backends --json
+        if: matrix.ncdu_expect != 'skip'
+        shell: bash
+        run: cargo run -q -p nirmoka-cli -- backends --json || true
 
   web:
     name: web
@@ -78,44 +127,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
 
-  # Architectural invariants, enforced by grep rather than by good intentions.
-  # Each of these encodes a rule from docs/architecture.md that is otherwise
-  # only a paragraph someone has to remember.
+  # Architectural invariants. The checks live in scripts/check-invariants.sh so
+  # that this job and the pre-push hook run the exact same code and cannot drift.
   invariants:
     name: architecture invariants
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: core must not depend on a GUI framework
-        run: |
-          if grep -qE '^\s*tauri' crates/core/Cargo.toml crates/adapter/Cargo.toml; then
-            echo "::error::core/adapter must not depend on tauri. See docs/adr/0005."
-            exit 1
-          fi
-
-      - name: core must not contain platform conditionals
-        run: |
-          # Matches the attribute form only, and drops comment lines — the rule
-          # is documented inside core/src/lib.rs, which must not trip its own guard.
-          if grep -rn 'cfg(target_os' crates/core/src | grep -vE ':[[:space:]]*(//|/\*)'; then
-            echo "::error::No #[cfg(target_os)] in core. Platform specifics belong in adapters."
-            exit 1
-          fi
-
-      - name: no absolute developer paths
-        run: |
-          if grep -rnE '"/(Users|home)/' crates/ --include='*.rs'; then
-            echo "::error::Hardcoded developer path. Use the directories crate."
-            exit 1
-          fi
-
-      - name: transport is the only module that knows about tauri
-        run: |
-          hits=$(grep -rln '@tauri-apps' apps packages --include='*.ts' --include='*.tsx' \
-            | grep -v '^packages/transport/' || true)
-          if [ -n "$hits" ]; then
-            echo "::error::@tauri-apps imported outside packages/transport:"
-            echo "$hits"
-            exit 1
-          fi
+      - run: ./scripts/check-invariants.sh

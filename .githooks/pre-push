@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# Pre-push hook: run what CI runs, before waiting on CI.
+#
+# Enable once per clone (or `pnpm hooks:install`):
+#     git config core.hooksPath .githooks
+#
+# Skip for a single push when you know what you're doing:
+#     NIRMOKA_SKIP_HOOKS=1 git push
+#
+# Pre-push rather than pre-commit on purpose: clippy and the test suite are too
+# slow to run on every commit, and a local commit that fails checks harms
+# nobody. Pushing is the point where it starts costing other people time.
+
+set -uo pipefail
+
+if [[ "${NIRMOKA_SKIP_HOOKS:-}" == "1" ]]; then
+  printf '\033[33mSkipping pre-push checks (NIRMOKA_SKIP_HOOKS=1).\033[0m\n'
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+failed=0
+started=$SECONDS
+
+# Run a check, print its outcome, remember failures. Output is never piped to
+# head or tail — the pipeline would report the pager's exit code, so a red run
+# would read green.
+step() {
+  local label="$1"
+  shift
+
+  printf '\n\033[1m▸ %s\033[0m\n' "$label"
+
+  if "$@"; then
+    printf '\033[32m✓ %s\033[0m\n' "$label"
+  else
+    printf '\033[31m✗ %s\033[0m\n' "$label"
+    failed=1
+  fi
+}
+
+# --- Rust -------------------------------------------------------------------
+# If cargo is absent the Rust checks are skipped with a loud warning rather
+# than blocking the push. CI remains the gate; this hook is a fast local
+# preview of it, and a missing toolchain should not make the repo unpushable.
+if command -v cargo > /dev/null 2>&1; then
+  step "cargo fmt" cargo fmt --all -- --check
+  step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
+  step "cargo test" cargo test --workspace
+else
+  printf '\n\033[33m⚠ cargo not found — Rust checks skipped. CI will still run them.\033[0m\n'
+  printf '  Install: curl --proto '"'"'=https'"'"' --tlsv1.2 -sSf https://sh.rustup.rs | sh\n'
+fi
+
+# --- Web --------------------------------------------------------------------
+if command -v pnpm > /dev/null 2>&1; then
+  step "prettier" pnpm format:check
+  step "typecheck" pnpm typecheck
+else
+  printf '\n\033[33m⚠ pnpm not found — web checks skipped.\033[0m\n'
+fi
+
+# --- Architecture -----------------------------------------------------------
+# Same script CI runs, so the hook and CI cannot disagree.
+step "architecture invariants" ./scripts/check-invariants.sh
+
+# --- Result -----------------------------------------------------------------
+elapsed=$((SECONDS - started))
+
+if ((failed)); then
+  printf '\n\033[31mPre-push checks failed after %ds. Push aborted.\033[0m\n' "$elapsed"
+  printf 'Fix the above, or bypass with: NIRMOKA_SKIP_HOOKS=1 git push\n'
+  exit 1
+fi
+
+printf '\n\033[32mAll pre-push checks passed in %ds.\033[0m\n' "$elapsed"

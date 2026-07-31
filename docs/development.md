@@ -26,6 +26,7 @@ git clone git@github.com:Shishir435/nirmoka.git
 cd nirmoka
 
 pnpm install
+pnpm hooks:install          # enable the pre-push hook (once per clone)
 cargo check --workspace --all-targets
 ```
 
@@ -52,19 +53,34 @@ pnpm format
 
 From step 7, `pnpm tauri dev` launches the desktop app and starts Vite automatically.
 
-## Before committing
+## Before pushing
+
+The pre-push hook runs this for you once `pnpm hooks:install` has been run:
 
 ```bash
-cargo fmt --all
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-pnpm format
+pnpm format:check
 pnpm typecheck
-pnpm build
+pnpm invariants
 ```
 
-CI runs all of the above plus the architecture invariant greps, on macOS, Linux, and
-Windows. Getting these green locally is the whole pre-flight.
+Bypass for one push when you genuinely need to:
+
+```bash
+NIRMOKA_SKIP_HOOKS=1 git push
+```
+
+Pre-push rather than pre-commit on purpose — clippy and the test suite are too slow to run
+on every commit, and a local commit that fails checks harms nobody. Pushing is where it
+starts costing CI minutes and other people's attention.
+
+If `cargo` is missing the hook warns loudly and skips the Rust steps rather than making the
+repo unpushable. CI is still the gate.
+
+The invariant checks live in `scripts/check-invariants.sh`, called by both the hook and CI,
+so the two cannot disagree about what the rules are.
 
 Never pipe a test or check run into `head` or `tail` — the pipeline reports the pager's exit
 code, so a failing run reads as green. Let it print in full, or capture to a file and check
