@@ -243,8 +243,13 @@ fn candidates(base: &Path, pathext: Option<&OsStr>) -> Vec<PathBuf> {
             if extension.is_empty() {
                 continue;
             }
+            // PATHEXT is conventionally uppercase (".COM;.EXE;.BAT"), and the
+            // filesystem is case-insensitive, so appending it verbatim opens
+            // the right file — and then reports `C:\…\gdu.EXE` to a user whose
+            // disk says `gdu.exe`. Detection's whole job is naming the binary
+            // that will run; shouting a different spelling of it undoes that.
             let mut name = base.as_os_str().to_os_string();
-            name.push(extension);
+            name.push(extension.to_lowercase());
             candidates.push(PathBuf::from(name));
         }
     }
@@ -477,6 +482,8 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn applies_pathext_on_windows() {
+        // PATHEXT is passed in uppercase, as Windows sets it, and the answer
+        // must still match the file's own spelling rather than the variable's.
         let dir = TempDir::new("path-e");
         let expected = write_executable(&dir.0, "tool.cmd");
 
