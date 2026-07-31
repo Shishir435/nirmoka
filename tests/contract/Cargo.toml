@@ -1,0 +1,20 @@
+[package]
+name = "nirmoka-contract-tests"
+description = "One suite every adapter must pass. Fixture-driven, no live backend required."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# There is no library and no binary here — only tests. An empty lib target keeps
+# cargo from looking for src/main.rs.
+[lib]
+path = "src/lib.rs"
+
+# INVARIANT: no `tauri`. This suite runs headless on every platform in CI.
+[dependencies]
+nirmoka-adapter = { workspace = true }
+nirmoka-adapter-ncdu = { workspace = true }
+nirmoka-core = { workspace = true }

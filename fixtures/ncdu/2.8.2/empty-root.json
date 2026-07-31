@@ -1,0 +1,6 @@
+[
+  1,
+  2,
+  { "progname": "ncdu", "progver": "2.8.2", "timestamp": 1785498272 },
+  [{ "name": "/fixtures/empty-root", "asize": 64, "dev": 16777230 }]
+]
