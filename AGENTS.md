@@ -147,7 +147,7 @@ crates/adapter/       Adapter trait, Capabilities, Detection, Registry
 crates/adapter-ncdu/  baseline backend (cross-platform)
 crates/adapter-gdu/   cross-platform scanner; primary Windows backend
 crates/adapter-mole/  macOS-only cleanup backend. Does not scan — see ADR 0012
-crates/adapter-rip/   recoverable selected-path deletion and exact undo
+crates/adapter-rip/   exact undo for existing receipts; new deletion refused
 crates/cli/           bin `nrmk` — headless harness, not shipped
 crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
 

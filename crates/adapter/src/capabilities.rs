@@ -22,7 +22,8 @@ pub struct Capabilities {
     /// Recoverable mode for caller-selected path removal.
     pub trash: bool,
 
-    /// Restore a recoverable selected-path deletion non-interactively.
+    /// Restore a durable receipt non-interactively. This may remain true when
+    /// new recoverable deletion is withdrawn, so older receipts stay usable.
     pub undo: bool,
 
     /// Produce the exact list of what would be removed, without removing it.

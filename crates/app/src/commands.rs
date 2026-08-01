@@ -202,7 +202,7 @@ pub fn prepare_delete_in(
     let choice = state.resolve(Ability::Trash).ok_or_else(|| {
         dto::DeleteFailure::new(
             dto::DeleteFailureCode::NoBackend,
-            "no installed backend supports recoverable selected-path deletion; install rip 0.13.x",
+            "no backend safely supports execution-bound selected-path deletion",
         )
     })?;
     let plan = choice
@@ -264,7 +264,12 @@ pub fn confirm_delete_in(
     let receipt = adapter
         .delete(&pending.plan, &CancelToken::new())
         .map_err(backend_failure)?;
-    let operation = state.deletion().record_delete(receipt);
+    let operation = state.deletion().record_delete(receipt).map_err(|error| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::Backend,
+            format!("deletion receipt could not be made durable: {error}"),
+        )
+    })?;
 
     // The scan describes a path that no longer exists. Keeping it would make a
     // second click target stale filesystem state, so require a rescan.
@@ -580,7 +585,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn deletion_requires_a_one_time_confirmation_and_can_be_undone() {
+    fn unsafe_selected_path_deletion_is_not_offered() {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
 
@@ -594,7 +599,6 @@ mod tests {
         let target = root.join("file.txt");
         let binary = base.join("rip");
         let recovery = base.join("recovery");
-        let log = base.join("operations.jsonl");
         fs::create_dir_all(&root).unwrap();
         fs::write(&target, b"important").unwrap();
         fs::write(
@@ -631,12 +635,7 @@ fi
         registry.register(Box::new(RipAdapter::with_binary_and_recovery_root(
             binary, recovery,
         )));
-        let state = AppState::with_parts(
-            Preference::platform_default(),
-            false,
-            registry,
-            Some(log.clone()),
-        );
+        let state = AppState::with_parts(Preference::platform_default(), false, registry, None);
 
         let mut tree = Tree::new(&root);
         let root_id = tree.push(None, Node::directory("scan"));
@@ -654,24 +653,9 @@ fi
             tree,
         });
 
-        let prepared = prepare_delete_in(&state, SCAN, file_id.raw()).unwrap();
-        assert!(target.exists(), "preparation must not delete");
-        assert!(prepared.requires_confirmation);
-        assert!(prepared.recoverable);
-        assert!(!prepared.dry_run);
-
-        let deleted = confirm_delete_in(&state, prepared.confirmation_token).unwrap();
-        assert!(!target.exists());
-        assert!(state.scan().result.is_none(), "the old tree is stale");
-        assert_eq!(operation_log_of(&state), vec![deleted.clone()]);
-        assert!(confirm_delete_in(&state, prepared.confirmation_token).is_err());
-
-        let undone = undo_delete_in(&state, deleted.id).unwrap();
-        assert!(undone.undone);
-        assert_eq!(fs::read(&target).unwrap(), b"important");
-        assert!(fs::read_to_string(log)
-            .unwrap()
-            .contains("\"event\":\"undone\""));
+        let error = prepare_delete_in(&state, SCAN, file_id.raw()).unwrap_err();
+        assert_eq!(error.code, dto::DeleteFailureCode::NoBackend);
+        assert!(target.exists(), "refusal must leave the target untouched");
         let _ = fs::remove_dir_all(base);
     }
 }

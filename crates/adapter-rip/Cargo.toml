@@ -1,6 +1,6 @@
 [package]
 name = "nirmoka-adapter-rip"
-description = "Recoverable selected-path deletion through rm-improved (rip)."
+description = "Exact undo for existing rm-improved (rip) receipts."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,4 +11,3 @@ publish = false
 [dependencies]
 nirmoka-adapter = { workspace = true }
 directories = { workspace = true }
-

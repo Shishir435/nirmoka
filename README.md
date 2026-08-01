@@ -66,7 +66,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and
 | [Mole](https://github.com/tw93/Mole)   | macOS                 | Rich cleanup, app uninstall, protected-path safety rules |
 | [ncdu](https://dev.yorhel.nl/ncdu)     | macOS, Linux, BSD     | Baseline scanner                                         |
 | [gdu](https://github.com/dundee/gdu)   | macOS, Linux, Windows | Fast parallel scan, ncdu-compatible export               |
-| [rip](https://github.com/nivekuil/rip) | macOS, Linux          | Recoverable selected-path deletion and exact undo        |
+| [rip](https://github.com/nivekuil/rip) | macOS, Linux          | Exact undo for existing receipts; new deletion refused   |
 
 Nirmoka does not bundle any of these. It detects what you already have installed and
 tells you how to get one if you have none.

@@ -88,9 +88,9 @@ closest to user input and the furthest from the backend's safety rules.
 
 Selected-path deletion uses a two-call boundary. `prepare_delete` keeps the validated
 adapter plan in Rust and returns only a one-time confirmation token; `confirm_delete`
-consumes that token. A raw path is never accepted by the execute command. rip validates
-again immediately before spawning, so a confirmation left open cannot bypass a symlink
-retarget or path escape.
+consumes that token. A raw path is never accepted by the execute command. No current backend
+offers this capability: rip's later pathname resolution cannot be bound to validation, so it
+fails closed and retains only exact undo for existing receipts.
 
 **5. Adapters version-pin their backend and fail closed.**
 

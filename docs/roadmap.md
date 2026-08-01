@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 11 — ship.**
+**Current step: 10 — selected-path deletion backend (reopened by ADR 0017).**
 
 ## Sequencing rules
 
@@ -198,16 +198,17 @@ Nothing here ships without tests.
 - [x] Shared deletion validator, with tests for relative paths, scan-root deletion,
       containment, symlink escape, missing targets, and system-critical locations. It is
       shared by preparation and final execution rather than copied into the rip adapter
-- [x] Path validation wired at the `adapter-rip` boundary and repeated immediately before
-      spawning, so a symlink retarget or path escape while confirmation is open is refused
+- [x] Path validation was wired at the `adapter-rip` boundary and repeated immediately before
+      spawning; ADR 0017 records why this was still insufficient and deletion was withdrawn
 - [x] Dry-run preview where the backend supports it. No selected-path backend currently
       does, so `dryRun` remains false rather than showing a guessed preview
-- [x] Explicit confirmation where it does not: prepare returns a one-time token; execute
-      accepts the token, never a caller-supplied path
-- [x] Trash where available, permanent clearly marked where not. rip 0.13.x is recoverable;
-      permanent mode is explicitly `Unsupported` and cannot silently replace Trash
-- [x] Undo affordance for trashed items through rip's exact non-interactive `--unbury`
-- [x] A readable append-only JSON Lines operation log, reloaded across launches
+- [ ] Explicit confirmation for new deletion. No current backend can execute an
+      execution-bound selected path, so the capability is unavailable
+- [ ] Trash for new selected-path deletion. rip 0.13.x was withdrawn by ADR 0017 rather than
+      exposing a pathname race
+- [x] Exact non-interactive `--unbury` remains available for existing rip receipts
+- [x] A readable append-only JSON Lines operation log, reloaded across launches; a failed
+      durable append cannot create an in-memory success
 
 ## Step 11 — Ship
 

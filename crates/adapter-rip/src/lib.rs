@@ -1,19 +1,16 @@
-//! Recoverable selected-path deletion through `rip` (rm-improved).
+//! Exact undo for existing `rip` (rm-improved) receipts.
 
 #![forbid(unsafe_code)]
 
-use std::fs;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use directories::ProjectDirs;
 use nirmoka_adapter::process::{find_in_path, RunningProcess};
 use nirmoka_adapter::{
-    validate_delete_target, Adapter, AdapterError, CancelToken, Capabilities, DeleteMode,
-    DeletePlan, DeleteReceipt, Detection, ScanOptions, ScanSummary, WireSink,
+    Adapter, AdapterError, CancelToken, Capabilities, DeleteMode, DeletePlan, DeleteReceipt,
+    Detection, ScanOptions, ScanSummary, WireSink,
 };
 
 const BINARY: &str = "rip";
@@ -23,7 +20,6 @@ const SUPPORTED: &str = ">=0.13, <0.14";
 pub struct RipAdapter {
     binary: Option<PathBuf>,
     recovery_root: Option<PathBuf>,
-    next_operation: AtomicU64,
 }
 
 impl RipAdapter {
@@ -32,7 +28,6 @@ impl RipAdapter {
             binary: None,
             recovery_root: ProjectDirs::from("app", "nirmoka", "Nirmoka")
                 .map(|dirs| dirs.data_local_dir().join("recoverable-delete")),
-            next_operation: AtomicU64::new(0),
         }
     }
 
@@ -43,7 +38,6 @@ impl RipAdapter {
         Self {
             binary: Some(binary),
             recovery_root: Some(recovery_root),
-            next_operation: AtomicU64::new(0),
         }
     }
 
@@ -63,35 +57,6 @@ impl RipAdapter {
             }
             Detection::NotInstalled => Err(AdapterError::NotInstalled { binary: BINARY }),
         }
-    }
-
-    fn operation_root(&self) -> Result<PathBuf, AdapterError> {
-        let base = self.recovery_root.as_ref().ok_or_else(|| {
-            failed(
-                "delete",
-                "this system has no application data directory for recoverable deletion",
-            )
-        })?;
-        fs::create_dir_all(base).map_err(|error| {
-            failed(
-                "delete",
-                format!("could not create {}: {error}", base.display()),
-            )
-        })?;
-
-        let epoch = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let sequence = self.next_operation.fetch_add(1, Ordering::Relaxed);
-        let root = base.join(format!("{epoch}-{}-{sequence}", std::process::id()));
-        fs::create_dir(&root).map_err(|error| {
-            failed(
-                "delete",
-                format!("could not create {}: {error}", root.display()),
-            )
-        })?;
-        Ok(root)
     }
 }
 
@@ -161,8 +126,8 @@ impl Adapter for RipAdapter {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             scan: false,
-            delete: true,
-            trash: true,
+            delete: false,
+            trash: false,
             undo: true,
             dry_run: false,
             cleanup_categories: false,
@@ -186,88 +151,25 @@ impl Adapter for RipAdapter {
 
     fn prepare_delete(
         &self,
-        scan_root: &Path,
-        target: &Path,
-        mode: DeleteMode,
+        _scan_root: &Path,
+        _target: &Path,
+        _mode: DeleteMode,
     ) -> Result<DeletePlan, AdapterError> {
-        if mode != DeleteMode::Trash {
-            return Err(AdapterError::Unsupported {
-                backend: BINARY,
-                operation: "permanent selected-path deletion",
-            });
-        }
-
-        let scan_root = scan_root.canonicalize().map_err(|error| {
-            refused(
-                scan_root,
-                format!("could not canonicalise scan root: {error}"),
-            )
-        })?;
-        let target = validate_delete_target(&scan_root, target)?;
-        Ok(DeletePlan::new(BINARY, scan_root, target, mode))
+        Err(AdapterError::Unsupported {
+            backend: BINARY,
+            operation: "selected-path deletion without execution-bound path resolution",
+        })
     }
 
     fn delete(
         &self,
-        plan: &DeletePlan,
-        cancel: &CancelToken,
+        _plan: &DeletePlan,
+        _cancel: &CancelToken,
     ) -> Result<DeleteReceipt, AdapterError> {
-        if plan.backend() != BINARY || plan.mode() != DeleteMode::Trash {
-            return Err(AdapterError::Unsupported {
-                backend: BINARY,
-                operation: "requested deletion plan",
-            });
-        }
-
-        // Validation happens again at the final boundary. A confirmation may
-        // sit open while the filesystem changes underneath it.
-        let target = validate_delete_target(plan.scan_root(), plan.target())?;
-        if target != plan.target() {
-            return Err(refused(plan.target(), "target changed after confirmation"));
-        }
-
-        let binary = self.usable_binary()?;
-        if cancel.is_cancelled() {
-            return Err(cancelled("delete"));
-        }
-
-        let recovery_root = self.operation_root()?;
-        let recovery_path = recovery_root.join(relative_storage_path(&target));
-        let mut command = Command::new(binary);
-        command.arg("--graveyard").arg(&recovery_root).arg(&target);
-
-        let outcome = run(&mut command, cancel, "delete")?;
-        let moved = !target.exists() && recovery_path.exists();
-        // Filesystem state wins over the process status. Cancellation can race
-        // with rip's final exit after the move; reporting Cancelled then would
-        // make the caller believe nothing happened and lose the undo receipt.
-        if moved {
-            return Ok(DeleteReceipt::new(
-                BINARY,
-                target,
-                recovery_root,
-                recovery_path,
-            ));
-        }
-        cleanup_empty_recovery(&recovery_root);
-        if outcome.cancelled {
-            return Err(cancelled("delete"));
-        }
-        if !outcome.success {
-            return Err(AdapterError::BackendFailed {
-                binary: BINARY,
-                status: outcome.status,
-                stderr: outcome.stderr,
-            });
-        }
-        Err(failed(
-            "delete",
-            format!(
-                "backend succeeded but {} was not recorded at {}",
-                target.display(),
-                recovery_path.display()
-            ),
-        ))
+        Err(AdapterError::Unsupported {
+            backend: BINARY,
+            operation: "selected-path deletion without execution-bound path resolution",
+        })
     }
 
     fn undo(&self, receipt: &DeleteReceipt, cancel: &CancelToken) -> Result<(), AdapterError> {
@@ -399,30 +301,6 @@ fn run(
         },
         cancelled: outcome.cancelled,
     })
-}
-
-fn relative_storage_path(path: &Path) -> PathBuf {
-    let mut relative = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => {
-                let drive = prefix
-                    .as_os_str()
-                    .to_string_lossy()
-                    .replace([':', '\\', '/'], "_");
-                relative.push(drive);
-            }
-            Component::Normal(segment) => relative.push(segment),
-            Component::RootDir | Component::CurDir | Component::ParentDir => {}
-        }
-    }
-    relative
-}
-
-fn cleanup_empty_recovery(path: &Path) {
-    // Only the unique directory created for this attempt is targeted. Ignore a
-    // failure: cleanup must never replace the backend error the user needs.
-    let _ = fs::remove_dir(path);
 }
 
 fn parse_version(output: &str) -> Option<String> {

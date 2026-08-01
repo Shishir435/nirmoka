@@ -28,7 +28,7 @@ each filtered by whether the adapter is usable _and_ declares the ability being 
 1. **The user's choice**, honoured wherever the backend can do the job.
 2. **The platform default** — macOS `mole, rip, ncdu, gdu`; Windows
    `gdu, rip, ncdu, mole`; everywhere else `ncdu, rip, gdu, mole`. Capability filtering
-   means rip is considered only for deletion/undo and never for scanning.
+   means rip is considered only for undo and never for scanning or new deletion.
 3. **Registration order**, so a backend no default names is still reachable.
 
 A preference is a preference, not an override. Choosing Mole on macOS is honoured for
@@ -41,10 +41,10 @@ An id naming no registered backend is skipped rather than treated as an error. S
 
 ## The trait
 
-Detection, capabilities, scanning, and selected-path deletion share one trait. ncdu, gdu,
-and Mole retain the default `Unsupported` destructive methods; rip implements them. See
-[ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md) and
-[ADR 0016](adr/0016-rip-is-the-selected-path-deletion-backend.md).
+Detection, capabilities, scanning, and selected-path deletion share one trait. Every current
+backend refuses new selected-path deletion. rip retains exact undo for durable receipts made
+before deletion was withdrawn. See
+[ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md).
 
 ```rust
 pub trait Adapter: Send + Sync {
@@ -244,15 +244,13 @@ particular thing.
 - Binary: `rip` from the `rm-improved` package
 - Supported versions: `>=0.13, <0.14`, tested against the real 0.13.1 release
 - Scan: none
-- Selected-path deletion: recoverable only, through a dedicated per-operation graveyard
-  below Nirmoka's application-data directory
-- Undo: exact non-interactive `rip --graveyard <operation> --unbury <receipt>`
-- Dry run and permanent deletion: none. The adapter refuses permanent mode and the shell
-  requires an explicit one-time confirmation token
-- The target is canonicalised and checked twice: during preparation and immediately before
-  it becomes a subprocess argument
+- Selected-path deletion: none. rip 0.13.1 canonicalises a path and later moves that pathname,
+  so an ancestor replacement can redirect execution after containment validation
+- Undo: exact non-interactive `rip --graveyard <operation> --unbury <receipt>` for existing
+  durable receipts
+- Dry run and permanent deletion: none
 - GPL-3.0 and separately installed. Nirmoka invokes the binary and does not bundle or copy it
-- Details and consequences: [ADR 0016](adr/0016-rip-is-the-selected-path-deletion-backend.md)
+- Details and consequences: [ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md)
 
 ## Fixtures and the contract suite
 

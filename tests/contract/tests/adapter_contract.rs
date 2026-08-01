@@ -93,6 +93,7 @@ fn capabilities_are_internally_coherent() {
         assert!(
             caps.scan
                 || caps.delete
+                || caps.undo
                 || caps.cleanup_categories
                 || caps.uninstall_apps
                 || caps.system_status,
@@ -104,9 +105,8 @@ fn capabilities_are_internally_coherent() {
         if caps.trash {
             assert!(caps.delete, "{id} offers Trash without delete");
         }
-        if caps.undo {
-            assert!(caps.trash, "{id} offers undo without recoverable deletion");
-        }
+        // Undo may remain available for durable receipts created by an older
+        // release after new deletion is withdrawn for safety.
     });
 }
 

@@ -2,13 +2,13 @@
 
 ## Prerequisites
 
-| Tool | Version | Notes                                                     |
-| ---- | ------- | --------------------------------------------------------- |
-| Node | ≥ 22    |                                                           |
-| pnpm | 10.32.1 | pinned via `packageManager` in `package.json`             |
-| Rust | stable  | via `rustup`; `rust-toolchain.toml` selects the channel   |
-| ncdu | 2.x     | the baseline scanner; `brew install ncdu`                 |
-| rip  | 0.13.x  | optional recoverable deletion; `brew install rm-improved` |
+| Tool | Version | Notes                                                           |
+| ---- | ------- | --------------------------------------------------------------- |
+| Node | ≥ 22    |                                                                 |
+| pnpm | 10.32.1 | pinned via `packageManager` in `package.json`                   |
+| Rust | stable  | via `rustup`; `rust-toolchain.toml` selects the channel         |
+| ncdu | 2.x     | the baseline scanner; `brew install ncdu`                       |
+| rip  | 0.13.x  | optional undo for existing receipts; `brew install rm-improved` |
 
 On Linux the shell links against the system webview, which is a package rather than part of
 the OS:
@@ -19,7 +19,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
 ```
 
 Optional: `mo` ([Mole](https://github.com/tw93/Mole)) for the macOS-only rich backend from
-step 9. rip is required only for selected-path deletion and undo; scanning works without it.
+step 9. rip is required only to undo existing receipts; new selected-path deletion is disabled.
 
 ## First-time setup
 
@@ -30,7 +30,7 @@ source "$HOME/.cargo/env"
 
 # The backend Nirmoka drives
 brew install ncdu
-brew install rm-improved    # optional: recoverable delete + undo
+brew install rm-improved    # optional: undo existing receipts
 
 git clone git@github.com:Shishir435/nirmoka.git
 cd nirmoka

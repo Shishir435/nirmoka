@@ -1,6 +1,6 @@
 # ADR 0016: rip is the selected-path deletion backend
 
-- Status: accepted
+- Status: superseded by [ADR 0017](0017-rip-deletion-is-not-execution-bound.md)
 - Date: 2026-08-01
 - Extends: [ADR 0014](0014-interactive-deletion-is-not-an-adapter-api.md)
 

@@ -85,7 +85,7 @@ impl DeletionState {
         self.pending.remove(&token)
     }
 
-    pub fn record_delete(&mut self, receipt: DeleteReceipt) -> Operation {
+    pub fn record_delete(&mut self, receipt: DeleteReceipt) -> io::Result<Operation> {
         self.next_operation = self.next_operation.saturating_add(1);
         let id = self.next_operation;
         let at_ms = now_ms();
@@ -97,16 +97,19 @@ impl DeletionState {
             recovery_path: receipt.recovery_path().to_path_buf(),
             at_ms,
         };
-        let log_error = self.append(&event).err().map(|error| error.to_string());
+        // A recoverable operation is not successful until its undo receipt is
+        // durable. Never convert this failure into metadata on an operation the
+        // caller could mistake for safely recorded deletion.
+        self.append(&event)?;
         let operation = Operation {
             id,
             receipt,
             deleted_at_ms: at_ms,
             undone_at_ms: None,
-            log_error,
+            log_error: None,
         };
         self.operations.push(operation.clone());
-        operation
+        Ok(operation)
     }
 
     pub fn operation(&self, id: u64) -> Option<Operation> {
@@ -236,7 +239,7 @@ mod tests {
             PathBuf::from("/recovery/1/scan/file"),
         );
         let mut state = DeletionState::new(Some(path.clone()));
-        let operation = state.record_delete(receipt);
+        let operation = state.record_delete(receipt).unwrap();
         state.mark_undone(operation.id).unwrap();
         fs::write(
             &path,
@@ -248,5 +251,27 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert!(loaded[0].undone_at_ms.is_some());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_failed_delete_journal_write_records_no_success() {
+        let directory = std::env::temp_dir().join(format!(
+            "nirmoka-operation-log-directory-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+
+        let receipt = DeleteReceipt::new(
+            "rip",
+            PathBuf::from("/scan/file"),
+            PathBuf::from("/recovery/1"),
+            PathBuf::from("/recovery/1/scan/file"),
+        );
+        let mut state = DeletionState::new(Some(directory.clone()));
+
+        assert!(state.record_delete(receipt).is_err());
+        assert!(state.operations().is_empty());
+        let _ = fs::remove_dir_all(directory);
     }
 }

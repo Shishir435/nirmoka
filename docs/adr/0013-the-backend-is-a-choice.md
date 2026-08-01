@@ -3,7 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Builds on** [ADR 0012](0012-mole-is-not-a-scanner.md).
-- **Extended by** [ADR 0016](0016-rip-is-the-selected-path-deletion-backend.md).
+- **Extended by** [ADR 0016](0016-rip-is-the-selected-path-deletion-backend.md), then
+  [ADR 0017](0017-rip-deletion-is-not-execution-bound.md).
 
 ## Context
 
