@@ -1894,6 +1894,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nirmoka-adapter-gdu"
+version = "0.0.0"
+dependencies = [
+ "nirmoka-adapter",
+]
+
+[[package]]
 name = "nirmoka-adapter-mole"
 version = "0.0.0"
 dependencies = [
@@ -1915,6 +1922,7 @@ version = "0.0.0"
 dependencies = [
  "directories",
  "nirmoka-adapter",
+ "nirmoka-adapter-gdu",
  "nirmoka-adapter-mole",
  "nirmoka-adapter-ncdu",
  "nirmoka-core",
@@ -1931,6 +1939,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "nirmoka-adapter",
+ "nirmoka-adapter-gdu",
  "nirmoka-adapter-mole",
  "nirmoka-adapter-ncdu",
  "nirmoka-core",
@@ -1943,6 +1952,7 @@ name = "nirmoka-contract-tests"
 version = "0.0.0"
 dependencies = [
  "nirmoka-adapter",
+ "nirmoka-adapter-gdu",
  "nirmoka-adapter-mole",
  "nirmoka-adapter-ncdu",
  "nirmoka-core",

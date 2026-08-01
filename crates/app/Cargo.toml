@@ -21,6 +21,7 @@ tauri-build = { workspace = true }
 [dependencies]
 nirmoka-core = { workspace = true }
 nirmoka-adapter = { workspace = true }
+nirmoka-adapter-gdu = { workspace = true }
 nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 directories = { workspace = true }

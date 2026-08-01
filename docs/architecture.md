@@ -59,17 +59,17 @@ and reporting its extra abilities through capability flags.
 
 See [ADR 0002](adr/0002-wire-format-ncdu-json.md).
 
-**3. Every ability beyond "scan and delete" is a capability flag.**
+**3. Every backend ability is a capability flag.**
 
-Backends differ enormously. ncdu browses and deletes. Mole additionally cleans by
-category, uninstalls applications, moves to Trash, and previews with a dry run. The UI
-queries capabilities and hides what the active backend cannot do, rather than offering a
-button that fails at call time.
+Backends differ enormously. ncdu scans but exposes deletion only inside its interactive
+terminal UI. Mole cleans by category and uninstalls applications, but does not remove an
+arbitrary selected path. The UI queries capabilities and hides what the active backend
+cannot do, rather than offering a button that fails at call time.
 
 ```rust
 pub struct Capabilities {
-    pub scan: bool,              // every backend
-    pub delete: bool,            // every backend
+    pub scan: bool,              // walk a directory tree
+    pub delete: bool,            // non-interactive selected-path removal
     pub trash: bool,             // recoverable delete rather than permanent
     pub dry_run: bool,           // preview the exact delete list first
     pub cleanup_categories: bool,// named cleanup targets, not just paths

@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::{Ability, CancelToken, Choice, Preference, Registry};
+use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 use nirmoka_core::Tree;
@@ -29,6 +30,7 @@ pub fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
+    registry.register(Box::new(GduAdapter::new()));
     registry
 }
 
@@ -189,7 +191,7 @@ mod tests {
     #[test]
     fn the_registry_holds_the_backends_the_cli_reports() {
         let ids: Vec<_> = registry().iter().map(|adapter| adapter.id()).collect();
-        assert_eq!(ids, vec!["ncdu", "mole"]);
+        assert_eq!(ids, vec!["ncdu", "mole", "gdu"]);
     }
 
     #[test]

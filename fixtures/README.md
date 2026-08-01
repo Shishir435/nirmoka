@@ -4,6 +4,9 @@ Recorded output from real backends, committed so the contract suite runs
 everywhere — including on CI machines where the backend cannot be installed.
 
 - `ncdu/<version>/` — produced by `scripts/record-ncdu-fixture.sh`.
+- `gdu/<version>/` — produced by `scripts/record-gdu-fixture.sh`.
+- `mole/<version>/` — recorded analyzer evidence produced by
+  `scripts/record-mole-fixture.sh`; these are not wire-format fixtures.
 
 ## Rules
 

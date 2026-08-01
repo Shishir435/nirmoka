@@ -86,25 +86,23 @@ fn capabilities_are_internally_coherent() {
         let caps = adapter.capabilities();
         let id = adapter.id();
 
-        // The floor is deletion, and only deletion.
-        //
-        // Scanning used to be asserted here too, on the assumption that every
-        // backend worth adapting walks a tree. Mole does not: `mo analyze
-        // --json` lists one directory's children, so the adapter declares
-        // `scan: false` rather than faking the rest. A backend that can neither
-        // scan nor delete is not a disk tool; one that can only delete is.
+        // An adapter must offer at least one real operation. No single flag is
+        // the floor: ncdu scans but cannot script its interactive deletion;
+        // Mole cleans categories and uninstalls apps but cannot scan or remove
+        // an arbitrary caller-selected path.
         assert!(
-            caps.scan || caps.delete,
-            "{id} can neither scan nor delete, so it does nothing"
+            caps.scan
+                || caps.delete
+                || caps.cleanup_categories
+                || caps.uninstall_apps
+                || caps.system_status,
+            "{id} declares no usable operation"
         );
 
         // Every removal mode is a way of deleting, so claiming one without the
         // other is a flag that will fail at call time.
         if caps.trash {
             assert!(caps.delete, "{id} offers Trash without delete");
-        }
-        if caps.cleanup_categories {
-            assert!(caps.delete, "{id} offers cleanup without delete");
         }
     });
 }

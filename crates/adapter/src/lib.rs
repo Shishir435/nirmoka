@@ -5,13 +5,14 @@
 //!
 //! # Current scope
 //!
-//! Detection, capabilities, and scanning. `delete` lands in step 10 with its
-//! own validation and tests; it is deliberately absent rather than stubbed, so
-//! no caller can depend on a signature that has not been designed yet.
+//! Detection, capabilities, scanning, and the shared validation required before
+//! a delete target may reach a backend. Path deletion itself is deliberately
+//! absent until a backend exposes a non-interactive command for it.
 
 #![forbid(unsafe_code)]
 
 pub mod capabilities;
+pub mod delete;
 pub mod detect;
 pub mod error;
 pub mod preference;
@@ -23,6 +24,7 @@ pub mod wire;
 use std::path::Path;
 
 pub use capabilities::Capabilities;
+pub use delete::validate_delete_target;
 pub use detect::Detection;
 pub use error::AdapterError;
 pub use preference::{default_order, default_order_for, Ability, Preference};

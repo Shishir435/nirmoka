@@ -1,0 +1,11 @@
+[package]
+name = "nirmoka-adapter-gdu"
+description = "gdu backend adapter for Nirmoka"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nirmoka-adapter = { workspace = true }

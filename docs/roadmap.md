@@ -190,6 +190,13 @@ something that belongs to the user and to the platform.
 
 Nothing here ships without tests.
 
+- [x] Verify the backend command surface before designing the destructive API. ncdu 2.8.2
+      deletes only inside its interactive browser; Mole 1.48.1 cleans curated categories
+      and uninstalls named apps, but neither exposes arbitrary selected-path deletion — see
+      [ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md)
+- [x] Shared deletion validator, with tests for relative paths, scan-root deletion,
+      containment, symlink escape, missing targets, and system-critical locations. It is
+      not yet wired to a destructive command because no current backend has one
 - [ ] Path validation at the adapter boundary: absolute, canonicalised, symlinks resolved,
       inside the scan root, not system-critical
 - [ ] Dry-run preview where the backend supports it
@@ -200,11 +207,14 @@ Nothing here ships without tests.
 
 ## Step 11 — Ship
 
-- [ ] `adapter-gdu` for the Windows path
+- [x] `adapter-gdu` for the Windows path — gdu 5.32.x, native ncdu-format export,
+      fixture-driven contract coverage, cancellation, and a real Windows CI scan. Unsupported
+      scan options fail closed rather than changing semantics — see
+      [ADR 0015](adr/0015-gdu-is-the-windows-scanner.md)
 - [ ] Signed macOS build
 - [ ] Linux AppImage or Flatpak
 - [ ] CI builds installers for all three platforms
-- [ ] Pin `rust-toolchain.toml` to an exact version
+- [x] Pin `rust-toolchain.toml` to Rust 1.97.1
 - [ ] First tagged release
 
 ---

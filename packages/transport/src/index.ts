@@ -312,7 +312,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           usable: true,
           capabilities: {
             scan: true,
-            delete: true,
+            delete: false,
             trash: false,
             dryRun: false,
             cleanupCategories: false,
@@ -332,12 +332,29 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           usable: true,
           capabilities: {
             scan: false,
-            delete: true,
+            delete: false,
             trash: false,
             dryRun: true,
             cleanupCategories: true,
             uninstallApps: true,
             systemStatus: true,
+          },
+        },
+        {
+          id: "gdu",
+          displayName: "gdu",
+          supportedVersions: ">=5.32, <5.33",
+          detection: { state: "notInstalled" },
+          error: null,
+          usable: false,
+          capabilities: {
+            scan: true,
+            delete: false,
+            trash: false,
+            dryRun: false,
+            cleanupCategories: false,
+            uninstallApps: false,
+            systemStatus: false,
           },
         },
       ];
@@ -346,7 +363,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     async capabilities() {
       return {
         scan: true,
-        delete: true,
+        delete: false,
         trash: false,
         dryRun: false,
         cleanupCategories: false,

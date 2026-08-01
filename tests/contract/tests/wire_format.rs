@@ -147,16 +147,16 @@ fn parsing_is_deterministic() {
 // belongs in a commit message, not in a silently updated number.
 // ---------------------------------------------------------------------------
 
-fn fixture_named(name: &str) -> Fixture {
+fn fixture_named(backend: &str, name: &str) -> Fixture {
     all_fixtures()
         .into_iter()
-        .find(|fixture| fixture.name == name)
-        .unwrap_or_else(|| panic!("no fixture named {name}; run scripts/record-ncdu-fixture.sh"))
+        .find(|fixture| fixture.backend == backend && fixture.name == name)
+        .unwrap_or_else(|| panic!("no fixture named {backend}/{name}"))
 }
 
 #[test]
 fn the_simple_tree_holds_every_awkward_case() {
-    let (tree, stats, tree_stats) = parse(&fixture_named("simple"));
+    let (tree, stats, tree_stats) = parse(&fixture_named("ncdu", "simple"));
     let root = tree.root().unwrap();
 
     assert_eq!(stats.directories, 5); // root, empty, unreadable, nested, deeper
@@ -202,7 +202,7 @@ fn the_simple_tree_holds_every_awkward_case() {
 
 #[test]
 fn the_excluded_tree_keeps_what_it_skipped() {
-    let (tree, _, tree_stats) = parse(&fixture_named("excluded"));
+    let (tree, _, tree_stats) = parse(&fixture_named("ncdu", "excluded"));
 
     assert!(tree_stats.excluded > 0);
 
@@ -225,7 +225,7 @@ fn the_excluded_tree_keeps_what_it_skipped() {
 fn an_extended_export_identifies_what_a_plain_one_cannot() {
     // `ncdu -e` records mode, which is the only way to tell a symlink from a
     // socket, or an excluded directory from an excluded file.
-    let (tree, _, _) = parse(&fixture_named("extended"));
+    let (tree, _, _) = parse(&fixture_named("ncdu", "extended"));
     let root = tree.root().unwrap();
     let nested = by_name(&tree, root, "nested");
     let deeper = by_name(&tree, nested, "deeper");
@@ -244,13 +244,31 @@ fn an_extended_export_identifies_what_a_plain_one_cannot() {
 fn a_root_with_no_children_is_a_tree_of_one() {
     // The degenerate export, and the one a parser that assumes at least one
     // child gets wrong.
-    let (tree, stats, _) = parse(&fixture_named("empty-root"));
+    for fixture in all_fixtures()
+        .into_iter()
+        .filter(|fixture| fixture.name == "empty-root")
+    {
+        let (tree, stats, _) = parse(&fixture);
 
-    assert_eq!(stats.items, 1);
-    assert_eq!(tree.len(), 1);
+        assert_eq!(stats.items, 1, "{}", fixture.label());
+        assert_eq!(tree.len(), 1, "{}", fixture.label());
 
-    let root = tree.root().unwrap();
-    assert!(tree.children_of(root).is_empty());
-    assert!(tree.get(root).unwrap().is_dir());
-    assert_eq!(tree.path_of(root).unwrap(), tree.root_path());
+        let root = tree.root().unwrap();
+        assert!(tree.children_of(root).is_empty(), "{}", fixture.label());
+        assert!(tree.get(root).unwrap().is_dir(), "{}", fixture.label());
+        assert_eq!(tree.path_of(root).unwrap(), tree.root_path());
+    }
+}
+
+#[test]
+fn gdu_records_the_shared_wire_format_without_translation() {
+    let fixture = fixture_named("gdu", "simple");
+    let (tree, stats, tree_stats) = parse(&fixture);
+
+    assert_eq!(stats.header.program.as_deref(), Some("gdu"));
+    assert_eq!(stats.header.program_version.as_deref(), Some("v5.32.0"));
+    assert_eq!(stats.header.format_major, 1);
+    assert_eq!(stats.header.format_minor, 2);
+    assert_eq!(tree_stats.hardlinks_deduplicated, 1);
+    assert!(tree.path_of(tree.root().unwrap()).unwrap().is_absolute());
 }

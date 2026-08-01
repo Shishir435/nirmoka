@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use nirmoka_adapter::Registry;
+use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
@@ -22,6 +23,7 @@ pub fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
+    registry.register(Box::new(GduAdapter::new()));
     registry
 }
 

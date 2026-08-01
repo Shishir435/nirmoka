@@ -22,6 +22,7 @@ mod scan;
 
 use clap::{Parser, Subcommand};
 use nirmoka_adapter::{Preference, Registry};
+use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
 
@@ -75,6 +76,7 @@ pub fn build_registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
+    registry.register(Box::new(GduAdapter::new()));
     registry
 }
 

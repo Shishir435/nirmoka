@@ -4,7 +4,7 @@
 //! that arrived together: the backends stopped agreeing on what they can do, and
 //! the right default stopped being the same on every platform. Mole is the
 //! better tool on macOS and cannot scan; ncdu scans everywhere and cleans
-//! nothing; gdu is the realistic Windows scanner and is not adapted yet.
+//! nothing; gdu is the primary Windows scanner.
 //!
 //! So selection is two separate questions, asked in this order:
 //!
@@ -12,7 +12,7 @@
 //!    nothing, which means "whatever this platform defaults to".
 //! 2. **Can it do the thing being asked?** A preference is a preference, not an
 //!    override of reality. Choosing Mole on macOS does not make Mole a scanner —
-//!    it makes Mole the backend that deletes, while ncdu still scans, and
+//!    it makes Mole the backend for cleanup, while ncdu still scans, and
 //!    [`Choice::instead_of`] carries the fact so the UI can say so.
 //!
 //! The alternative — honouring the choice and failing the scan — would be a user
@@ -80,10 +80,8 @@ impl Ability {
 /// stop offering it the moment the user's chosen backend could not do something,
 /// which is the opposite of what a default is for.
 ///
-/// `gdu` has no adapter yet — it arrives in roadmap step 11. Naming it here is
-/// deliberate: the Windows default is what Windows *should* use, and an id that
-/// matches no registered backend is skipped rather than being an error. When the
-/// adapter lands, the default becomes correct without this file changing.
+/// Every list names every shipped backend, so a user preference can always fall
+/// through to a platform-appropriate scanner.
 pub fn default_order_for(os: &str) -> &'static [&'static str] {
     match os {
         // Mole is macOS-only and does the things nothing else here can.
@@ -167,7 +165,7 @@ mod tests {
     fn abilities_read_the_flag_they_are_named_after() {
         let ncdu = Capabilities::MINIMAL;
         assert!(Ability::Scan.is_offered_by(&ncdu));
-        assert!(Ability::Delete.is_offered_by(&ncdu));
+        assert!(!Ability::Delete.is_offered_by(&ncdu));
         assert!(!Ability::DryRun.is_offered_by(&ncdu));
         assert!(!Ability::Trash.is_offered_by(&ncdu));
 

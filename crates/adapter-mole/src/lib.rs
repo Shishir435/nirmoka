@@ -135,12 +135,12 @@ impl Adapter for MoleAdapter {
             // The headline exception. See the module docs: `mo analyze --json`
             // lists one directory's children, not a tree.
             scan: false,
-            delete: true,
-            // Undocumented. Mole's CLI never says its removals are recoverable,
-            // and the safe direction for an unknown is the one that promises
-            // less: `false` makes the UI ask for an explicit confirmation.
-            // Claiming Trash routing that does not exist would tell a user
-            // their files can be brought back.
+            // Mole can clean curated categories and uninstall applications,
+            // but it has no command that removes an arbitrary scanned path.
+            delete: false,
+            // `mo uninstall` documents Trash routing, but this flag describes
+            // selected-path deletion, which Mole does not offer. Recoverability
+            // for app uninstall belongs to that operation's eventual API.
             trash: false,
             // `mo clean --dry-run`, `mo uninstall --dry-run`. The preview is
             // Mole's own output rather than rows Nirmoka can render, which is a

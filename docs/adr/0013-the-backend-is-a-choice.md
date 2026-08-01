@@ -51,9 +51,9 @@ Consequences that follow:
 - **Registration order stops being preference order.** It is now the last tiebreak, reached
   only by a backend no default names — kept so that a new adapter is reachable rather than
   invisible before anyone updates the defaults.
-- **`gdu` is named in every default order and has no adapter.** An id matching no registered
-  backend is skipped, not an error. The Windows default is therefore aspirational until step
-  11, and becomes correct when the adapter lands without this file changing.
+- **`gdu` was named in every default order before its adapter existed.** An id matching no
+  registered backend is skipped, not an error. Step 11 later added the adapter without
+  changing this ordering decision.
 - **`None` is a real preference,** not an absent one. It means "follow the platform default"
   and keeps following it when a later release changes the defaults — which a value written
   eagerly on first run would not.
@@ -97,8 +97,8 @@ Claiming one would eventually tell somebody to install what they already have.
   every surface that mentions a backend has to say which job it means.
 - Resolution runs detection on each candidate, so it is a handful of subprocesses. Fine for a
   button press and wrong for a loop; nothing calls it in one today.
-- A default naming an unimplemented backend is a real, if small, trap: `gdu` sitting first on
-  Windows and resolving to nothing is correct behaviour that reads like a bug until step 11.
+- Before step 11, a default naming an unimplemented backend was a real, if small, trap: `gdu`
+  sat first on Windows and correctly resolved to nothing. ADR 0015 closes that gap.
 
 ## Notes
 

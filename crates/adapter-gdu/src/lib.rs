@@ -1,23 +1,14 @@
-//! The ncdu adapter — Nirmoka's baseline backend.
+//! The gdu adapter — the cross-platform scanner and primary Windows backend.
 //!
-//! ncdu is built first and deliberately: it is the *narrowest* backend, so
-//! developing against it keeps the interface honest. Mole produces far more
-//! information, and designing around Mole's output would leave the ncdu path
-//! impossible to implement — a Mole GUI with a backend-shaped hole in it.
-//!
-//! It is also cross-platform, which means platform-neutral code can be written
-//! and tested on a single machine.
+//! gdu 5.32 emits ncdu JSON export format 1.2 directly, so this adapter shares
+//! the parser and tree sink in `nirmoka-adapter`. It does not translate or
+//! buffer the export.
 //!
 //! # Version support
 //!
-//! Only ncdu 2.x. The JSON export format used as Nirmoka's wire format
-//! (`ncdu -o -`) is the version 2 shape; ncdu 1.x emits a different one, and a
-//! hypothetical 3.x is unknown until someone tests it.
-//!
-//! The gate is enforced on *every* operation, not only in the backend picker.
-//! ncdu 1.x emits the same JSON format *major* version as 2.x, so its export
-//! parses — an unversioned scan would silently produce plausible numbers from
-//! an untested backend.
+//! Only the 5.32 release line is accepted. The recorded fixture and live
+//! command evidence come from 5.32.0; another minor release joins the supported
+//! range only after its output has been recorded and tested.
 
 #![forbid(unsafe_code)]
 
@@ -32,25 +23,18 @@ use nirmoka_adapter::{
     ScanSummary, WireSink,
 };
 
-const BINARY: &str = "ncdu";
-const SUPPORTED: &str = ">=2.0, <3.0";
-
-/// 64 KiB. An export of a large home directory is tens of megabytes arriving
-/// through a pipe; reading it in default-sized chunks is measurable overhead.
+const BINARY: &str = "gdu";
+const SUPPORTED: &str = ">=5.32, <5.33";
 const READ_BUFFER: usize = 64 * 1024;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct NcduAdapter;
+pub struct GduAdapter;
 
-impl NcduAdapter {
+impl GduAdapter {
     pub fn new() -> Self {
         Self
     }
 
-    /// The binary path and version, or an error explaining which gate failed.
-    ///
-    /// Every operation goes through this. Detection is not a one-time startup
-    /// check: a user can upgrade ncdu while the app is open.
     fn usable_binary(&self) -> Result<(PathBuf, String), AdapterError> {
         match self.detect()? {
             Detection::Found { path, version } => Ok((path, version)),
@@ -66,13 +50,13 @@ impl NcduAdapter {
     }
 }
 
-impl Adapter for NcduAdapter {
+impl Adapter for GduAdapter {
     fn id(&self) -> &'static str {
-        "ncdu"
+        "gdu"
     }
 
     fn display_name(&self) -> &'static str {
-        "ncdu"
+        "gdu"
     }
 
     fn supported_versions(&self) -> &'static str {
@@ -80,16 +64,11 @@ impl Adapter for NcduAdapter {
     }
 
     fn detect(&self) -> Result<Detection, AdapterError> {
-        // Resolved first so the reported path is the binary that will actually
-        // run. On a machine with ncdu in both /usr/bin and /opt/homebrew/bin,
-        // "ncdu" is not an answer the user can act on.
         let resolved = find_in_path(BINARY);
         let program = resolved.clone().unwrap_or_else(|| PathBuf::from(BINARY));
 
         let output = match Command::new(&program).arg("--version").output() {
             Ok(output) => output,
-            // A missing binary is a normal state, not an error. Anything else
-            // (permission denied, exec format error) is worth surfacing.
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Detection::NotInstalled)
             }
@@ -130,9 +109,9 @@ impl Adapter for NcduAdapter {
     }
 
     fn capabilities(&self) -> Capabilities {
-        // ncdu can delete only from its interactive ncurses browser. Export
-        // mode has no command for removing a selected path, so claiming that
-        // ability here would leave the adapter with no safe implementation.
+        // `d` deletes inside gdu's terminal browser. There is no command that
+        // removes a caller-selected path, so selected-path deletion remains
+        // false for the same reason as ncdu. See ADR 0014.
         Capabilities::MINIMAL
     }
 
@@ -144,32 +123,34 @@ impl Adapter for NcduAdapter {
         cancel: &CancelToken,
     ) -> Result<ScanSummary, AdapterError> {
         let root = validate_scan_root(root)?;
-        let (binary, version) = self.usable_binary()?;
 
+        // gdu 5.32 has no CACHEDIR.TAG option and its ignore patterns are Go
+        // regular expressions, not the glob syntax promised by ScanOptions.
+        // Refuse instead of silently changing what the caller asked to scan.
+        if options.exclude_caches || !options.exclude.is_empty() {
+            return Err(AdapterError::Unsupported {
+                backend: BINARY,
+                operation: "scan exclusions",
+            });
+        }
+
+        let (binary, version) = self.usable_binary()?;
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
 
         let mut command = Command::new(binary);
         command
-            // Without this, a user's ~/.config/ncdu/config silently changes
-            // what a scan means — including turning on apparent-size mode or
-            // adding exclude patterns Nirmoka never asked for.
-            .arg("--ignore-config")
-            // No progress UI. `-o -` still draws one otherwise, into a terminal
-            // that is not there.
-            .arg("-0")
+            // Do not let ~/.gdu.yaml change the meaning of a scan. The null
+            // device is a valid empty config on each supported platform.
+            .arg("--config-file")
+            .arg(empty_config())
+            .arg("--no-progress")
             .arg("-o")
             .arg("-");
 
         if options.one_file_system {
-            command.arg("-x");
-        }
-        if options.exclude_caches {
-            command.arg("--exclude-caches");
-        }
-        for pattern in &options.exclude {
-            command.arg("--exclude").arg(pattern);
+            command.arg("--no-cross");
         }
 
         command.arg(&root);
@@ -183,10 +164,6 @@ impl Adapter for NcduAdapter {
         let stdout = process
             .take_stdout()
             .expect("RunningProcess::spawn pipes stdout");
-
-        // Parsing happens while ncdu is still walking the disk. The sink sees
-        // entries during the scan, which is what invariant 5 needs on the other
-        // side of the boundary.
         let parsed = wire::parse(BufReader::with_capacity(READ_BUFFER, stdout), sink);
 
         let outcome = process.finish().map_err(|source| AdapterError::Spawn {
@@ -194,13 +171,9 @@ impl Adapter for NcduAdapter {
             source,
         })?;
 
-        // Order matters. A cancelled scan leaves a truncated export and a
-        // killed process; reporting either of those as the failure would blame
-        // the backend for something the user did.
         if outcome.cancelled {
             return Err(cancelled());
         }
-
         if !outcome.status.success() {
             return Err(AdapterError::BackendFailed {
                 binary: BINARY,
@@ -223,36 +196,41 @@ impl Adapter for NcduAdapter {
     }
 }
 
+#[cfg(windows)]
+fn empty_config() -> &'static str {
+    "NUL"
+}
+
+#[cfg(not(windows))]
+fn empty_config() -> &'static str {
+    "/dev/null"
+}
+
 fn cancelled() -> AdapterError {
     AdapterError::Cancelled {
-        backend: "ncdu",
+        backend: BINARY,
         operation: "scan",
     }
 }
 
-/// Pull a version out of `ncdu --version` output.
-///
-/// Observed shape on ncdu 2.8.2 (Homebrew, macOS): `ncdu 2.8.2`.
+/// Observed 5.32.0 output starts with `Version:\t v5.32.0`.
 fn parse_version(output: &str) -> Option<String> {
     let line = output.lines().next()?.trim();
     let token = line.split_whitespace().nth(1)?;
+    let version = token.strip_prefix('v').unwrap_or(token);
 
-    // Reject anything that is not digit-led, so error text like
-    // "ncdu: command failed" cannot be mistaken for a version.
-    if token.starts_with(|c: char| c.is_ascii_digit()) {
-        Some(token.to_string())
-    } else {
-        None
-    }
+    version
+        .starts_with(|c: char| c.is_ascii_digit())
+        .then(|| version.to_string())
 }
 
-/// Accept 2.x only.
 fn is_supported(version: &str) -> bool {
-    matches!(major_of(version), Some(2))
+    matches!(major_minor_of(version), Some((5, 32)))
 }
 
-fn major_of(version: &str) -> Option<u32> {
-    version.split('.').next()?.parse().ok()
+fn major_minor_of(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.split('.');
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
 #[cfg(test)]
@@ -260,53 +238,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_the_observed_homebrew_output() {
-        assert_eq!(parse_version("ncdu 2.8.2\n").as_deref(), Some("2.8.2"));
+    fn parses_the_recorded_version_output() {
+        let output = "Version:\t v5.32.0\nBuilt time:\t Sat Nov 22 12:00:38 PM CET 2025\n";
+        assert_eq!(parse_version(output).as_deref(), Some("5.32.0"));
     }
 
     #[test]
-    fn parses_a_one_x_version() {
-        assert_eq!(parse_version("ncdu 1.19").as_deref(), Some("1.19"));
+    fn parses_versions_with_or_without_the_v_prefix() {
+        assert_eq!(parse_version("Version: v5.32.1").as_deref(), Some("5.32.1"));
+        assert_eq!(parse_version("Version: 5.32.1").as_deref(), Some("5.32.1"));
     }
 
     #[test]
     fn rejects_error_text_as_a_version() {
-        // The failure mode this guards: treating stderr-ish output as data.
-        assert!(parse_version("ncdu: command not found").is_none());
+        assert!(parse_version("gdu: command failed").is_none());
         assert!(parse_version("").is_none());
-        assert!(parse_version("ncdu").is_none());
+        assert!(parse_version("Version:").is_none());
     }
 
     #[test]
-    fn accepts_two_x_only() {
-        assert!(is_supported("2.8.2"));
-        assert!(is_supported("2.0"));
-        assert!(!is_supported("1.19"));
-        assert!(!is_supported("3.0.0"));
+    fn gates_to_the_recorded_minor_release() {
+        assert!(is_supported("5.32.0"));
+        assert!(is_supported("5.32.9"));
+        assert!(!is_supported("5.31.0"));
+        assert!(!is_supported("5.33.0"));
+        assert!(!is_supported("6.0.0"));
     }
 
     #[test]
-    fn declares_no_dry_run() {
-        // If this ever flips to true, there must be a real preview behind it.
-        assert!(!NcduAdapter::new().capabilities().dry_run);
-        assert!(!NcduAdapter::new().capabilities().trash);
-    }
-
-    #[test]
-    fn declares_scan_but_not_scriptable_deletion() {
-        let caps = NcduAdapter::new().capabilities();
+    fn declares_scan_without_scriptable_deletion() {
+        let caps = GduAdapter::new().capabilities();
         assert!(caps.scan);
         assert!(!caps.delete);
+        assert!(!caps.trash);
+        assert!(!caps.dry_run);
     }
 
     #[test]
-    fn a_bad_scan_root_is_refused_before_anything_is_spawned() {
-        // Runs on every platform, including the ones with no ncdu: validation
-        // happens before the backend is consulted.
+    fn validates_the_root_before_looking_for_gdu() {
         let mut sink = nirmoka_adapter::TreeSink::new();
-        let error = NcduAdapter::new()
+        let error = GduAdapter::new()
             .scan(
-                Path::new("nirmoka-no-such-directory"),
+                Path::new("nirmoka-gdu-no-such-directory"),
                 &ScanOptions::default(),
                 &mut sink,
                 &CancelToken::new(),
@@ -314,5 +287,27 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, AdapterError::RefusedPath { .. }));
+    }
+
+    #[test]
+    fn refuses_scan_options_it_cannot_translate_honestly() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut sink = nirmoka_adapter::TreeSink::new();
+
+        for options in [
+            ScanOptions {
+                exclude_caches: true,
+                ..ScanOptions::default()
+            },
+            ScanOptions {
+                exclude: vec!["target".to_string()],
+                ..ScanOptions::default()
+            },
+        ] {
+            let error = GduAdapter::new()
+                .scan(root, &options, &mut sink, &CancelToken::new())
+                .unwrap_err();
+            assert!(matches!(error, AdapterError::Unsupported { .. }));
+        }
     }
 }
