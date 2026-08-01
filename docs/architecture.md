@@ -90,7 +90,9 @@ Selected-path deletion uses a two-call boundary. `prepare_delete` keeps the vali
 adapter plan in Rust and returns only a one-time confirmation token; `confirm_delete`
 consumes that token. A raw path is never accepted by the execute command. No current backend
 offers this capability: rip's later pathname resolution cannot be bound to validation, so it
-fails closed and retains only exact undo for existing receipts.
+fails closed and retains only exact undo for existing receipts. New selected-path deletion is
+deferred beyond v0.1 by
+[ADR 0018](adr/0018-selected-path-deletion-is-deferred-for-v0-1.md).
 
 **5. Adapters version-pin their backend and fail closed.**
 

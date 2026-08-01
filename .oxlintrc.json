@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "jsx-a11y"],
+  "jsPlugins": ["./tools/oxlint-tailwind-plugin.mjs"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "jsx-a11y/heading-has-content": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "nirmoka-tailwind/canonical-classes": "error",
+    "react/react-in-jsx-scope": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "env": {
+    "builtin": true
+  }
+}

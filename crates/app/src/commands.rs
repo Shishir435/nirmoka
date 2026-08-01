@@ -20,6 +20,7 @@ use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
 use crate::deletion::PendingDelete;
 use crate::dto;
+use crate::inventory;
 use crate::scan;
 use crate::state::{AppState, ScanId};
 
@@ -319,6 +320,42 @@ pub fn operation_log_of(state: &AppState) -> Vec<dto::DeleteOperation> {
         .collect()
 }
 
+pub fn application_inventory_of(
+    state: &AppState,
+    scan_id: ScanId,
+) -> Result<dto::ApplicationInventory, String> {
+    let scan = state.scan();
+    let result = scan
+        .result
+        .as_ref()
+        .ok_or_else(|| "no scan has completed yet".to_string())?;
+    if result.id != scan_id {
+        return Err(format!(
+            "scan {scan_id} has been replaced by scan {}",
+            result.id
+        ));
+    }
+    Ok(inventory::applications(result.id, &result.tree))
+}
+
+pub fn developer_inventory_of(
+    state: &AppState,
+    scan_id: ScanId,
+) -> Result<dto::DeveloperInventory, String> {
+    let scan = state.scan();
+    let result = scan
+        .result
+        .as_ref()
+        .ok_or_else(|| "no scan has completed yet".to_string())?;
+    if result.id != scan_id {
+        return Err(format!(
+            "scan {scan_id} has been replaced by scan {}",
+            result.id
+        ));
+    }
+    Ok(inventory::developer(result.id, &result.tree))
+}
+
 fn backend_failure(error: nirmoka_adapter::AdapterError) -> dto::DeleteFailure {
     dto::DeleteFailure::new(dto::DeleteFailureCode::Backend, error.to_string())
 }
@@ -401,6 +438,27 @@ pub fn undo_delete(
 #[tauri::command]
 pub fn operation_log(state: State<'_, AppState>) -> Vec<dto::DeleteOperation> {
     operation_log_of(&state)
+}
+
+#[tauri::command]
+pub fn volume_info(path: String) -> Result<dto::VolumeInfo, String> {
+    crate::volume::info(std::path::Path::new(&path))
+}
+
+#[tauri::command]
+pub fn application_inventory(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+) -> Result<dto::ApplicationInventory, String> {
+    application_inventory_of(&state, scan_id)
+}
+
+#[tauri::command]
+pub fn developer_inventory(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+) -> Result<dto::DeveloperInventory, String> {
+    developer_inventory_of(&state, scan_id)
 }
 
 #[cfg(test)]

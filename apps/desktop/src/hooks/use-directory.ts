@@ -95,7 +95,7 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
       .then((page) => {
         if (!live || generation.current !== era) return;
 
-        rows.current = new Array<Row | undefined>(page.total);
+        rows.current = Array.from<Row | undefined>({ length: page.total });
         page.rows.forEach((row, index) => {
           rows.current[index] = row;
         });

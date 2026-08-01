@@ -100,6 +100,100 @@ pub struct Crumb {
     pub name: String,
 }
 
+/// Capacity of the filesystem containing a path. This is deliberately separate
+/// from a scan summary: bytes reached by a scan are not disk capacity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct VolumeInfo {
+    pub mount_point: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    #[ts(type = "number")]
+    pub used_bytes: u64,
+    #[ts(type = "number")]
+    pub free_bytes: u64,
+}
+
+/// One application bundle found inside the completed scan tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct ApplicationItem {
+    pub id: u32,
+    pub name: String,
+    pub path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    pub size_is_partial: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct ApplicationInventory {
+    #[ts(type = "number")]
+    pub scan_id: u64,
+    pub total: u32,
+    pub rows: Vec<ApplicationItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum DeveloperCategory {
+    XcodeDerivedData,
+    SimulatorData,
+    XcodeArchives,
+    DeveloperCaches,
+    GitRepository,
+    NodeModules,
+}
+
+/// Developer data evidenced by names and locations in the completed scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DeveloperItem {
+    pub id: u32,
+    pub category: DeveloperCategory,
+    pub name: String,
+    pub path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    #[ts(type = "number | null")]
+    pub modified_at_ms: Option<u64>,
+    pub size_is_partial: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DeveloperInventory {
+    #[ts(type = "number")]
+    pub scan_id: u64,
+    pub total: u32,
+    pub rows: Vec<DeveloperItem>,
+}
+
 /// Whether a backend is installed, and whether this build understands it.
 ///
 /// `unsupportedVersion` stays a distinct state all the way to the UI. Collapsing

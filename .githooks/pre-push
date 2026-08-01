@@ -87,7 +87,8 @@ fi
 
 # --- Web --------------------------------------------------------------------
 if command -v pnpm > /dev/null 2>&1; then
-  step "prettier" pnpm format:check
+  step "oxlint" pnpm lint
+  step "oxfmt" pnpm format:check
   step "typecheck" pnpm typecheck
 else
   printf '\n\033[33m⚠ pnpm not found — web checks skipped.\033[0m\n'

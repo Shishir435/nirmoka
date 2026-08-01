@@ -1,8 +1,0 @@
-pnpm-lock.yaml
-dist/
-target/
-packages/transport/src/generated/
-# Byte-for-byte backend evidence. Formatting these would turn recorded output
-# into hand-edited fixtures and defeat the contract suite's purpose.
-fixtures/
-LICENSE

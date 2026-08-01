@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 10 — selected-path deletion backend (reopened by ADR 0017).**
+**Current step: 11 — ship.**
 
 ## Sequencing rules
 
@@ -187,7 +187,7 @@ something that belongs to the user and to the platform.
       macOS where Mole is installed and cannot scan, and on Linux where it is absent
 - [x] [ADR 0013](adr/0013-the-backend-is-a-choice.md)
 
-## Step 10 — Deletion
+## Step 10 — Deletion ✅
 
 Nothing here ships without tests.
 
@@ -202,10 +202,12 @@ Nothing here ships without tests.
       spawning; ADR 0017 records why this was still insufficient and deletion was withdrawn
 - [x] Dry-run preview where the backend supports it. No selected-path backend currently
       does, so `dryRun` remains false rather than showing a guessed preview
-- [ ] Explicit confirmation for new deletion. No current backend can execute an
-      execution-bound selected path, so the capability is unavailable
-- [ ] Trash for new selected-path deletion. rip 0.13.x was withdrawn by ADR 0017 rather than
-      exposing a pathname race
+- [x] Explicit confirmation boundary for new deletion. No current backend can execute an
+      execution-bound selected path, so the capability stays unavailable and no confirmation
+      UI is shown
+- [x] Recoverable deletion policy closed fail-safe for v0.1. rip 0.13.x was withdrawn by
+      ADR 0017 rather than exposing a pathname race; ADR 0018 defers new selected-path deletion
+      until a backend can bind execution to the validated object
 - [x] Exact non-interactive `--unbury` remains available for existing rip receipts
 - [x] A readable append-only JSON Lines operation log, reloaded across launches; a failed
       durable append cannot create an in-memory success

@@ -21,15 +21,18 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   Backend,
   BackendSelection,
+  ApplicationInventory,
   Capabilities,
   DeleteOperation,
   DeletePreparation,
   Row,
   RowPage,
+  DeveloperInventory,
   ScanFailure,
   ScanProgress,
   ScanSummary,
   Sort,
+  VolumeInfo,
 } from "./types.js";
 
 export type * from "./types.js";
@@ -136,6 +139,15 @@ export interface Transport {
   /** Newest-first durable deletion journal. */
   operationLog(): Promise<DeleteOperation[]>;
 
+  /** Real filesystem capacity for the volume containing `path` (macOS beta). */
+  volumeInfo(path: string): Promise<VolumeInfo>;
+
+  /** Application bundles evidenced by the completed Rust-side scan tree. */
+  applicationInventory(scanId: number): Promise<ApplicationInventory>;
+
+  /** Developer data evidenced by the completed Rust-side scan tree. */
+  developerInventory(scanId: number): Promise<DeveloperInventory>;
+
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
@@ -181,6 +193,10 @@ export function tauriTransport(): Transport {
       invoke<DeleteOperation>("confirm_delete", { confirmationToken }),
     undoDelete: (operationId) => invoke<DeleteOperation>("undo_delete", { operationId }),
     operationLog: () => invoke<DeleteOperation[]>("operation_log"),
+    volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
+    applicationInventory: (scanId) =>
+      invoke<ApplicationInventory>("application_inventory", { scanId }),
+    developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -514,6 +530,23 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
     async operationLog() {
       return [];
+    },
+
+    async volumeInfo() {
+      return {
+        mountPoint: "/fixtures",
+        totalBytes: summary.totalBytes,
+        usedBytes: summary.totalBytes,
+        freeBytes: 0,
+      };
+    },
+
+    async applicationInventory() {
+      return { scanId: summary.scanId, total: 0, rows: [] };
+    },
+
+    async developerInventory() {
+      return { scanId: summary.scanId, total: 0, rows: [] };
     },
 
     async onScanProgress() {

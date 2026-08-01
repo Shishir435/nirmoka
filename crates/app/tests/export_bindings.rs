@@ -42,14 +42,17 @@ fn the_bindings_land_where_the_frontend_imports_them_from() {
 
     for expected in [
         "export type Backend",
+        "export type ApplicationInventory",
         "export type Capabilities",
         "export type Detection",
+        "export type DeveloperInventory",
         "export type NodeKind",
         "export type Row",
         "export type RowPage",
         "export type ScanFailure",
         "export type ScanProgress",
         "export type ScanSummary",
+        "export type VolumeInfo",
     ] {
         assert!(
             generated.contains(expected),
