@@ -59,6 +59,12 @@ pub fn settings_path() -> Option<PathBuf> {
     ProjectDirs::from("app", "nirmoka", "Nirmoka").map(|dirs| dirs.config_dir().join(FILE))
 }
 
+/// Append-only, human-readable deletion journal.
+pub fn operation_log_path() -> Option<PathBuf> {
+    ProjectDirs::from("app", "nirmoka", "Nirmoka")
+        .map(|dirs| dirs.data_local_dir().join("operations.jsonl"))
+}
+
 /// Read the stored preference, or the platform default if there is not one.
 pub fn load() -> Preference {
     settings_path()

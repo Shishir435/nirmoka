@@ -22,6 +22,9 @@ pub struct Capabilities {
     /// Recoverable mode for caller-selected path removal.
     pub trash: bool,
 
+    /// Restore a recoverable selected-path deletion non-interactively.
+    pub undo: bool,
+
     /// Produce the exact list of what would be removed, without removing it.
     ///
     /// When false the UI falls back to an explicit confirmation dialog. An
@@ -46,6 +49,7 @@ impl Capabilities {
         scan: true,
         delete: false,
         trash: false,
+        undo: false,
         dry_run: false,
         cleanup_categories: false,
         uninstall_apps: false,

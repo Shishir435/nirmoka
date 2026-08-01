@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 10 — deletion.**
+**Current step: 11 — ship.**
 
 ## Sequencing rules
 
@@ -49,7 +49,7 @@ for Tauri types inside `core` arrives before the boundary is established.
 ## Step 2 — Adapter contract ✅
 
 - [x] `Adapter` trait: `id`, `display_name`, `supported_versions`, `detect`, `capabilities`
-- [x] `Capabilities` with seven flags and a `MINIMAL` constant
+- [x] `Capabilities` flags and a `MINIMAL` constant (seven initially; undo added in step 10)
 - [x] `Detection` with a distinct `UnsupportedVersion` state
 - [x] `Registry`, push-based to avoid a dependency cycle
 - [x] `AdapterError` exercised by tests for each variant, including the `NotInstalled`,
@@ -168,8 +168,9 @@ something that belongs to the user and to the platform.
 
 - [x] `Registry::resolve(ability, preference)`: the user's choice, then the platform default,
       then registration order, each filtered by whether the adapter can do the thing
-- [x] Platform defaults — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`; else
-      `ncdu, gdu, mole`. Matched on `std::env::consts::OS`, so every platform's default is
+- [x] Platform defaults — macOS `mole, rip, ncdu, gdu`; Windows
+      `gdu, rip, ncdu, mole`; else `ncdu, rip, gdu, mole`. Matched on
+      `std::env::consts::OS`, so every platform's default is
       testable from every platform rather than only from the job that runs there
 - [x] A preference is not an override: choosing Mole on macOS is honoured for cleanup and
       falls back to ncdu for scanning, and `Choice::instead_of` names the displaced backend
@@ -196,14 +197,17 @@ Nothing here ships without tests.
       [ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md)
 - [x] Shared deletion validator, with tests for relative paths, scan-root deletion,
       containment, symlink escape, missing targets, and system-critical locations. It is
-      not yet wired to a destructive command because no current backend has one
-- [ ] Path validation at the adapter boundary: absolute, canonicalised, symlinks resolved,
-      inside the scan root, not system-critical
-- [ ] Dry-run preview where the backend supports it
-- [ ] Explicit confirmation where it does not
-- [ ] Trash where available, permanent clearly marked where not
-- [ ] Undo affordance for trashed items
-- [ ] A readable operation log
+      shared by preparation and final execution rather than copied into the rip adapter
+- [x] Path validation wired at the `adapter-rip` boundary and repeated immediately before
+      spawning, so a symlink retarget or path escape while confirmation is open is refused
+- [x] Dry-run preview where the backend supports it. No selected-path backend currently
+      does, so `dryRun` remains false rather than showing a guessed preview
+- [x] Explicit confirmation where it does not: prepare returns a one-time token; execute
+      accepts the token, never a caller-supplied path
+- [x] Trash where available, permanent clearly marked where not. rip 0.13.x is recoverable;
+      permanent mode is explicitly `Unsupported` and cannot silently replace Trash
+- [x] Undo affordance for trashed items through rip's exact non-interactive `--unbury`
+- [x] A readable append-only JSON Lines operation log, reloaded across launches
 
 ## Step 11 — Ship
 

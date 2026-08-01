@@ -5,7 +5,106 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::AdapterError;
+
+/// The destructive behavior requested by the caller.
+///
+/// Backends must refuse modes they cannot implement exactly. In particular, a
+/// recoverable move must never silently become permanent removal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeleteMode {
+    Trash,
+    Permanent,
+}
+
+/// A target validated by the adapter that will execute it.
+///
+/// This is a plan, not authorization. The shell keeps it behind a one-time
+/// confirmation token and the adapter validates it again immediately before
+/// spawning the destructive backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletePlan {
+    backend: &'static str,
+    scan_root: PathBuf,
+    target: PathBuf,
+    mode: DeleteMode,
+}
+
+impl DeletePlan {
+    pub fn new(
+        backend: &'static str,
+        scan_root: PathBuf,
+        target: PathBuf,
+        mode: DeleteMode,
+    ) -> Self {
+        Self {
+            backend,
+            scan_root,
+            target,
+            mode,
+        }
+    }
+
+    pub fn backend(&self) -> &'static str {
+        self.backend
+    }
+
+    pub fn scan_root(&self) -> &Path {
+        &self.scan_root
+    }
+
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
+    pub fn mode(&self) -> DeleteMode {
+        self.mode
+    }
+}
+
+/// Evidence needed to undo one recoverable deletion through the same backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteReceipt {
+    backend: String,
+    target: PathBuf,
+    recovery_root: PathBuf,
+    recovery_path: PathBuf,
+}
+
+impl DeleteReceipt {
+    pub fn new(
+        backend: impl Into<String>,
+        target: PathBuf,
+        recovery_root: PathBuf,
+        recovery_path: PathBuf,
+    ) -> Self {
+        Self {
+            backend: backend.into(),
+            target,
+            recovery_root,
+            recovery_path,
+        }
+    }
+
+    pub fn backend(&self) -> &str {
+        &self.backend
+    }
+
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
+    pub fn recovery_root(&self) -> &Path {
+        &self.recovery_root
+    }
+
+    pub fn recovery_path(&self) -> &Path {
+        &self.recovery_path
+    }
+}
 
 /// Resolve and validate one caller-selected deletion target.
 ///
@@ -82,14 +181,29 @@ fn is_system_critical(path: &Path) -> bool {
         "/private/etc",
     ];
 
+    const EXACT_ROOTS: &[&str] = &[
+        "/Applications",
+        "/Users",
+        "/Volumes",
+        "/home",
+        "/opt",
+        "/private",
+        "/private/var",
+        "/tmp",
+        "/var",
+    ];
+
     ROOTS
         .iter()
         .any(|root| starts_with_system_root(path, Path::new(root)))
+        || EXACT_ROOTS
+            .iter()
+            .any(|root| paths_equal(path, Path::new(root)))
 }
 
 #[cfg(windows)]
 fn is_system_critical(path: &Path) -> bool {
-    [
+    let protected_tree = [
         std::env::var_os("SystemRoot"),
         std::env::var_os("ProgramFiles"),
         std::env::var_os("ProgramFiles(x86)"),
@@ -99,7 +213,26 @@ fn is_system_critical(path: &Path) -> bool {
     .flatten()
     .map(PathBuf::from)
     .filter_map(|root| root.canonicalize().ok())
-    .any(|root| starts_with_system_root(path, &root))
+    .any(|root| starts_with_system_root(path, &root));
+
+    let users_root = std::env::var_os("SystemDrive")
+        .map(PathBuf::from)
+        .map(|root| root.join("Users"))
+        .and_then(|root| root.canonicalize().ok())
+        .is_some_and(|root| paths_equal(path, &root));
+
+    protected_tree || users_root
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn paths_equal(path: &Path, root: &Path) -> bool {
+    path.to_string_lossy()
+        .eq_ignore_ascii_case(&root.to_string_lossy())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn paths_equal(path: &Path, root: &Path) -> bool {
+    path == root
 }
 
 #[cfg(any(target_os = "macos", windows))]
@@ -254,6 +387,22 @@ mod tests {
             reason(error),
             "resolved target is a system-critical location"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_top_level_user_containers_without_protecting_every_home_file() {
+        let root = Path::new(std::path::MAIN_SEPARATOR_STR);
+        let home = root.join("home");
+        assert!(is_system_critical(&home));
+        assert!(!is_system_critical(&home.join("person/file.txt")));
+
+        #[cfg(target_os = "macos")]
+        {
+            let users = root.join("Users");
+            assert!(is_system_critical(&users));
+            assert!(!is_system_critical(&users.join("person/file.txt")));
+        }
     }
 
     #[test]

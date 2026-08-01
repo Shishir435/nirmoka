@@ -25,6 +25,7 @@ use nirmoka_adapter::{Preference, Registry};
 use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
+use nirmoka_adapter_rip::RipAdapter;
 
 #[derive(Parser)]
 #[command(
@@ -77,6 +78,7 @@ pub fn build_registry() -> Registry {
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry.register(Box::new(GduAdapter::new()));
+    registry.register(Box::new(RipAdapter::new()));
     registry
 }
 

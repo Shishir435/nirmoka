@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Builds on** [ADR 0012](0012-mole-is-not-a-scanner.md).
+- **Extended by** [ADR 0016](0016-rip-is-the-selected-path-deletion-backend.md).
 
 ## Context
 
@@ -37,8 +38,9 @@ from where it cannot — never silently.
 adapter is usable _and_ declares the ability:
 
 1. **The user's choice.** Honoured whenever it can be.
-2. **The platform default order** — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`;
-   everywhere else `ncdu, gdu, mole`.
+2. **The platform default order** — macOS `mole, rip, ncdu, gdu`; Windows
+   `gdu, rip, ncdu, mole`; everywhere else `ncdu, rip, gdu, mole`. rip was added by
+   ADR 0016 and capability filtering keeps it out of scans.
 3. **Registration order**, for a backend no default names.
 
 It returns a `Choice`, which carries the adapter _and_ `instead_of` — the backend that was

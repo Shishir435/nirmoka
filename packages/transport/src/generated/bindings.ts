@@ -75,7 +75,7 @@ saveError: string | null, };
 /**
  * What the active backend can do, so the UI can hide controls it cannot honour.
  */
-export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
+export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
 
 /**
  * One step on the way back out of a directory.
@@ -84,6 +84,25 @@ export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, dry
  * name the directory it descended from — "up" would mean rescanning.
  */
 export type Crumb = { id: number, name: string, };
+
+export type DeleteDisposition = "trash" | "permanent";
+
+export type DeleteFailure = { code: DeleteFailureCode, message: string, };
+
+/**
+ * Stable failure classes for destructive commands.
+ */
+export type DeleteFailureCode = "noCompletedScan" | "staleScan" | "unknownNode" | "noBackend" | "confirmationExpired" | "alreadyUndone" | "backend";
+
+/**
+ * One durable deletion journal entry.
+ */
+export type DeleteOperation = { id: number, backend: string, targetPath: string, disposition: DeleteDisposition, recoverable: boolean, undone: boolean, deletedAtMs: number, undoneAtMs: number | null, logError: string | null, };
+
+/**
+ * A validated destructive operation waiting for explicit confirmation.
+ */
+export type DeletePreparation = { confirmationToken: number, backend: string, backendInsteadOf: string | null, targetPath: string, totalBytes: number, disposition: DeleteDisposition, recoverable: boolean, dryRun: boolean, requiresConfirmation: boolean, warning: string, };
 
 /**
  * Whether a backend is installed, and whether this build understands it.

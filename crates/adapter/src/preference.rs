@@ -41,6 +41,7 @@ pub enum Ability {
     Scan,
     Delete,
     Trash,
+    Undo,
     DryRun,
     CleanupCategories,
     UninstallApps,
@@ -54,6 +55,7 @@ impl Ability {
             Self::Scan => "scan",
             Self::Delete => "delete",
             Self::Trash => "move to Trash",
+            Self::Undo => "undo deletion",
             Self::DryRun => "dry run",
             Self::CleanupCategories => "cleanup categories",
             Self::UninstallApps => "uninstall applications",
@@ -66,6 +68,7 @@ impl Ability {
             Self::Scan => caps.scan,
             Self::Delete => caps.delete,
             Self::Trash => caps.trash,
+            Self::Undo => caps.undo,
             Self::DryRun => caps.dry_run,
             Self::CleanupCategories => caps.cleanup_categories,
             Self::UninstallApps => caps.uninstall_apps,
@@ -85,13 +88,13 @@ impl Ability {
 pub fn default_order_for(os: &str) -> &'static [&'static str] {
     match os {
         // Mole is macOS-only and does the things nothing else here can.
-        "macos" => &["mole", "ncdu", "gdu"],
+        "macos" => &["mole", "rip", "ncdu", "gdu"],
         // gdu is the backend Windows users realistically have; ncdu is a
         // distant second there.
-        "windows" => &["gdu", "ncdu", "mole"],
+        "windows" => &["gdu", "rip", "ncdu", "mole"],
         // ncdu is packaged everywhere else. Mole trails because it refuses to
         // install off macOS at all.
-        _ => &["ncdu", "gdu", "mole"],
+        _ => &["ncdu", "rip", "gdu", "mole"],
     }
 }
 
@@ -150,7 +153,7 @@ mod tests {
             sorted.sort_unstable();
             sorted.dedup();
 
-            assert_eq!(sorted, vec!["gdu", "mole", "ncdu"], "{os}");
+            assert_eq!(sorted, vec!["gdu", "mole", "ncdu", "rip"], "{os}");
             assert_eq!(sorted.len(), order.len(), "{os} names one twice");
         }
     }
@@ -173,6 +176,7 @@ mod tests {
             scan: false,
             delete: true,
             trash: false,
+            undo: false,
             dry_run: true,
             cleanup_categories: true,
             uninstall_apps: true,

@@ -104,6 +104,9 @@ fn capabilities_are_internally_coherent() {
         if caps.trash {
             assert!(caps.delete, "{id} offers Trash without delete");
         }
+        if caps.undo {
+            assert!(caps.trash, "{id} offers undo without recoverable deletion");
+        }
     });
 }
 
@@ -188,10 +191,11 @@ fn the_registry_agrees_with_the_adapters_it_holds() {
 fn a_resolved_backend_can_always_do_what_it_was_resolved_for() {
     use nirmoka_adapter::{Ability, Preference};
 
-    const ABILITIES: [Ability; 7] = [
+    const ABILITIES: [Ability; 8] = [
         Ability::Scan,
         Ability::Delete,
         Ability::Trash,
+        Ability::Undo,
         Ability::DryRun,
         Ability::CleanupCategories,
         Ability::UninstallApps,

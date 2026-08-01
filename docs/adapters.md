@@ -26,8 +26,9 @@ Not registration order. `Registry::resolve(ability, preference)` picks, in three
 each filtered by whether the adapter is usable _and_ declares the ability being asked for:
 
 1. **The user's choice**, honoured wherever the backend can do the job.
-2. **The platform default** — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`; everywhere
-   else `ncdu, gdu, mole`.
+2. **The platform default** — macOS `mole, rip, ncdu, gdu`; Windows
+   `gdu, rip, ncdu, mole`; everywhere else `ncdu, rip, gdu, mole`. Capability filtering
+   means rip is considered only for deletion/undo and never for scanning.
 3. **Registration order**, so a backend no default names is still reachable.
 
 A preference is a preference, not an override. Choosing Mole on macOS is honoured for
@@ -40,13 +41,14 @@ An id naming no registered backend is skipped rather than treated as an error. S
 
 ## The trait
 
-Detection, capabilities, scanning, and the common deletion validator are implemented.
-Selected-path deletion remains absent: neither ncdu nor Mole exposes a command that can
-implement it. See [ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md).
+Detection, capabilities, scanning, and selected-path deletion share one trait. ncdu, gdu,
+and Mole retain the default `Unsupported` destructive methods; rip implements them. See
+[ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md) and
+[ADR 0016](adr/0016-rip-is-the-selected-path-deletion-backend.md).
 
 ```rust
 pub trait Adapter: Send + Sync {
-    /// Stable machine identifier: "ncdu", "mole", "gdu".
+    /// Stable machine identifier: "ncdu", "mole", "gdu", "rip".
     fn id(&self) -> &'static str;
 
     /// Name shown in the backend picker.
@@ -69,6 +71,28 @@ pub trait Adapter: Send + Sync {
         sink: &mut dyn WireSink,
         cancel: &CancelToken,
     ) -> Result<ScanSummary, AdapterError>;
+
+    /// Validate and canonicalise a selected target. Default: Unsupported.
+    fn prepare_delete(
+        &self,
+        scan_root: &Path,
+        target: &Path,
+        mode: DeleteMode,
+    ) -> Result<DeletePlan, AdapterError>;
+
+    /// Revalidate and execute a confirmed plan. Default: Unsupported.
+    fn delete(
+        &self,
+        plan: &DeletePlan,
+        cancel: &CancelToken,
+    ) -> Result<DeleteReceipt, AdapterError>;
+
+    /// Restore the exact receipt through the same backend. Default: Unsupported.
+    fn undo(
+        &self,
+        receipt: &DeleteReceipt,
+        cancel: &CancelToken,
+    ) -> Result<(), AdapterError>;
 }
 ```
 
@@ -77,7 +101,7 @@ would be a dependency, a colour on every function, and a second scheduler beside
 Tauri already runs. Callers put `scan` on a worker thread and cancel it with the token.
 
 The parser and `WireSink` live in `crates/adapter` rather than in the ncdu adapter, because
-the format is part of this contract and two of three backends emit it natively. See
+the format is part of this contract and both scanner backends emit it natively. See
 [ADR 0008](adr/0008-wire-parser-in-adapter-crate.md).
 
 ## Reading a scan
@@ -214,6 +238,21 @@ particular thing.
 - Selected-path deletion is not exposed: like ncdu, gdu deletes only inside its interactive
   terminal browser — see [ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md)
 - Details and consequences: [ADR 0015](adr/0015-gdu-is-the-windows-scanner.md)
+
+### rip (macOS and Linux)
+
+- Binary: `rip` from the `rm-improved` package
+- Supported versions: `>=0.13, <0.14`, tested against the real 0.13.1 release
+- Scan: none
+- Selected-path deletion: recoverable only, through a dedicated per-operation graveyard
+  below Nirmoka's application-data directory
+- Undo: exact non-interactive `rip --graveyard <operation> --unbury <receipt>`
+- Dry run and permanent deletion: none. The adapter refuses permanent mode and the shell
+  requires an explicit one-time confirmation token
+- The target is canonicalised and checked twice: during preparation and immediately before
+  it becomes a subprocess argument
+- GPL-3.0 and separately installed. Nirmoka invokes the binary and does not bundle or copy it
+- Details and consequences: [ADR 0016](adr/0016-rip-is-the-selected-path-deletion-backend.md)
 
 ## Fixtures and the contract suite
 

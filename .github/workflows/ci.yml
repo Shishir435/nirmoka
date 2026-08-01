@@ -96,6 +96,15 @@ jobs:
             (Join-Path $directory 'gdu.exe')
           $directory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      # rip is the only backend with scriptable selected-path deletion and
+      # exact undo. It is Unix-only upstream, so Windows still compiles the
+      # adapter and honestly reports it missing.
+      - name: Install rip 0.13.1
+        if: runner.os != 'Windows'
+        run: |
+          cargo install rm-improved --version 0.13.1 --locked
+          echo "NIRMOKA_RIP_BIN=$(command -v rip)" >> "$GITHUB_ENV"
+
       # Lint once per platform. The second Linux entry exists for its backend,
       # not to run clippy again on the same source.
       - name: Format

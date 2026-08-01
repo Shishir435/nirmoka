@@ -44,7 +44,17 @@ is a published specification; no ncdu source code is used.
 
 - Project: <https://github.com/dundee/gdu>
 - License: MIT
-- Role: planned cross-platform backend with ncdu-compatible export
+- Role: cross-platform scanner with ncdu-compatible export; primary Windows backend
+
+### rip (rm-improved)
+
+- Project: <https://github.com/nivekuil/rip>
+- License: GNU General Public License v3.0
+- Role: optional recoverable selected-path deletion backend on macOS and Linux
+
+Nirmoka invokes rip as a separately installed process and does not bundle, link, or copy
+its source. Each operation uses a dedicated graveyard below Nirmoka's application-data
+directory so the exact item can be restored through rip's own `--unbury` command.
 
 ---
 

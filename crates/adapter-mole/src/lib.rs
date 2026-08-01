@@ -142,6 +142,7 @@ impl Adapter for MoleAdapter {
             // selected-path deletion, which Mole does not offer. Recoverability
             // for app uninstall belongs to that operation's eventual API.
             trash: false,
+            undo: false,
             // `mo clean --dry-run`, `mo uninstall --dry-run`. The preview is
             // Mole's own output rather than rows Nirmoka can render, which is a
             // presentation problem for step 10 — not a reason to claim the

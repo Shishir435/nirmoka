@@ -7,7 +7,7 @@ Shared source of truth for any AI agent working on this repo (Claude Code, Codex
 ## Project
 
 Nirmoka is a cross-platform desktop GUI for disk analysis and cleanup. It writes **no disk
-scanner of its own** — it drives existing CLI tools (ncdu, gdu, Mole) as subprocesses
+scanner of its own** — it drives existing CLI tools (ncdu, gdu, Mole, rip) as subprocesses
 behind an adapter layer, and focuses entirely on being a good interface to them.
 
 Read `docs/architecture.md` before your first change. `docs/roadmap.md` has the current
@@ -147,6 +147,7 @@ crates/adapter/       Adapter trait, Capabilities, Detection, Registry
 crates/adapter-ncdu/  baseline backend (cross-platform)
 crates/adapter-gdu/   cross-platform scanner; primary Windows backend
 crates/adapter-mole/  macOS-only cleanup backend. Does not scan — see ADR 0012
+crates/adapter-rip/   recoverable selected-path deletion and exact undo
 crates/cli/           bin `nrmk` — headless harness, not shipped
 crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
 

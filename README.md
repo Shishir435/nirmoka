@@ -59,13 +59,14 @@ unmaintained, swapping it out is a contained change rather than a rewrite.
 See [`docs/architecture.md`](docs/architecture.md) for the full design and
 [`docs/adapters.md`](docs/adapters.md) for the backend contract.
 
-## Planned backends
+## Backends
 
-| Backend                              | Platforms             | Role                                                     |
-| ------------------------------------ | --------------------- | -------------------------------------------------------- |
-| [Mole](https://github.com/tw93/Mole) | macOS                 | Rich cleanup, app uninstall, protected-path safety rules |
-| [ncdu](https://dev.yorhel.nl/ncdu)   | macOS, Linux, BSD     | Baseline scan + delete, everywhere                       |
-| [gdu](https://github.com/dundee/gdu) | macOS, Linux, Windows | Fast parallel scan, ncdu-compatible export               |
+| Backend                                | Platforms             | Role                                                     |
+| -------------------------------------- | --------------------- | -------------------------------------------------------- |
+| [Mole](https://github.com/tw93/Mole)   | macOS                 | Rich cleanup, app uninstall, protected-path safety rules |
+| [ncdu](https://dev.yorhel.nl/ncdu)     | macOS, Linux, BSD     | Baseline scanner                                         |
+| [gdu](https://github.com/dundee/gdu)   | macOS, Linux, Windows | Fast parallel scan, ncdu-compatible export               |
+| [rip](https://github.com/nivekuil/rip) | macOS, Linux          | Recoverable selected-path deletion and exact undo        |
 
 Nirmoka does not bundle any of these. It detects what you already have installed and
 tells you how to get one if you have none.

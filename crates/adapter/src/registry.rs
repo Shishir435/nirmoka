@@ -66,6 +66,15 @@ impl Registry {
         self.adapters.iter().map(AsRef::as_ref)
     }
 
+    /// A registered adapter by stable id.
+    ///
+    /// Used after a one-time destructive confirmation: the operation must run
+    /// through the exact adapter that prepared it, even if preferences change
+    /// while the dialog is open.
+    pub fn by_id(&self, id: &str) -> Option<&dyn Adapter> {
+        self.iter().find(|adapter| adapter.id() == id)
+    }
+
     /// Run detection for every registered adapter.
     ///
     /// A failing adapter yields an `Err` entry rather than aborting the sweep —
@@ -180,6 +189,7 @@ mod tests {
                 caps: Capabilities {
                     scan: false,
                     delete: true,
+                    undo: false,
                     cleanup_categories: true,
                     ..Capabilities::MINIMAL
                 },

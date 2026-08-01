@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod commands;
+pub mod deletion;
 pub mod dto;
 pub mod path;
 pub mod scan;
@@ -33,6 +34,10 @@ pub fn run() {
             commands::cancel_scan,
             commands::scan_summary,
             commands::rows,
+            commands::prepare_delete,
+            commands::confirm_delete,
+            commands::undo_delete,
+            commands::operation_log,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

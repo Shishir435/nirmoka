@@ -12,8 +12,10 @@ use nirmoka_adapter::{Ability, CancelToken, Choice, Preference, Registry};
 use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
+use nirmoka_adapter_rip::RipAdapter;
 use nirmoka_core::Tree;
 
+use crate::deletion::DeletionState;
 use crate::{dto, settings};
 
 /// The registry every entry point builds.
@@ -31,6 +33,7 @@ pub fn registry() -> Registry {
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry.register(Box::new(GduAdapter::new()));
+    registry.register(Box::new(RipAdapter::new()));
     registry
 }
 
@@ -86,11 +89,17 @@ pub struct AppState {
     /// configuration directory, which the UI says out loud rather than letting
     /// the setting silently evaporate on quit.
     persistent: bool,
+    deletion: Mutex<DeletionState>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        Self::with_preference(settings::load(), settings::settings_path().is_some())
+        Self::with_parts(
+            settings::load(),
+            settings::settings_path().is_some(),
+            registry(),
+            settings::operation_log_path(),
+        )
     }
 
     /// A state with a dictated preference and no persistence.
@@ -98,11 +107,21 @@ impl AppState {
     /// Tests use this so they assert against a preference they set rather than
     /// against whatever the developer running them happens to have chosen.
     pub fn with_preference(preference: Preference, persistent: bool) -> Self {
+        Self::with_parts(preference, persistent, registry(), None)
+    }
+
+    pub(crate) fn with_parts(
+        preference: Preference,
+        persistent: bool,
+        registry: Registry,
+        operation_log: Option<PathBuf>,
+    ) -> Self {
         Self {
-            registry: registry(),
+            registry,
             scan: Mutex::new(ScanState::default()),
             preference: Mutex::new(preference),
             persistent,
+            deletion: Mutex::new(DeletionState::new(operation_log)),
         }
     }
 
@@ -119,6 +138,16 @@ impl AppState {
 
     pub fn detect_all(&self) -> Vec<RegistryEntry> {
         self.registry.detect_all()
+    }
+
+    pub fn deletion(&self) -> MutexGuard<'_, DeletionState> {
+        self.deletion
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn adapter(&self, id: &str) -> Option<&dyn nirmoka_adapter::Adapter> {
+        self.registry.by_id(id)
     }
 
     /// The backend the user picked, or `None` for the platform default.
@@ -191,7 +220,7 @@ mod tests {
     #[test]
     fn the_registry_holds_the_backends_the_cli_reports() {
         let ids: Vec<_> = registry().iter().map(|adapter| adapter.id()).collect();
-        assert_eq!(ids, vec!["ncdu", "mole", "gdu"]);
+        assert_eq!(ids, vec!["ncdu", "mole", "gdu", "rip"]);
     }
 
     #[test]

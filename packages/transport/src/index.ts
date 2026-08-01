@@ -22,6 +22,8 @@ import type {
   Backend,
   BackendSelection,
   Capabilities,
+  DeleteOperation,
+  DeletePreparation,
   Row,
   RowPage,
   ScanFailure,
@@ -122,6 +124,18 @@ export interface Transport {
     limit: number,
   ): Promise<RowPage>;
 
+  /** Validate a scanned row and receive a one-time confirmation token. */
+  prepareDelete(scanId: number, nodeId: number): Promise<DeletePreparation>;
+
+  /** Execute the exact adapter plan held behind a one-time token. */
+  confirmDelete(confirmationToken: number): Promise<DeleteOperation>;
+
+  /** Restore one recoverable deletion through its original backend. */
+  undoDelete(operationId: number): Promise<DeleteOperation>;
+
+  /** Newest-first durable deletion journal. */
+  operationLog(): Promise<DeleteOperation[]>;
+
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
@@ -161,6 +175,12 @@ export function tauriTransport(): Transport {
     scanSummary: () => invoke<ScanSummary | null>("scan_summary"),
     rows: (scanId, parentId, sort, offset, limit) =>
       invoke<RowPage>("rows", { scanId, parentId, sort, offset, limit }),
+    prepareDelete: (scanId, nodeId) =>
+      invoke<DeletePreparation>("prepare_delete", { scanId, nodeId }),
+    confirmDelete: (confirmationToken) =>
+      invoke<DeleteOperation>("confirm_delete", { confirmationToken }),
+    undoDelete: (operationId) => invoke<DeleteOperation>("undo_delete", { operationId }),
+    operationLog: () => invoke<DeleteOperation[]>("operation_log"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -275,7 +295,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
    * simply echoed the chosen id would render a state the real app cannot reach —
    * "Mole is scanning" — and the UI built against it would be wrong.
    */
-  const DEFAULT_ORDER = ["mole", "ncdu", "gdu"];
+  const DEFAULT_ORDER = ["mole", "rip", "ncdu", "gdu"];
   let chosen: string | null = null;
 
   const selection = async (): Promise<BackendSelection> => {
@@ -314,6 +334,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
             scan: true,
             delete: false,
             trash: false,
+            undo: false,
             dryRun: false,
             cleanupCategories: false,
             uninstallApps: false,
@@ -334,6 +355,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
             scan: false,
             delete: false,
             trash: false,
+            undo: false,
             dryRun: true,
             cleanupCategories: true,
             uninstallApps: true,
@@ -351,6 +373,25 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
             scan: true,
             delete: false,
             trash: false,
+            undo: false,
+            dryRun: false,
+            cleanupCategories: false,
+            uninstallApps: false,
+            systemStatus: false,
+          },
+        },
+        {
+          id: "rip",
+          displayName: "rip",
+          supportedVersions: ">=0.13, <0.14",
+          detection: { state: "notInstalled" },
+          error: null,
+          usable: false,
+          capabilities: {
+            scan: false,
+            delete: true,
+            trash: true,
+            undo: true,
             dryRun: false,
             cleanupCategories: false,
             uninstallApps: false,
@@ -365,6 +406,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
         scan: true,
         delete: false,
         trash: false,
+        undo: false,
         dryRun: false,
         cleanupCategories: false,
         uninstallApps: false,
@@ -456,6 +498,22 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           };
         }),
       };
+    },
+
+    async prepareDelete() {
+      throw new Error("mock transport never performs destructive filesystem operations");
+    },
+
+    async confirmDelete() {
+      throw new Error("mock transport never performs destructive filesystem operations");
+    },
+
+    async undoDelete() {
+      throw new Error("mock transport has no deletion to undo");
+    },
+
+    async operationLog() {
+      return [];
     },
 
     async onScanProgress() {

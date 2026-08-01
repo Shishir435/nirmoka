@@ -10,6 +10,7 @@ use nirmoka_adapter::Registry;
 use nirmoka_adapter_gdu::GduAdapter;
 use nirmoka_adapter_mole::MoleAdapter;
 use nirmoka_adapter_ncdu::NcduAdapter;
+use nirmoka_adapter_rip::RipAdapter;
 
 /// Every adapter Nirmoka ships, in registration order.
 ///
@@ -24,6 +25,7 @@ pub fn registry() -> Registry {
     registry.register(Box::new(NcduAdapter::new()));
     registry.register(Box::new(MoleAdapter::new()));
     registry.register(Box::new(GduAdapter::new()));
+    registry.register(Box::new(RipAdapter::new()));
     registry
 }
 

@@ -30,6 +30,16 @@ pub enum AdapterError {
         stderr: String,
     },
 
+    /// An adapter could run its backend but could not safely complete the
+    /// surrounding operation (for example, creating its recovery directory or
+    /// finding the receipt the backend promised).
+    #[error("{operation} on {backend} failed: {reason}")]
+    OperationFailed {
+        backend: &'static str,
+        operation: &'static str,
+        reason: String,
+    },
+
     /// The backend ran and exited cleanly, but what it printed was not the wire
     /// format. Distinct from `BackendFailed` because the fix is different: a
     /// format drift needs a new version gate, not a working install.
@@ -124,6 +134,19 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "ncdu exited with status 2: no such directory"
+        );
+    }
+
+    #[test]
+    fn operation_failures_explain_the_safety_check_that_failed() {
+        let error = AdapterError::OperationFailed {
+            backend: "rip",
+            operation: "delete",
+            reason: "recovery receipt was not created".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "delete on rip failed: recovery receipt was not created"
         );
     }
 

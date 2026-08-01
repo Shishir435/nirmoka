@@ -24,6 +24,7 @@ nirmoka-adapter = { workspace = true }
 nirmoka-adapter-gdu = { workspace = true }
 nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
+nirmoka-adapter-rip = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
 # Promoted from dev-dependencies by the settings file: the backend choice is
