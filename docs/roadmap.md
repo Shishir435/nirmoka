@@ -227,12 +227,12 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 - [x] Confirm targeted `mo uninstall --dry-run <name>` exists but its plan is human-readable
 - [x] Confirm `mo clean --dry-run` publishes an exact grouped preview file, not JSON
 - [x] Confirm clean category-selection flags were removed and execution performs a fresh discovery
-- [ ] Record sanitized, fixture-driven schemas without committing machine-specific paths or metrics
+- [x] Record sanitized, fixture-driven schemas without committing machine-specific paths or metrics
 
 ### Phase 1 — read-only Mole ports
 
-- [ ] Add capability-specific adapter contracts; do not widen selected-path deletion
-- [ ] Parse and expose `mo status --json`, version-gated and cancellable
+- [x] Add capability-specific adapter contracts; do not widen selected-path deletion
+- [x] Parse and expose `mo status --json`, version-gated and cancellable
 - [ ] Parse and expose `mo uninstall --list` application inventory
 - [ ] Add malformed-output, cancellation, unsupported-version, and contract tests
 

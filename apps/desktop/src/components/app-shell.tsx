@@ -7,6 +7,7 @@ import {
   HardDrive,
   History,
   LayoutDashboard,
+  Activity,
   Settings,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ export type Route =
   | "space"
   | "developer"
   | "applications"
+  | "status"
   | "activity"
   | "help";
 
@@ -28,6 +30,7 @@ const primary = [
   ["space", "Space Explorer", HardDrive],
   ["developer", "Developer", Code2],
   ["applications", "Applications", AppWindow],
+  ["status", "System Status", Activity],
   ["activity", "Activity", History],
 ] as const;
 

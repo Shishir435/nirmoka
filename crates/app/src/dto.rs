@@ -17,7 +17,10 @@
 
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
-use nirmoka_adapter::{Capabilities as AdapterCapabilities, Detection as AdapterDetection};
+use nirmoka_adapter::{
+    Capabilities as AdapterCapabilities, Detection as AdapterDetection,
+    SystemStatus as AdapterSystemStatus,
+};
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -116,6 +119,204 @@ pub struct VolumeInfo {
     pub used_bytes: u64,
     #[ts(type = "number")]
     pub free_bytes: u64,
+}
+
+/// One backend-produced system-health snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct SystemStatus {
+    pub backend: String,
+    pub backend_instead_of: Option<String>,
+    pub collected_at: String,
+    pub host: String,
+    pub platform: String,
+    pub uptime: String,
+    pub health_score: u8,
+    pub health_score_message: String,
+    pub hardware: HardwareStatus,
+    pub cpu: CpuStatus,
+    pub memory: MemoryStatus,
+    pub disks: Vec<DiskStatus>,
+    pub batteries: Vec<BatteryStatus>,
+    pub thermal: ThermalStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct HardwareStatus {
+    pub model: String,
+    pub cpu_model: String,
+    pub total_ram: String,
+    pub disk_size: String,
+    pub os_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CpuStatus {
+    pub usage: f64,
+    pub load1: f64,
+    pub load5: f64,
+    pub load15: f64,
+    pub core_count: u32,
+    pub logical_cpu: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct MemoryStatus {
+    #[ts(type = "number")]
+    pub used: u64,
+    #[ts(type = "number")]
+    pub total: u64,
+    #[ts(type = "number")]
+    pub available: u64,
+    pub used_percent: f64,
+    #[ts(type = "number")]
+    pub swap_used: u64,
+    #[ts(type = "number")]
+    pub swap_total: u64,
+    pub pressure: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DiskStatus {
+    pub mount: String,
+    pub device: String,
+    #[ts(type = "number")]
+    pub used: u64,
+    #[ts(type = "number")]
+    pub total: u64,
+    pub used_percent: f64,
+    pub filesystem: String,
+    pub external: bool,
+    pub smart_status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct BatteryStatus {
+    pub percent: f64,
+    pub status: String,
+    pub time_left: String,
+    pub health: String,
+    pub cycle_count: u32,
+    pub capacity: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct ThermalStatus {
+    pub cpu_temp: Option<f64>,
+    pub gpu_temp: Option<f64>,
+    pub battery_temp: Option<f64>,
+    pub fan_speed: Option<f64>,
+    pub fan_count: Option<u32>,
+}
+
+impl SystemStatus {
+    pub fn from_adapter(
+        backend: impl Into<String>,
+        backend_instead_of: Option<String>,
+        status: AdapterSystemStatus,
+    ) -> Self {
+        Self {
+            backend: backend.into(),
+            backend_instead_of,
+            collected_at: status.collected_at,
+            host: status.host,
+            platform: status.platform,
+            uptime: status.uptime,
+            health_score: status.health_score,
+            health_score_message: status.health_score_msg,
+            hardware: HardwareStatus {
+                model: status.hardware.model,
+                cpu_model: status.hardware.cpu_model,
+                total_ram: status.hardware.total_ram,
+                disk_size: status.hardware.disk_size,
+                os_version: status.hardware.os_version,
+            },
+            cpu: CpuStatus {
+                usage: status.cpu.usage,
+                load1: status.cpu.load1,
+                load5: status.cpu.load5,
+                load15: status.cpu.load15,
+                core_count: status.cpu.core_count,
+                logical_cpu: status.cpu.logical_cpu,
+            },
+            memory: MemoryStatus {
+                used: status.memory.used,
+                total: status.memory.total,
+                available: status.memory.available,
+                used_percent: status.memory.used_percent,
+                swap_used: status.memory.swap_used,
+                swap_total: status.memory.swap_total,
+                pressure: status.memory.pressure,
+            },
+            disks: status
+                .disks
+                .into_iter()
+                .map(|disk| DiskStatus {
+                    mount: disk.mount,
+                    device: disk.device,
+                    used: disk.used,
+                    total: disk.total,
+                    used_percent: disk.used_percent,
+                    filesystem: disk.fstype,
+                    external: disk.external,
+                    smart_status: disk.smart_status,
+                })
+                .collect(),
+            batteries: status
+                .batteries
+                .into_iter()
+                .map(|battery| BatteryStatus {
+                    percent: battery.percent,
+                    status: battery.status,
+                    time_left: battery.time_left,
+                    health: battery.health,
+                    cycle_count: battery.cycle_count,
+                    capacity: battery.capacity,
+                })
+                .collect(),
+            thermal: ThermalStatus {
+                cpu_temp: status.thermal.cpu_temp,
+                gpu_temp: status.thermal.gpu_temp,
+                battery_temp: status.thermal.battery_temp,
+                fan_speed: status.thermal.fan_speed,
+                fan_count: status.thermal.fan_count,
+            },
+        }
+    }
 }
 
 /// One application bundle found inside the completed scan tree.

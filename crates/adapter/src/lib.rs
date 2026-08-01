@@ -19,6 +19,7 @@ pub mod preference;
 pub mod process;
 pub mod registry;
 pub mod scan;
+pub mod status;
 pub mod wire;
 
 use std::path::Path;
@@ -31,6 +32,7 @@ pub use preference::{default_order, default_order_for, Ability, Preference};
 pub use process::CancelToken;
 pub use registry::{Choice, Registry};
 pub use scan::{validate_scan_root, ScanOptions, ScanSummary};
+pub use status::SystemStatus;
 pub use wire::{TreeSink, WireError, WireItem, WireSink};
 
 /// One external disk tool, wrapped.
@@ -60,6 +62,14 @@ pub trait Adapter: Send + Sync {
     /// What this backend can do. Only meaningful after a successful
     /// [`Adapter::detect`].
     fn capabilities(&self) -> Capabilities;
+
+    /// Read one system-health snapshot from this backend.
+    fn system_status(&self, _cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "system status",
+        })
+    }
 
     /// Walk `root`, streaming entries into `sink` as the backend produces them.
     ///

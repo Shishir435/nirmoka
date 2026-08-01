@@ -50,6 +50,14 @@ pub enum AdapterError {
         source: WireError,
     },
 
+    /// A capability-specific machine-readable response changed shape.
+    #[error("{binary} produced unreadable {operation} output: {reason}")]
+    MalformedBackendOutput {
+        binary: &'static str,
+        operation: &'static str,
+        reason: String,
+    },
+
     /// The backend is not on this machine. Not an internal failure — the UI
     /// says "install ncdu", not "something went wrong".
     #[error("{binary} is not installed")]

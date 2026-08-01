@@ -75,6 +75,21 @@ pub fn selection_of(state: &AppState) -> dto::BackendSelection {
     }
 }
 
+/// One backend-produced system-health snapshot.
+pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
+    let choice = state
+        .resolve(Ability::SystemStatus)
+        .ok_or_else(|| "no usable backend provides system status".to_string())?;
+    let backend = choice.adapter.id();
+    let instead_of = choice.instead_of;
+    let status = choice
+        .adapter
+        .system_status(&CancelToken::new())
+        .map_err(|error| error.to_string())?;
+
+    Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
+}
+
 /// Pick a backend, or pass `None` to go back to the platform default.
 ///
 /// Returns the selection as it now stands rather than the id that was passed in.
@@ -459,6 +474,11 @@ pub fn developer_inventory(
     scan_id: ScanId,
 ) -> Result<dto::DeveloperInventory, String> {
     developer_inventory_of(&state, scan_id)
+}
+
+#[tauri::command]
+pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, String> {
+    system_status_of(&state)
 }
 
 #[cfg(test)]

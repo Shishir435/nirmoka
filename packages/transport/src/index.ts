@@ -32,6 +32,7 @@ import type {
   ScanProgress,
   ScanSummary,
   Sort,
+  SystemStatus,
   VolumeInfo,
 } from "./types.js";
 
@@ -148,6 +149,9 @@ export interface Transport {
   /** Developer data evidenced by the completed Rust-side scan tree. */
   developerInventory(scanId: number): Promise<DeveloperInventory>;
 
+  /** One backend-produced system health snapshot. */
+  systemStatus(): Promise<SystemStatus>;
+
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
@@ -197,6 +201,7 @@ export function tauriTransport(): Transport {
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
+    systemStatus: () => invoke<SystemStatus>("system_status"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -547,6 +552,72 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
     async developerInventory() {
       return { scanId: summary.scanId, total: 0, rows: [] };
+    },
+
+    async systemStatus() {
+      return {
+        backend: "mole",
+        backendInsteadOf: null,
+        collectedAt: "2026-08-01T12:00:00Z",
+        host: "fixture-mac",
+        platform: "darwin/arm64",
+        uptime: "2d 3h",
+        healthScore: 91,
+        healthScoreMessage: "Healthy fixture",
+        hardware: {
+          model: "Fixture Mac",
+          cpuModel: "Fixture CPU",
+          totalRam: "16 GB",
+          diskSize: "512 GB",
+          osVersion: "26.5",
+        },
+        cpu: {
+          usage: 23.5,
+          load1: 1.1,
+          load5: 1,
+          load15: 0.9,
+          coreCount: 8,
+          logicalCpu: 8,
+        },
+        memory: {
+          used: 8 * 1024 ** 3,
+          total: 16 * 1024 ** 3,
+          available: 8 * 1024 ** 3,
+          usedPercent: 50,
+          swapUsed: 0,
+          swapTotal: 4 * 1024 ** 3,
+          pressure: "normal",
+        },
+        disks: [
+          {
+            mount: "/",
+            device: "/dev/fixture",
+            used: 200 * 1024 ** 3,
+            total: 500 * 1024 ** 3,
+            usedPercent: 40,
+            filesystem: "apfs",
+            external: false,
+            smartStatus: "verified",
+          },
+        ],
+        batteries: [
+          {
+            percent: 82,
+            status: "discharging",
+            timeLeft: "5h 10m",
+            health: "normal",
+            cycleCount: 120,
+            capacity: 94,
+          },
+        ],
+        thermal: {
+          cpuTemp: 48,
+          gpuTemp: 44,
+          batteryTemp: 31,
+          fanSpeed: 0,
+          fanCount: 1,
+        },
+      };
     },
 
     async onScanProgress() {

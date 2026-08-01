@@ -34,9 +34,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use nirmoka_adapter::process::find_in_path;
+use nirmoka_adapter::process::{find_in_path, RunningProcess};
 use nirmoka_adapter::{
-    Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions, ScanSummary, WireSink,
+    Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions, ScanSummary,
+    SystemStatus, WireSink,
 };
 
 const BINARY: &str = "mo";
@@ -155,6 +156,22 @@ impl Adapter for MoleAdapter {
         }
     }
 
+    fn system_status(&self, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
+        let binary = match self.detect()? {
+            Detection::Found { path, .. } => path,
+            Detection::UnsupportedVersion { version, .. } => {
+                return Err(AdapterError::UnsupportedVersion {
+                    binary: BINARY,
+                    version,
+                    supported: SUPPORTED,
+                })
+            }
+            Detection::NotInstalled => return Err(AdapterError::NotInstalled { binary: BINARY }),
+        };
+
+        status_from(&binary, cancel)
+    }
+
     /// Always [`AdapterError::Unsupported`].
     ///
     /// Not a stub and not a TODO. Faking a scan here would mean either a tree
@@ -172,6 +189,51 @@ impl Adapter for MoleAdapter {
             operation: "scan",
         })
     }
+}
+
+fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
+    let mut command = Command::new(binary);
+    command.args(["status", "--json"]);
+
+    let mut process =
+        RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+    let parsed = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation: "system status",
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|stdout| {
+            serde_json::from_reader(stdout).map_err(|source| AdapterError::MalformedBackendOutput {
+                binary: BINARY,
+                operation: "system status",
+                reason: source.to_string(),
+            })
+        });
+
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    if outcome.cancelled {
+        return Err(AdapterError::Cancelled {
+            backend: "mole",
+            operation: "system status",
+        });
+    }
+    if !outcome.status.success() {
+        return Err(AdapterError::BackendFailed {
+            binary: BINARY,
+            status: outcome.status.code().unwrap_or(-1),
+            stderr: outcome.stderr,
+        });
+    }
+
+    parsed
 }
 
 /// Pull a version out of `mo --version` output.
@@ -226,6 +288,8 @@ fn parts_of(version: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
 
     /// Byte-for-byte what `mo --version` printed on Mole 1.48.1, leading blank
     /// line included. Trimming it here to make the parser's job easier is how
@@ -314,6 +378,54 @@ mod tests {
         );
         assert!(caps.dry_run && caps.cleanup_categories && caps.uninstall_apps);
         assert!(caps.system_status);
+    }
+
+    #[test]
+    fn parses_the_sanitized_status_fixture() {
+        let status: SystemStatus = serde_json::from_str(STATUS).expect("status fixture");
+
+        assert_eq!(status.health_score, 91);
+        assert_eq!(status.cpu.logical_cpu, 8);
+        assert_eq!(status.memory.total, 17_179_869_184);
+        assert_eq!(status.disks[0].mount, "/");
+        assert_eq!(status.batteries[0].cycle_count, 120);
+        assert_eq!(status.thermal.cpu_temp, Some(48.0));
+    }
+
+    #[test]
+    fn malformed_status_is_rejected() {
+        let error = serde_json::from_str::<SystemStatus>(r#"{"health_score":"healthy"}"#)
+            .expect_err("wrong types must fail");
+
+        assert!(error.to_string().contains("invalid type"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cancelling_status_kills_the_subprocess() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::thread;
+        use std::time::{Duration, SystemTime};
+
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let script = std::env::temp_dir().join(format!("nirmoka-mole-status-{unique}.sh"));
+        fs::write(&script, "#!/bin/sh\nsleep 60\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let cancel = CancelToken::new();
+        let worker_cancel = cancel.clone();
+        let worker_script = script.clone();
+        let worker = thread::spawn(move || status_from(&worker_script, &worker_cancel));
+        thread::sleep(Duration::from_millis(100));
+        cancel.cancel();
+
+        let error = worker.join().unwrap().expect_err("status was cancelled");
+        let _ = fs::remove_file(script);
+        assert!(matches!(error, AdapterError::Cancelled { .. }), "{error}");
     }
 
     /// Mole is macOS-only upstream, so a `mo` found anywhere else is a

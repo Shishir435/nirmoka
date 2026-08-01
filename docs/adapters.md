@@ -204,8 +204,9 @@ what the backend would delete.
   subprocess per directory. The adapter declares `scan: false` and returns `Unsupported`.
   See [ADR 0012](adr/0012-mole-is-not-a-scanner.md) and `fixtures/mole/1.48.1/`
 - Preview: `mo clean --dry-run`, `mo uninstall --dry-run`. Human-readable text, not JSON —
-  the ability is real, rendering it as rows is a step 10 problem
-- Status: `mo status --json`
+  the ability is real, and step 11 parses only plans Mole itself produced
+- Status: `mo status --json`, normalized into the capability-specific system-status contract;
+  the adapter rejects malformed output and unsupported Mole versions
 - Capabilities: dry run, cleanup categories, app uninstall, status. Not arbitrary-path
   deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.
