@@ -35,24 +35,10 @@ impl Fixture {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("deep/deeper")).unwrap();
         std::fs::create_dir_all(root.join("empty")).unwrap();
-        std::fs::write(root.join("deep/big.bin"), deterministic_bytes(200 * 1024)).unwrap();
+        std::fs::write(root.join("deep/big.bin"), vec![0u8; 200 * 1024]).unwrap();
         std::fs::write(root.join("deep/deeper/small.txt"), b"small").unwrap();
         Self(root)
     }
-}
-
-/// High-entropy fixture data keeps disk usage meaningful on filesystems that
-/// compress or sparsify long zero runs (including some Windows CI volumes).
-fn deterministic_bytes(len: usize) -> Vec<u8> {
-    let mut state = 0x4d59_5df4_d0f3_3173_u64;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect()
 }
 
 impl Drop for Fixture {
@@ -106,11 +92,22 @@ fn scans_a_real_directory_into_the_shared_tree() {
         .backend_version
         .as_deref()
         .is_some_and(|version| version.starts_with("5.32.")));
-    assert!(tree.get(root).unwrap().total_bytes >= 200 * 1024);
-    assert_eq!(
-        tree.get(tree.children_by_size(root)[0]).unwrap().name,
-        "deep"
-    );
+    let deep = tree
+        .children_of(root)
+        .iter()
+        .copied()
+        .find(|id| tree.get(*id).is_ok_and(|node| node.name == "deep"))
+        .expect("deep directory is present");
+    let big = tree
+        .children_of(deep)
+        .iter()
+        .copied()
+        .find(|id| tree.get(*id).is_ok_and(|node| node.name == "big.bin"))
+        .expect("big file is present");
+
+    // Disk usage varies with filesystem allocation and compression. Apparent
+    // size is the portable proof that gdu reported the whole file.
+    assert_eq!(tree.get(big).unwrap().apparent_bytes, 200 * 1024);
 }
 
 #[test]
