@@ -159,9 +159,10 @@ jobs:
         if: matrix.ncdu_expect != 'skip'
         run: ncdu --version
 
-      # `backends` exits non-zero when nothing usable is found, so the exit
-      # code is asserted explicitly per platform rather than assumed. This is
-      # also the proof that the whole stack runs with no display server.
+      # `backends` exits non-zero when nothing usable is found. Once rip is
+      # installed, an unsupported ncdu no longer implies that exit status, so
+      # version-gate assertions inspect ncdu's own row rather than conflating
+      # one backend's state with the whole registry.
       - name: Detect backends
         if: matrix.ncdu_expect != 'skip'
         shell: bash
@@ -194,12 +195,8 @@ jobs:
               fi
               ;;
             unsupported)
-              if [ "$status" -eq 0 ]; then
-                echo "::error::ncdu 1.x must not be accepted — the version gate failed"
-                exit 1
-              fi
-              if ! printf '%s' "$output" | grep -q 'unsupported'; then
-                echo "::error::expected ncdu reported as unsupported"
+              if ! printf '%s' "$output" | grep -qE '^ncdu +unsupported +1\.'; then
+                echo "::error::expected ncdu 1.x reported as unsupported"
                 exit 1
               fi
               ;;
