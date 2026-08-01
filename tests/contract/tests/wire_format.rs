@@ -270,5 +270,8 @@ fn gdu_records_the_shared_wire_format_without_translation() {
     assert_eq!(stats.header.format_major, 1);
     assert_eq!(stats.header.format_minor, 2);
     assert_eq!(tree_stats.hardlinks_deduplicated, 1);
-    assert!(tree.path_of(tree.root().unwrap()).unwrap().is_absolute());
+    // Fixtures use a neutral `/fixtures/...` root. It has a filesystem root on
+    // every platform, but Windows reserves `is_absolute` for drive-qualified
+    // paths such as `C:\\fixtures`.
+    assert!(tree.path_of(tree.root().unwrap()).unwrap().has_root());
 }
