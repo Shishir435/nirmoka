@@ -28,6 +28,7 @@ import type {
   Row,
   RowPage,
   DeveloperInventory,
+  InstalledApplicationInventory,
   ScanFailure,
   ScanProgress,
   ScanSummary,
@@ -146,6 +147,9 @@ export interface Transport {
   /** Application bundles evidenced by the completed Rust-side scan tree. */
   applicationInventory(scanId: number): Promise<ApplicationInventory>;
 
+  /** Backend-produced applications with stable uninstall identifiers. */
+  installedApplicationInventory(): Promise<InstalledApplicationInventory>;
+
   /** Developer data evidenced by the completed Rust-side scan tree. */
   developerInventory(scanId: number): Promise<DeveloperInventory>;
 
@@ -200,6 +204,8 @@ export function tauriTransport(): Transport {
     volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
+    installedApplicationInventory: () =>
+      invoke<InstalledApplicationInventory>("installed_application_inventory"),
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
     systemStatus: () => invoke<SystemStatus>("system_status"),
 
@@ -548,6 +554,32 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
     async applicationInventory() {
       return { scanId: summary.scanId, total: 0, rows: [] };
+    },
+
+    async installedApplicationInventory() {
+      return {
+        backend: "mole",
+        backendInsteadOf: null,
+        total: 2,
+        rows: [
+          {
+            name: "Example",
+            bundleId: "com.example.desktop",
+            source: "system",
+            uninstallName: "Example",
+            path: "/Applications/Example.app",
+            totalBytes: 256 * 1024 ** 2,
+          },
+          {
+            name: "Sample Tool",
+            bundleId: "org.example.sample-tool",
+            source: "user",
+            uninstallName: "Sample Tool",
+            path: "/Users/fixture/Applications/Sample Tool.app",
+            totalBytes: 64 * 1024 ** 2,
+          },
+        ],
+      };
     },
 
     async developerInventory() {

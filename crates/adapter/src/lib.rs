@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod applications;
 pub mod capabilities;
 pub mod delete;
 pub mod detect;
@@ -24,6 +25,7 @@ pub mod wire;
 
 use std::path::Path;
 
+pub use applications::InstalledApplication;
 pub use capabilities::Capabilities;
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
@@ -68,6 +70,17 @@ pub trait Adapter: Send + Sync {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "system status",
+        })
+    }
+
+    /// List applications this backend can later address for uninstall.
+    fn installed_applications(
+        &self,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<InstalledApplication>, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "application inventory",
         })
     }
 

@@ -136,6 +136,13 @@ export type DiskStatus = { mount: string, device: string, used: number, total: n
 
 export type HardwareStatus = { model: string, cpuModel: string, totalRam: string, diskSize: string, osVersion: string, };
 
+export type InstalledApplication = { name: string, bundleId: string, source: string, uninstallName: string, path: string, totalBytes: number, };
+
+/**
+ * Applications addressed by a backend's own uninstall identifier.
+ */
+export type InstalledApplicationInventory = { backend: string, backendInsteadOf: string | null, total: number, rows: Array<InstalledApplication>, };
+
 export type MemoryStatus = { used: number, total: number, available: number, usedPercent: number, swapUsed: number, swapTotal: number, pressure: string, };
 
 export type NodeKind = "directory" | "file" | "symlink" | "other";

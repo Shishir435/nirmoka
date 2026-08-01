@@ -207,6 +207,8 @@ what the backend would delete.
   the ability is real, and step 11 parses only plans Mole itself produced
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
+- Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's
+  `uninstall_name` crosses the boundary unchanged so later execution never guesses from a label
 - Capabilities: dry run, cleanup categories, app uninstall, status. Not arbitrary-path
   deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.

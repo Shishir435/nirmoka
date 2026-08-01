@@ -19,7 +19,7 @@ use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
 use nirmoka_adapter::{
     Capabilities as AdapterCapabilities, Detection as AdapterDetection,
-    SystemStatus as AdapterSystemStatus,
+    InstalledApplication as AdapterInstalledApplication, SystemStatus as AdapterSystemStatus,
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
@@ -346,6 +346,68 @@ pub struct ApplicationInventory {
     pub scan_id: u64,
     pub total: u32,
     pub rows: Vec<ApplicationItem>,
+}
+
+/// Applications addressed by a backend's own uninstall identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct InstalledApplicationInventory {
+    pub backend: String,
+    pub backend_instead_of: Option<String>,
+    pub total: u32,
+    pub rows: Vec<InstalledApplication>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct InstalledApplication {
+    pub name: String,
+    pub bundle_id: String,
+    pub source: String,
+    pub uninstall_name: String,
+    pub path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+}
+
+impl InstalledApplicationInventory {
+    pub fn from_adapter(
+        backend: impl Into<String>,
+        backend_instead_of: Option<String>,
+        applications: Vec<AdapterInstalledApplication>,
+    ) -> Self {
+        let total = applications.len().min(u32::MAX as usize) as u32;
+        let mut rows = applications
+            .into_iter()
+            .map(|application| InstalledApplication {
+                name: application.name,
+                bundle_id: application.bundle_id,
+                source: application.source,
+                uninstall_name: application.uninstall_name,
+                path: application.path.display().to_string(),
+                total_bytes: application.size,
+            })
+            .collect::<Vec<_>>();
+        rows.sort_unstable_by(|a, b| {
+            b.total_bytes
+                .cmp(&a.total_bytes)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        Self {
+            backend: backend.into(),
+            backend_instead_of,
+            total,
+            rows,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -1076,5 +1138,34 @@ mod tests {
             }
             other => panic!("unsupported version collapsed into {other:?}"),
         }
+    }
+
+    #[test]
+    fn backend_application_identity_survives_and_rows_sort_by_size() {
+        let inventory = InstalledApplicationInventory::from_adapter(
+            "mole",
+            None,
+            vec![
+                AdapterInstalledApplication {
+                    name: "Small".into(),
+                    bundle_id: "example.small".into(),
+                    source: "user".into(),
+                    uninstall_name: "Small Command".into(),
+                    path: "/Applications/Small.app".into(),
+                    size: 10,
+                },
+                AdapterInstalledApplication {
+                    name: "Large".into(),
+                    bundle_id: "example.large".into(),
+                    source: "system".into(),
+                    uninstall_name: "Large Command".into(),
+                    path: "/Applications/Large.app".into(),
+                    size: 20,
+                },
+            ],
+        );
+
+        assert_eq!(inventory.rows[0].name, "Large");
+        assert_eq!(inventory.rows[1].uninstall_name, "Small Command");
     }
 }

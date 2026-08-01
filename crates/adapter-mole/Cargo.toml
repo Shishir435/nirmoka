@@ -10,5 +10,6 @@ authors.workspace = true
 [dependencies]
 nirmoka-adapter = { workspace = true }
 nirmoka-core = { workspace = true }
-# Mole's supported status boundary is JSON; parsing stays in its adapter.
+# Mole's supported status and application-list boundaries are JSON; parsing stays here.
+serde = { workspace = true }
 serde_json = { workspace = true }

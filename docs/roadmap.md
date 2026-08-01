@@ -233,8 +233,8 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 
 - [x] Add capability-specific adapter contracts; do not widen selected-path deletion
 - [x] Parse and expose `mo status --json`, version-gated and cancellable
-- [ ] Parse and expose `mo uninstall --list` application inventory
-- [ ] Add malformed-output, cancellation, unsupported-version, and contract tests
+- [x] Parse and expose `mo uninstall --list` application inventory
+- [x] Add malformed-output, cancellation, unsupported-version, and contract tests
 
 ### Phase 2 — exact cleanup review
 

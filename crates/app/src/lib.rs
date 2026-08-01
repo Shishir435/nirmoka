@@ -42,6 +42,7 @@ pub fn run() {
             commands::operation_log,
             commands::volume_info,
             commands::application_inventory,
+            commands::installed_application_inventory,
             commands::developer_inventory,
             commands::system_status,
         ])

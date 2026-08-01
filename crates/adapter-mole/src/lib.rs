@@ -36,8 +36,8 @@ use std::process::Command;
 
 use nirmoka_adapter::process::{find_in_path, RunningProcess};
 use nirmoka_adapter::{
-    Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions, ScanSummary,
-    SystemStatus, WireSink,
+    Adapter, AdapterError, CancelToken, Capabilities, Detection, InstalledApplication, ScanOptions,
+    ScanSummary, SystemStatus, WireSink,
 };
 
 const BINARY: &str = "mo";
@@ -157,19 +157,16 @@ impl Adapter for MoleAdapter {
     }
 
     fn system_status(&self, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
-        let binary = match self.detect()? {
-            Detection::Found { path, .. } => path,
-            Detection::UnsupportedVersion { version, .. } => {
-                return Err(AdapterError::UnsupportedVersion {
-                    binary: BINARY,
-                    version,
-                    supported: SUPPORTED,
-                })
-            }
-            Detection::NotInstalled => return Err(AdapterError::NotInstalled { binary: BINARY }),
-        };
-
+        let binary = supported_binary(self.detect()?)?;
         status_from(&binary, cancel)
+    }
+
+    fn installed_applications(
+        &self,
+        cancel: &CancelToken,
+    ) -> Result<Vec<InstalledApplication>, AdapterError> {
+        let binary = supported_binary(self.detect()?)?;
+        applications_from(&binary, cancel)
     }
 
     /// Always [`AdapterError::Unsupported`].
@@ -191,9 +188,42 @@ impl Adapter for MoleAdapter {
     }
 }
 
+fn supported_binary(detection: Detection) -> Result<PathBuf, AdapterError> {
+    match detection {
+        Detection::Found { path, .. } => Ok(path),
+        Detection::UnsupportedVersion { version, .. } => Err(AdapterError::UnsupportedVersion {
+            binary: BINARY,
+            version,
+            supported: SUPPORTED,
+        }),
+        Detection::NotInstalled => Err(AdapterError::NotInstalled { binary: BINARY }),
+    }
+}
+
+fn applications_from(
+    binary: &Path,
+    cancel: &CancelToken,
+) -> Result<Vec<InstalledApplication>, AdapterError> {
+    json_from_command(
+        binary,
+        &["uninstall", "--list"],
+        "application inventory",
+        cancel,
+    )
+}
+
 fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
+    json_from_command(binary, &["status", "--json"], "system status", cancel)
+}
+
+fn json_from_command<T: serde::de::DeserializeOwned>(
+    binary: &Path,
+    args: &[&str],
+    operation: &'static str,
+    cancel: &CancelToken,
+) -> Result<T, AdapterError> {
     let mut command = Command::new(binary);
-    command.args(["status", "--json"]);
+    command.args(args);
 
     let mut process =
         RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
@@ -204,13 +234,13 @@ fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, Adap
         .take_stdout()
         .ok_or_else(|| AdapterError::OperationFailed {
             backend: "mole",
-            operation: "system status",
+            operation,
             reason: "backend stdout was unavailable".to_string(),
         })
         .and_then(|stdout| {
             serde_json::from_reader(stdout).map_err(|source| AdapterError::MalformedBackendOutput {
                 binary: BINARY,
-                operation: "system status",
+                operation,
                 reason: source.to_string(),
             })
         });
@@ -222,7 +252,7 @@ fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, Adap
     if outcome.cancelled {
         return Err(AdapterError::Cancelled {
             backend: "mole",
-            operation: "system status",
+            operation,
         });
     }
     if !outcome.status.success() {
@@ -289,7 +319,24 @@ fn parts_of(version: &str) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn executable_script(contents: &str) -> PathBuf {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::SystemTime;
+
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let script = std::env::temp_dir().join(format!("nirmoka-mole-test-{unique}.sh"));
+        fs::write(&script, contents).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        script
+    }
+
     const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
+    const APPLICATIONS: &str = include_str!("../../../fixtures/mole/1.48.1/applications.json");
 
     /// Byte-for-byte what `mo --version` printed on Mole 1.48.1, leading blank
     /// line included. Trimming it here to make the parser's job easier is how
@@ -393,28 +440,65 @@ mod tests {
     }
 
     #[test]
-    fn malformed_status_is_rejected() {
-        let error = serde_json::from_str::<SystemStatus>(r#"{"health_score":"healthy"}"#)
-            .expect_err("wrong types must fail");
+    #[cfg(unix)]
+    fn malformed_status_is_rejected_as_backend_output() {
+        let script = executable_script("#!/bin/sh\nprintf '%s' '{\"health_score\":\"healthy\"}'\n");
+        let error = status_from(&script, &CancelToken::new()).expect_err("wrong types must fail");
+        let _ = std::fs::remove_file(script);
 
-        assert!(error.to_string().contains("invalid type"));
+        assert!(matches!(
+            error,
+            AdapterError::MalformedBackendOutput {
+                operation: "system status",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_the_sanitized_application_fixture() {
+        let applications: Vec<InstalledApplication> =
+            serde_json::from_str(APPLICATIONS).expect("application fixture");
+
+        assert_eq!(applications.len(), 2);
+        assert_eq!(applications[0].bundle_id, "com.example.desktop");
+        assert_eq!(applications[0].uninstall_name, "Example");
+        assert_eq!(applications[0].path, Path::new("/Applications/Example.app"));
+        assert_eq!(applications[0].size, 268_435_456);
+    }
+
+    #[test]
+    fn malformed_application_inventory_is_rejected() {
+        let error = serde_json::from_str::<Vec<InstalledApplication>>(r#"[{"name":"Example"}]"#)
+            .expect_err("missing command identity must fail");
+
+        assert!(error.to_string().contains("bundle_id"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn application_inventory_uses_the_noninteractive_list_command() {
+        let script = executable_script(
+            r#"#!/bin/sh
+[ "$1" = "uninstall" ] && [ "$2" = "--list" ] || exit 12
+printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"system","uninstall_name":"Example","path":"/Applications/Example.app","size":42}]'
+"#,
+        );
+        let applications =
+            applications_from(&script, &CancelToken::new()).expect("application list");
+        let _ = std::fs::remove_file(script);
+
+        assert_eq!(applications[0].uninstall_name, "Example");
+        assert_eq!(applications[0].size, 42);
     }
 
     #[test]
     #[cfg(unix)]
     fn cancelling_status_kills_the_subprocess() {
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
         use std::thread;
-        use std::time::{Duration, SystemTime};
+        use std::time::Duration;
 
-        let unique = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let script = std::env::temp_dir().join(format!("nirmoka-mole-status-{unique}.sh"));
-        fs::write(&script, "#!/bin/sh\nsleep 60\n").unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let script = executable_script("#!/bin/sh\nsleep 60\n");
 
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();
@@ -424,7 +508,7 @@ mod tests {
         cancel.cancel();
 
         let error = worker.join().unwrap().expect_err("status was cancelled");
-        let _ = fs::remove_file(script);
+        let _ = std::fs::remove_file(script);
         assert!(matches!(error, AdapterError::Cancelled { .. }), "{error}");
     }
 
