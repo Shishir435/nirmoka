@@ -441,31 +441,20 @@ fn parse_cleanup_preview(
         .flat_map(|category| &category.items)
         .try_fold(0_u64, |total, item| total.checked_add(item.item_count))
         .ok_or_else(|| malformed("cleanup item count overflowed".to_string()))?;
-    if summary_fields != 0 && summary_fields != 3 {
+    if summary_fields != 3 {
         return Err(malformed(
-            "cleanup summary trailer is incomplete".to_string(),
-        ));
-    }
-    if !categories.is_empty() && summary_fields != 3 {
-        return Err(malformed(
-            "nonempty preview has no complete summary trailer".to_string(),
+            "preview has no complete summary trailer".to_string(),
         ));
     }
     let declared_items = match declared_items {
         Some(declared) => declared,
-        None if categories.is_empty() => total_items,
-        None => {
-            return Err(malformed(
-                "nonempty preview has no item-count summary".to_string(),
-            ))
-        }
+        None => return Err(malformed("preview has no item-count summary".to_string())),
     };
     let declared_categories = match declared_categories {
         Some(declared) => declared,
-        None if categories.is_empty() => categories.len(),
         None => {
             return Err(malformed(
-                "nonempty preview has no category-count summary".to_string(),
+                "preview has no category-count summary".to_string(),
             ));
         }
     };
@@ -885,14 +874,23 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     #[test]
     fn cleanup_preview_accepts_an_empty_backend_plan() {
         let preview = parse_cleanup_preview(
-            "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n",
+            "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# Potential cleanup: 0B\n# Items: 0\n# Categories: 0\n",
             CleanupSystemScope::Included,
         )
         .expect("empty cleanup preview");
 
         assert!(preview.categories.is_empty());
         assert_eq!(preview.total_items, 0);
-        assert_eq!(preview.potential_cleanup, None);
+        assert_eq!(preview.potential_cleanup.as_deref(), Some("0B"));
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_category_free_output_without_summary() {
+        let preview = "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# How to protect files:\n";
+        let error = parse_cleanup_preview(preview, CleanupSystemScope::Included)
+            .expect_err("category-free output needs completeness evidence");
+
+        assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
     }
 
     #[test]
