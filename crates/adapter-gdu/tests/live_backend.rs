@@ -35,10 +35,24 @@ impl Fixture {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("deep/deeper")).unwrap();
         std::fs::create_dir_all(root.join("empty")).unwrap();
-        std::fs::write(root.join("deep/big.bin"), vec![0u8; 200 * 1024]).unwrap();
+        std::fs::write(root.join("deep/big.bin"), deterministic_bytes(200 * 1024)).unwrap();
         std::fs::write(root.join("deep/deeper/small.txt"), b"small").unwrap();
         Self(root)
     }
+}
+
+/// High-entropy fixture data keeps disk usage meaningful on filesystems that
+/// compress or sparsify long zero runs (including some Windows CI volumes).
+fn deterministic_bytes(len: usize) -> Vec<u8> {
+    let mut state = 0x4d59_5df4_d0f3_3173_u64;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect()
 }
 
 impl Drop for Fixture {

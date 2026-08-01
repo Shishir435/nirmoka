@@ -64,8 +64,12 @@ if command -v cargo > /dev/null 2>&1; then
       printf 'Missing Rust target. Install once: rustup target add %s\n' "$windows_target"
       failed=1
     else
-      step "Windows-target clippy" \
-        cargo clippy -p nirmoka-adapter-rip --tests --target "$windows_target" -- -D warnings
+      step "Windows-target adapter clippy" \
+        cargo clippy \
+          -p nirmoka-adapter \
+          -p nirmoka-adapter-gdu \
+          -p nirmoka-adapter-rip \
+          --tests --target "$windows_target" -- -D warnings
     fi
   fi
 

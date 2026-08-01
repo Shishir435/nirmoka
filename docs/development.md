@@ -68,7 +68,7 @@ pnpm types                  # regenerate the TypeScript mirrors of the Rust DTOs
 
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p nirmoka-adapter-rip --tests \
+cargo clippy -p nirmoka-adapter -p nirmoka-adapter-gdu -p nirmoka-adapter-rip --tests \
   --target x86_64-pc-windows-gnu -- -D warnings
 cargo fmt --all
 pnpm format
@@ -87,7 +87,7 @@ once with `rustup target add x86_64-pc-windows-gnu`.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p nirmoka-adapter-rip --tests \
+cargo clippy -p nirmoka-adapter -p nirmoka-adapter-gdu -p nirmoka-adapter-rip --tests \
   --target x86_64-pc-windows-gnu -- -D warnings
 cargo test --workspace
 pnpm format:check
