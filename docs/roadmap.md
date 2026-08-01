@@ -238,10 +238,10 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 
 ### Phase 2 — exact cleanup review
 
-- [ ] Parse Mole's generated cleanup preview into typed categories, paths, sizes, and warnings
-- [ ] Keep every path backend-produced; never copy Mole cleanup or protection tables
-- [ ] Show full/partial preview state when system-level candidates require authorization
-- [ ] Design selection honestly around Mole's supported command surface
+- [x] Parse Mole's generated cleanup preview into typed categories, paths, sizes, and warnings
+- [x] Keep every path backend-produced; never copy Mole cleanup or protection tables
+- [x] Show full/partial preview state when system-level candidates require authorization
+- [x] Design selection honestly around Mole's supported command surface
 
 ### Phase 3 — cleanup execution
 

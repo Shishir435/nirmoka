@@ -90,6 +90,23 @@ pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
     Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
 }
 
+/// One fresh backend-owned cleanup discovery. This never removes anything.
+pub fn cleanup_preview_of(state: &AppState) -> Result<dto::CleanupPreview, String> {
+    let choice = state
+        .resolve(Ability::CleanupPreview)
+        .ok_or_else(|| "no usable backend provides cleanup preview".to_string())?;
+    let backend = choice.adapter.id();
+    let instead_of = choice.instead_of;
+    let preview = choice
+        .adapter
+        .cleanup_preview(&CancelToken::new())
+        .map_err(|error| error.to_string())?;
+
+    Ok(dto::CleanupPreview::from_adapter(
+        backend, instead_of, preview,
+    ))
+}
+
 /// Pick a backend, or pass `None` to go back to the platform default.
 ///
 /// Returns the selection as it now stands rather than the id that was passed in.
@@ -506,6 +523,11 @@ pub fn developer_inventory(
 #[tauri::command]
 pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, String> {
     system_status_of(&state)
+}
+
+#[tauri::command]
+pub async fn cleanup_preview(state: State<'_, AppState>) -> Result<dto::CleanupPreview, String> {
+    cleanup_preview_of(&state)
 }
 
 #[cfg(test)]

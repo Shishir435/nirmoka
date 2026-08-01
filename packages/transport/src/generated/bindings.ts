@@ -86,6 +86,17 @@ export type BatteryStatus = { percent: number, status: string, timeLeft: string,
  */
 export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
 
+export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
+
+export type CleanupItem = { path: string, reportedSize: string | null, itemCount: number, };
+
+/**
+ * Exact path groups published by a backend dry run.
+ */
+export type CleanupPreview = { backend: string, backendInsteadOf: string | null, generatedAt: string, categories: Array<CleanupCategory>, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, };
+
+export type CleanupSystemScope = "included" | "userOnly" | "unknown";
+
 export type CpuStatus = { usage: number, load1: number, load5: number, load15: number, coreCount: number, logicalCpu: number, };
 
 /**

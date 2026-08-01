@@ -44,6 +44,7 @@ pub enum Ability {
     Undo,
     DryRun,
     CleanupCategories,
+    CleanupPreview,
     UninstallApps,
     SystemStatus,
 }
@@ -58,6 +59,7 @@ impl Ability {
             Self::Undo => "undo deletion",
             Self::DryRun => "dry run",
             Self::CleanupCategories => "cleanup categories",
+            Self::CleanupPreview => "cleanup preview",
             Self::UninstallApps => "uninstall applications",
             Self::SystemStatus => "system status",
         }
@@ -71,6 +73,7 @@ impl Ability {
             Self::Undo => caps.undo,
             Self::DryRun => caps.dry_run,
             Self::CleanupCategories => caps.cleanup_categories,
+            Self::CleanupPreview => caps.cleanup_categories && caps.dry_run,
             Self::UninstallApps => caps.uninstall_apps,
             Self::SystemStatus => caps.system_status,
         }
@@ -184,6 +187,7 @@ mod tests {
         };
         assert!(!Ability::Scan.is_offered_by(&mole));
         assert!(Ability::CleanupCategories.is_offered_by(&mole));
+        assert!(Ability::CleanupPreview.is_offered_by(&mole));
         assert!(Ability::UninstallApps.is_offered_by(&mole));
         assert!(Ability::SystemStatus.is_offered_by(&mole));
     }

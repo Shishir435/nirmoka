@@ -191,13 +191,14 @@ fn the_registry_agrees_with_the_adapters_it_holds() {
 fn a_resolved_backend_can_always_do_what_it_was_resolved_for() {
     use nirmoka_adapter::{Ability, Preference};
 
-    const ABILITIES: [Ability; 8] = [
+    const ABILITIES: [Ability; 9] = [
         Ability::Scan,
         Ability::Delete,
         Ability::Trash,
         Ability::Undo,
         Ability::DryRun,
         Ability::CleanupCategories,
+        Ability::CleanupPreview,
         Ability::UninstallApps,
         Ability::SystemStatus,
     ];

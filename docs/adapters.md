@@ -205,6 +205,9 @@ what the backend would delete.
   See [ADR 0012](adr/0012-mole-is-not-a-scanner.md) and `fixtures/mole/1.48.1/`
 - Preview: `mo clean --dry-run`, `mo uninstall --dry-run`. Human-readable text, not JSON —
   the ability is real, and step 11 parses only plans Mole itself produced
+- Cleanup preview: the adapter reads Mole's safely published `clean-list.txt`, preserving its
+  category names, paths, rounded size labels, grouped counts, summary, and system-scope warning.
+  The UI offers no category selector because Mole 1.48.1 removed that command surface
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
 - Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's

@@ -23,6 +23,7 @@ import type {
   BackendSelection,
   ApplicationInventory,
   Capabilities,
+  CleanupPreview,
   DeleteOperation,
   DeletePreparation,
   Row,
@@ -156,6 +157,9 @@ export interface Transport {
   /** One backend-produced system health snapshot. */
   systemStatus(): Promise<SystemStatus>;
 
+  /** Fresh backend-owned cleanup discovery. Never removes anything. */
+  cleanupPreview(): Promise<CleanupPreview>;
+
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
@@ -208,6 +212,7 @@ export function tauriTransport(): Transport {
       invoke<InstalledApplicationInventory>("installed_application_inventory"),
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
     systemStatus: () => invoke<SystemStatus>("system_status"),
+    cleanupPreview: () => invoke<CleanupPreview>("cleanup_preview"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -649,6 +654,47 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           fanSpeed: 0,
           fanCount: 1,
         },
+      };
+    },
+
+    async cleanupPreview() {
+      return {
+        backend: "mole",
+        backendInsteadOf: null,
+        generatedAt: "2026-08-01 12:30:00",
+        potentialCleanup: "At least 192.00MB",
+        totalItems: 6,
+        systemScope: "userOnly",
+        warnings: [
+          "System-level candidates are not included because administrator access was unavailable.",
+        ],
+        categories: [
+          {
+            name: "Browser caches",
+            items: [
+              {
+                path: "/Users/fixture/Library/Caches/com.example.browser",
+                reportedSize: "128.00MB",
+                itemCount: 4,
+              },
+              {
+                path: "/Users/fixture/Library/Caches/com.example.helper",
+                reportedSize: "64.00MB",
+                itemCount: 1,
+              },
+            ],
+          },
+          {
+            name: "Developer caches",
+            items: [
+              {
+                path: "/Users/fixture/Library/Developer/Example",
+                reportedSize: null,
+                itemCount: 1,
+              },
+            ],
+          },
+        ],
       };
     },
 

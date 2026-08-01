@@ -13,6 +13,7 @@
 
 pub mod applications;
 pub mod capabilities;
+pub mod cleanup;
 pub mod delete;
 pub mod detect;
 pub mod error;
@@ -27,6 +28,7 @@ use std::path::Path;
 
 pub use applications::InstalledApplication;
 pub use capabilities::Capabilities;
+pub use cleanup::{CleanupCategory, CleanupItem, CleanupPreview, CleanupSystemScope};
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
 pub use error::AdapterError;
@@ -81,6 +83,14 @@ pub trait Adapter: Send + Sync {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "application inventory",
+        })
+    }
+
+    /// Discover the backend's cleanup candidates without removing anything.
+    fn cleanup_preview(&self, _cancel: &CancelToken) -> Result<CleanupPreview, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "cleanup preview",
         })
     }
 
