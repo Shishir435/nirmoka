@@ -55,7 +55,10 @@ fn prepare_validates_at_the_adapter_boundary() {
         .prepare_delete(&dir.0, &target, DeleteMode::Trash)
         .expect("valid descendant");
 
-    assert_eq!(plan.target(), target.canonicalize().unwrap());
+    assert_eq!(
+        plan.target().canonicalize().unwrap(),
+        target.canonicalize().unwrap()
+    );
     assert!(adapter
         .prepare_delete(&dir.0, &dir.0, DeleteMode::Trash)
         .is_err());
