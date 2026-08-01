@@ -5,12 +5,14 @@ import { ScanControls } from "@/components/scan-controls";
 import { EmptyState, PageHeader, SafetyBanner } from "@/components/shared";
 import { TreeView } from "@/components/tree-view";
 import { useApp } from "@/lib/app-context";
+import { parentIdForScan, type SpaceLocation } from "@/pages/space-navigation";
 
 export function SpacePage() {
   const { transport, scan } = useApp();
-  const [parentId, setParentId] = useState<number | null>(null);
+  const [location, setLocation] = useState<SpaceLocation | null>(null);
   const [sort, setSort] = useState<Sort>("largestFirst");
   const summary = scan.status === "done" ? scan.summary : null;
+  const parentId = parentIdForScan(location, summary?.scanId ?? null);
 
   return (
     <div className="space-y-6">
@@ -22,7 +24,9 @@ export function SpacePage() {
           summary={summary}
           parentId={parentId}
           sort={sort}
-          onNavigate={setParentId}
+          onNavigate={(nextParentId) =>
+            setLocation({ scanId: summary.scanId, parentId: nextParentId })
+          }
           onSort={setSort}
         />
       ) : (
