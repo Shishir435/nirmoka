@@ -325,7 +325,10 @@ mod tests {
         let validated = validate_delete_target(&fixture.root, &child).unwrap();
 
         assert!(validated.is_absolute());
-        assert_eq!(validated, child.canonicalize().unwrap());
+        assert_eq!(
+            validated,
+            strip_verbatim_prefix(child.canonicalize().unwrap())
+        );
     }
 
     #[test]

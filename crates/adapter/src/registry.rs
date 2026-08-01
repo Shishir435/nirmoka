@@ -296,16 +296,22 @@ mod tests {
     #[test]
     fn a_chosen_backend_that_cannot_scan_does_not_stop_the_scan() {
         let registry = as_shipped();
-        let choice = registry
-            .scanner(&Preference::of("mole"))
-            .expect("something still scans");
+        for (os, expected) in platform_scanners() {
+            let choice = registry
+                .resolve_in_order(
+                    Ability::Scan,
+                    &Preference::of("mole"),
+                    default_order_for(os),
+                )
+                .expect("something still scans");
 
-        assert_eq!(choice.adapter.id(), "ncdu");
-        assert_eq!(
-            choice.instead_of.as_deref(),
-            Some("mole"),
-            "the UI has to be able to say who was asked for"
-        );
+            assert_eq!(choice.adapter.id(), expected, "{os}");
+            assert_eq!(
+                choice.instead_of.as_deref(),
+                Some("mole"),
+                "the UI has to be able to say who was asked for on {os}"
+            );
+        }
     }
 
     #[test]
@@ -323,12 +329,27 @@ mod tests {
     #[test]
     fn a_choice_naming_no_registered_backend_falls_through_rather_than_failing() {
         let registry = as_shipped();
-        let choice = registry
-            .scanner(&Preference::of("not-a-backend"))
-            .expect("the default still applies");
+        for (os, expected) in platform_scanners() {
+            let choice = registry
+                .resolve_in_order(
+                    Ability::Scan,
+                    &Preference::of("not-a-backend"),
+                    default_order_for(os),
+                )
+                .expect("the default still applies");
 
-        assert_eq!(choice.adapter.id(), "ncdu");
-        assert_eq!(choice.instead_of.as_deref(), Some("not-a-backend"));
+            assert_eq!(choice.adapter.id(), expected, "{os}");
+            assert_eq!(choice.instead_of.as_deref(), Some("not-a-backend"), "{os}");
+        }
+    }
+
+    fn platform_scanners() -> [(&'static str, &'static str); 4] {
+        [
+            ("macos", "ncdu"),
+            ("windows", "gdu"),
+            ("linux", "ncdu"),
+            ("freebsd", "ncdu"),
+        ]
     }
 
     #[test]
