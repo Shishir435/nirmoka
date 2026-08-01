@@ -417,12 +417,35 @@ fn parse_cleanup_preview(
         .flat_map(|category| &category.items)
         .try_fold(0_u64, |total, item| total.checked_add(item.item_count))
         .ok_or_else(|| malformed("cleanup item count overflowed".to_string()))?;
-    if declared_items.is_some_and(|declared| declared != total_items) {
+    if !categories.is_empty() && potential_cleanup.is_none() {
+        return Err(malformed(
+            "nonempty preview has no potential-cleanup summary".to_string(),
+        ));
+    }
+    let declared_items = match declared_items {
+        Some(declared) => declared,
+        None if categories.is_empty() => total_items,
+        None => {
+            return Err(malformed(
+                "nonempty preview has no item-count summary".to_string(),
+            ))
+        }
+    };
+    let declared_categories = match declared_categories {
+        Some(declared) => declared,
+        None if categories.is_empty() => categories.len(),
+        None => {
+            return Err(malformed(
+                "nonempty preview has no category-count summary".to_string(),
+            ));
+        }
+    };
+    if declared_items != total_items {
         return Err(malformed(
             "summary item count does not match its rows".to_string(),
         ));
     }
-    if declared_categories.is_some_and(|declared| declared != categories.len()) {
+    if declared_categories != categories.len() {
         return Err(malformed(
             "summary category count does not match its sections".to_string(),
         ));
@@ -782,6 +805,21 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
             .expect_err("inconsistent preview must fail");
 
         assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_a_missing_or_partial_summary() {
+        for declaration in [
+            "# Potential cleanup: At least 192.00MB\n",
+            "# Items: 6\n",
+            "# Categories: 2\n",
+        ] {
+            let changed = CLEAN_PREVIEW.replace(declaration, "");
+            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+                .expect_err("every nonempty preview summary declaration must be present");
+
+            assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+        }
     }
 
     #[test]
