@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod applications;
 pub mod capabilities;
 pub mod delete;
 pub mod detect;
@@ -19,10 +20,12 @@ pub mod preference;
 pub mod process;
 pub mod registry;
 pub mod scan;
+pub mod status;
 pub mod wire;
 
 use std::path::Path;
 
+pub use applications::InstalledApplication;
 pub use capabilities::Capabilities;
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
@@ -31,6 +34,7 @@ pub use preference::{default_order, default_order_for, Ability, Preference};
 pub use process::CancelToken;
 pub use registry::{Choice, Registry};
 pub use scan::{validate_scan_root, ScanOptions, ScanSummary};
+pub use status::SystemStatus;
 pub use wire::{TreeSink, WireError, WireItem, WireSink};
 
 /// One external disk tool, wrapped.
@@ -60,6 +64,25 @@ pub trait Adapter: Send + Sync {
     /// What this backend can do. Only meaningful after a successful
     /// [`Adapter::detect`].
     fn capabilities(&self) -> Capabilities;
+
+    /// Read one system-health snapshot from this backend.
+    fn system_status(&self, _cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "system status",
+        })
+    }
+
+    /// List applications this backend can later address for uninstall.
+    fn installed_applications(
+        &self,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<InstalledApplication>, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "application inventory",
+        })
+    }
 
     /// Walk `root`, streaming entries into `sink` as the backend produces them.
     ///

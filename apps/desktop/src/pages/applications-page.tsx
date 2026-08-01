@@ -1,6 +1,6 @@
 import { ArrowUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { ApplicationInventory, ApplicationItem } from "@nirmoka/transport";
+import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
 
 import { EmptyState, MetricCard, PageHeader, SectionTitle } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,32 @@ export function ApplicationsPage() {
   const { transport, scan } = useApp();
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<InstalledApplicationInventory | null>(null);
+  const [installedLoading, setInstalledLoading] = useState(true);
+  const [installedError, setInstalledError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [largestFirst, setLargestFirst] = useState(true);
+
+  useEffect(() => {
+    let live = true;
+    transport
+      .installedApplicationInventory()
+      .then(
+        (value) => {
+          if (live) setInstalled(value);
+        },
+        (reason: unknown) => {
+          if (live) setInstalledError(String(reason));
+        },
+      )
+      .finally(() => {
+        if (live) setInstalledLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [transport]);
 
   useEffect(() => {
     if (!summary) {
@@ -23,47 +46,74 @@ export function ApplicationsPage() {
       return;
     }
     let live = true;
-    setError(null);
+    setScanError(null);
     transport.applicationInventory(summary.scanId).then(
       (value) => live && setInventory(value),
-      (reason: unknown) => live && setError(String(reason)),
+      (reason: unknown) => live && setScanError(String(reason)),
     );
     return () => {
       live = false;
     };
   }, [summary, transport]);
 
+  const allRows = useMemo(
+    () =>
+      installed
+        ? installed.rows.map((app) => ({
+            key: `${app.bundleId}-${app.path}`,
+            name: app.name,
+            path: app.path,
+            totalBytes: app.totalBytes,
+            sizeIsPartial: false,
+            detail: `${app.bundleId} · ${app.source}`,
+          }))
+        : (inventory?.rows.map((app) => ({
+            key: `${app.id}-${app.path}`,
+            name: app.name,
+            path: app.path,
+            totalBytes: app.totalBytes,
+            sizeIsPartial: app.sizeIsPartial,
+            detail: null,
+          })) ?? []),
+    [installed, inventory],
+  );
   const rows = useMemo(() => {
-    const found =
-      inventory?.rows.filter((app) => app.name.toLowerCase().includes(search.toLowerCase())) ?? [];
+    const found = allRows.filter((app) => app.name.toLowerCase().includes(search.toLowerCase()));
     return largestFirst ? found : [...found].reverse();
-  }, [inventory, largestFirst, search]);
-  const totalBytes = inventory?.rows.reduce((sum, app) => sum + app.totalBytes, 0) ?? 0;
+  }, [allRows, largestFirst, search]);
+  const totalBytes = allRows.reduce((sum, app) => sum + app.totalBytes, 0);
+  const total = installed?.total ?? inventory?.total ?? 0;
+  const sourceHint = installed ? `Reported by ${installed.backend}` : `Within ${summary?.rootPath}`;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Applications" subtitle="Application bundles found in the current scan" />
-      {!summary ? (
+      <PageHeader
+        title="Applications"
+        subtitle={
+          installed
+            ? "Applications Mole can address for uninstall"
+            : "Application bundles found in the current scan"
+        }
+      />
+      {installedLoading && !inventory ? (
+        <EmptyState title="Reading applications" text="Checking Mole and the current scan." />
+      ) : !installed && !summary ? (
         <EmptyState
           title="No application inventory"
-          text="Scan /Applications, ~/Applications, or a parent directory to inventory real .app bundles."
+          text={`${installedError ?? "Mole application inventory is unavailable"}. Install a supported Mole release, or scan /Applications.`}
         />
-      ) : error ? (
-        <p className="text-sm text-destructive">{error}</p>
+      ) : scanError && !installed ? (
+        <p className="text-sm text-destructive">{scanError}</p>
       ) : (
         <>
           <div className="grid grid-cols-4 gap-3 max-[1100px]:grid-cols-2">
+            <MetricCard label="Applications Found" value={formatCount(total)} hint={sourceHint} />
             <MetricCard
-              label="Applications Found"
-              value={formatCount(inventory?.total ?? 0)}
-              hint={`Within ${summary.rootPath}`}
-            />
-            <MetricCard
-              label="Scanned Footprint"
+              label={installed ? "Application Footprint" : "Scanned Footprint"}
               value={formatBytes(totalBytes)}
-              hint="Bundle contents only"
+              hint={installed ? "Mole-reported app size" : "Bundle contents only"}
             />
-            <MetricCard label="Last Used" value="Unavailable" hint="Not present in ncdu export" />
+            <MetricCard label="Last Used" value="Unavailable" hint="Not reported by backend" />
             <MetricCard
               label="Related Data / Leftovers"
               value="Unavailable"
@@ -96,21 +146,25 @@ export function ApplicationsPage() {
               </div>
               {rows.length === 0 ? (
                 <EmptyState
-                  title="No .app bundles in this scan"
-                  text="Nirmoka does not infer applications outside the directory you scanned."
+                  title={installed ? "No matching applications" : "No .app bundles in this scan"}
+                  text={
+                    installed
+                      ? "Clear the search to see every application Mole reported."
+                      : "Nirmoka does not infer applications outside the directory you scanned."
+                  }
                 />
               ) : (
                 <div className="divide-y">
                   {rows.map((app) => (
-                    <ApplicationRow key={`${app.id}-${app.path}`} app={app} />
+                    <ApplicationRow key={app.key} app={app} />
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
-          {(inventory?.total ?? 0) > (inventory?.rows.length ?? 0) && (
+          {total > allRows.length && (
             <p className="text-xs text-muted-foreground">
-              Showing the largest {inventory?.rows.length} of {inventory?.total} bundles.
+              Showing {allRows.length} of {total} applications.
             </p>
           )}
         </>
@@ -119,7 +173,16 @@ export function ApplicationsPage() {
   );
 }
 
-function ApplicationRow({ app }: { app: ApplicationItem }) {
+interface ApplicationRowModel {
+  key: string;
+  name: string;
+  path: string;
+  totalBytes: number;
+  sizeIsPartial: boolean;
+  detail: string | null;
+}
+
+function ApplicationRow({ app }: { app: ApplicationRowModel }) {
   return (
     <div className="flex items-center gap-3 py-3 text-sm">
       <span className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
@@ -128,6 +191,9 @@ function ApplicationRow({ app }: { app: ApplicationItem }) {
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{app.name}</span>
         <span className="block truncate font-mono text-xs text-muted-foreground">{app.path}</span>
+        {app.detail && (
+          <span className="block truncate text-xs text-muted-foreground">{app.detail}</span>
+        )}
       </span>
       {app.sizeIsPartial && <span className="text-xs text-warning-foreground">Partial</span>}
       <span className="tabular-nums">{formatBytes(app.totalBytes)}</span>

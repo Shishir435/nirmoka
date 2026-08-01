@@ -79,10 +79,14 @@ persistent: boolean,
  */
 saveError: string | null, };
 
+export type BatteryStatus = { percent: number, status: string, timeLeft: string, health: string, cycleCount: number, capacity: number, };
+
 /**
  * What the active backend can do, so the UI can hide controls it cannot honour.
  */
 export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
+
+export type CpuStatus = { usage: number, load1: number, load5: number, load15: number, coreCount: number, logicalCpu: number, };
 
 /**
  * One step on the way back out of a directory.
@@ -127,6 +131,19 @@ export type DeveloperInventory = { scanId: number, total: number, rows: Array<De
  * Developer data evidenced by names and locations in the completed scan.
  */
 export type DeveloperItem = { id: number, category: DeveloperCategory, name: string, path: string, totalBytes: number, modifiedAtMs: number | null, sizeIsPartial: boolean, };
+
+export type DiskStatus = { mount: string, device: string, used: number, total: number, usedPercent: number, filesystem: string, external: boolean, smartStatus: string, };
+
+export type HardwareStatus = { model: string, cpuModel: string, totalRam: string, diskSize: string, osVersion: string, };
+
+export type InstalledApplication = { name: string, bundleId: string, source: string, uninstallName: string, path: string, totalBytes: number, };
+
+/**
+ * Applications addressed by a backend's own uninstall identifier.
+ */
+export type InstalledApplicationInventory = { backend: string, backendInsteadOf: string | null, total: number, rows: Array<InstalledApplication>, };
+
+export type MemoryStatus = { used: number, total: number, available: number, usedPercent: number, swapUsed: number, swapTotal: number, pressure: string, };
 
 export type NodeKind = "directory" | "file" | "symlink" | "other";
 
@@ -258,6 +275,13 @@ readErrors: number, excluded: number, hardlinksDeduplicated: number, hardlinkByt
  * the slice and call it a sort.
  */
 export type Sort = "largestFirst" | "smallestFirst" | "nameAscending" | "nameDescending";
+
+/**
+ * One backend-produced system-health snapshot.
+ */
+export type SystemStatus = { backend: string, backendInsteadOf: string | null, collectedAt: string, host: string, platform: string, uptime: string, healthScore: number, healthScoreMessage: string, hardware: HardwareStatus, cpu: CpuStatus, memory: MemoryStatus, disks: Array<DiskStatus>, batteries: Array<BatteryStatus>, thermal: ThermalStatus, };
+
+export type ThermalStatus = { cpuTemp: number | null, gpuTemp: number | null, batteryTemp: number | null, fanSpeed: number | null, fanCount: number | null, };
 
 /**
  * Capacity of the filesystem containing a path. This is deliberately separate

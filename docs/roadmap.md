@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 11 — ship.**
+**Current step: 11 — Mole-powered macOS beta.**
 
 ## Sequencing rules
 
@@ -212,7 +212,60 @@ Nothing here ships without tests.
 - [x] A readable append-only JSON Lines operation log, reloaded across launches; a failed
       durable append cannot create an in-memory success
 
-## Step 11 — Ship
+## Step 11 — Mole-powered macOS beta
+
+The macOS beta must close the loop for a non-technical user: find a storage problem,
+review an exact backend-produced plan, approve it, run it through Mole, and understand the
+result. A read-only explorer remains useful infrastructure, but it is not the consumer beta.
+See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
+
+### Phase 0 — command evidence and contracts
+
+- [x] Verify Mole 1.48.1 command surface from the installed release
+- [x] Confirm `mo status --json` is a one-shot machine-readable status source
+- [x] Confirm `mo uninstall --list` emits JSON when stdout is not a terminal
+- [x] Confirm targeted `mo uninstall --dry-run <name>` exists but its plan is human-readable
+- [x] Confirm `mo clean --dry-run` publishes an exact grouped preview file, not JSON
+- [x] Confirm clean category-selection flags were removed and execution performs a fresh discovery
+- [x] Record sanitized, fixture-driven schemas without committing machine-specific paths or metrics
+
+### Phase 1 — read-only Mole ports
+
+- [x] Add capability-specific adapter contracts; do not widen selected-path deletion
+- [x] Parse and expose `mo status --json`, version-gated and cancellable
+- [x] Parse and expose `mo uninstall --list` application inventory
+- [x] Add malformed-output, cancellation, unsupported-version, and contract tests
+
+### Phase 2 — exact cleanup review
+
+- [ ] Parse Mole's generated cleanup preview into typed categories, paths, sizes, and warnings
+- [ ] Keep every path backend-produced; never copy Mole cleanup or protection tables
+- [ ] Show full/partial preview state when system-level candidates require authorization
+- [ ] Design selection honestly around Mole's supported command surface
+
+### Phase 3 — cleanup execution
+
+- [ ] Add a one-time confirmation boundary for the reviewed operation
+- [ ] State and test that Mole re-discovers candidates at execution time
+- [ ] Handle authorization, cancellation, partial failure, and backend version changes
+- [ ] Append exact results to the durable operation journal
+
+### Phase 4 — application uninstall
+
+- [ ] Use Mole's uninstall name as the backend identifier; display names are not commands
+- [ ] Preview application bundle, leftovers, sensitive/review-only items, and recovery mode
+- [ ] Execute through Mole with explicit confirmation and partial-result reporting
+- [ ] Default to Mole's recoverable Trash route; permanent removal is not a beta default
+
+### Phase 5 — consumer navigation and accessibility
+
+- [ ] Add selected-row keyboard navigation: arrows, Page Up/Down, Home/End
+- [ ] Add Enter/Right to open, Left/Backspace to go up, and back/forward history
+- [ ] Add Quick Look, Reveal in Finder, visible focus, and VoiceOver labels
+- [ ] Add frontend smoke tests for missing backends, scan/cancel/rescan, large directories,
+      cleanup review, confirmation, failure, and uninstall
+
+### Phase 6 — release
 
 - [x] `adapter-gdu` for the Windows path — gdu 5.32.x, native ncdu-format export,
       fixture-driven contract coverage, cancellation, and a real Windows CI scan. Unsupported

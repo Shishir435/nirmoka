@@ -43,6 +43,8 @@ fn the_bindings_land_where_the_frontend_imports_them_from() {
     for expected in [
         "export type Backend",
         "export type ApplicationInventory",
+        "export type InstalledApplication",
+        "export type InstalledApplicationInventory",
         "export type Capabilities",
         "export type Detection",
         "export type DeveloperInventory",
@@ -52,6 +54,7 @@ fn the_bindings_land_where_the_frontend_imports_them_from() {
         "export type ScanFailure",
         "export type ScanProgress",
         "export type ScanSummary",
+        "export type SystemStatus",
         "export type VolumeInfo",
     ] {
         assert!(

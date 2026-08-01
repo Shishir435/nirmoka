@@ -29,6 +29,9 @@ const pages: Record<Route, React.LazyExoticComponent<React.ComponentType>> = {
   applications: lazy(() =>
     import("@/pages/applications-page").then((module) => ({ default: module.ApplicationsPage })),
   ),
+  status: lazy(() =>
+    import("@/pages/status-page").then((module) => ({ default: module.StatusPage })),
+  ),
   activity: lazy(() =>
     import("@/pages/activity-page").then((module) => ({ default: module.ActivityPage })),
   ),

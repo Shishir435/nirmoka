@@ -75,6 +75,21 @@ pub fn selection_of(state: &AppState) -> dto::BackendSelection {
     }
 }
 
+/// One backend-produced system-health snapshot.
+pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
+    let choice = state
+        .resolve(Ability::SystemStatus)
+        .ok_or_else(|| "no usable backend provides system status".to_string())?;
+    let backend = choice.adapter.id();
+    let instead_of = choice.instead_of;
+    let status = choice
+        .adapter
+        .system_status(&CancelToken::new())
+        .map_err(|error| error.to_string())?;
+
+    Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
+}
+
 /// Pick a backend, or pass `None` to go back to the platform default.
 ///
 /// Returns the selection as it now stands rather than the id that was passed in.
@@ -338,6 +353,26 @@ pub fn application_inventory_of(
     Ok(inventory::applications(result.id, &result.tree))
 }
 
+pub fn installed_application_inventory_of(
+    state: &AppState,
+) -> Result<dto::InstalledApplicationInventory, String> {
+    let choice = state
+        .resolve(Ability::UninstallApps)
+        .ok_or_else(|| "no usable backend provides application uninstall".to_string())?;
+    let backend = choice.adapter.id();
+    let instead_of = choice.instead_of;
+    let applications = choice
+        .adapter
+        .installed_applications(&CancelToken::new())
+        .map_err(|error| error.to_string())?;
+
+    Ok(dto::InstalledApplicationInventory::from_adapter(
+        backend,
+        instead_of,
+        applications,
+    ))
+}
+
 pub fn developer_inventory_of(
     state: &AppState,
     scan_id: ScanId,
@@ -454,11 +489,23 @@ pub fn application_inventory(
 }
 
 #[tauri::command]
+pub fn installed_application_inventory(
+    state: State<'_, AppState>,
+) -> Result<dto::InstalledApplicationInventory, String> {
+    installed_application_inventory_of(&state)
+}
+
+#[tauri::command]
 pub fn developer_inventory(
     state: State<'_, AppState>,
     scan_id: ScanId,
 ) -> Result<dto::DeveloperInventory, String> {
     developer_inventory_of(&state, scan_id)
+}
+
+#[tauri::command]
+pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, String> {
+    system_status_of(&state)
 }
 
 #[cfg(test)]
