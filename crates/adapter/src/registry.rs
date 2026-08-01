@@ -110,6 +110,15 @@ impl Registry {
     /// would answer [`AdapterError::Unsupported`], and never one at an untested
     /// version.
     pub fn resolve(&self, ability: Ability, preference: &Preference) -> Option<Choice<'_>> {
+        self.resolve_in_order(ability, preference, default_order())
+    }
+
+    fn resolve_in_order<'a>(
+        &'a self,
+        ability: Ability,
+        preference: &Preference,
+        default_order: &[&str],
+    ) -> Option<Choice<'a>> {
         let capable = |adapter: &&dyn Adapter| {
             ability.is_offered_by(&adapter.capabilities()) && Self::is_usable(*adapter)
         };
@@ -123,7 +132,7 @@ impl Registry {
             }
         }
 
-        let adapter = default_order()
+        let adapter = default_order
             .iter()
             .find_map(|id| self.iter().find(|a| a.id() == *id).filter(capable))
             .or_else(|| self.iter().find(capable))?;
@@ -196,6 +205,20 @@ mod tests {
             }
         }
 
+        fn deleter(id: &'static str) -> Self {
+            Self {
+                id,
+                installed: true,
+                caps: Capabilities {
+                    scan: false,
+                    delete: true,
+                    trash: true,
+                    undo: true,
+                    ..Capabilities::MINIMAL
+                },
+            }
+        }
+
         fn missing(mut self) -> Self {
             self.installed = false;
             self
@@ -244,10 +267,15 @@ mod tests {
         registry
     }
 
-    /// The two backends as they actually are today, in the order `main` builds
-    /// them: ncdu registered first, and it is *not* the macOS default.
+    /// Shipped backends in the order every binary registers them. Resolution
+    /// must follow platform preference, not this order.
     fn as_shipped() -> Registry {
-        registry_of(vec![Fake::scanner("ncdu"), Fake::cleaner("mole")])
+        registry_of(vec![
+            Fake::scanner("ncdu"),
+            Fake::cleaner("mole"),
+            Fake::scanner("gdu"),
+            Fake::deleter("rip"),
+        ])
     }
 
     #[test]
@@ -304,31 +332,28 @@ mod tests {
     }
 
     #[test]
-    fn no_choice_leaves_the_platform_default_to_decide() {
+    fn every_platform_default_selects_the_right_delete_backend() {
         let registry = as_shipped();
-        let choice = registry
-            .resolve(Ability::Delete, &Preference::platform_default())
-            .expect("both delete");
+        for (os, expected) in [
+            ("macos", "mole"),
+            ("windows", "rip"),
+            ("linux", "rip"),
+            ("freebsd", "rip"),
+        ] {
+            let choice = registry
+                .resolve_in_order(
+                    Ability::Delete,
+                    &Preference::platform_default(),
+                    default_order_for(os),
+                )
+                .expect("mole and rip can delete");
 
-        // Both can delete, so the platform default is the only thing choosing —
-        // and it is not registration order, which would always say ncdu.
-        let expected = if default_order_for(std::env::consts::OS)
-            .iter()
-            .position(|id| *id == "mole")
-            < default_order_for(std::env::consts::OS)
-                .iter()
-                .position(|id| *id == "ncdu")
-        {
-            "mole"
-        } else {
-            "ncdu"
-        };
-
-        assert_eq!(choice.adapter.id(), expected);
-        assert!(
-            choice.instead_of.is_none(),
-            "a default is not a fallback from anything"
-        );
+            assert_eq!(choice.adapter.id(), expected, "{os}");
+            assert!(
+                choice.instead_of.is_none(),
+                "a default is not a fallback from anything on {os}"
+            );
+        }
     }
 
     /// Registration order is the last resort, not the first.

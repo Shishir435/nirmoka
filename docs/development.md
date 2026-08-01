@@ -37,6 +37,7 @@ cd nirmoka
 
 pnpm install
 pnpm hooks:install          # enable the pre-push hook (once per clone)
+rustup target add x86_64-pc-windows-gnu # catch Windows-only warnings locally
 cargo check --workspace --all-targets
 ```
 
@@ -67,6 +68,8 @@ pnpm types                  # regenerate the TypeScript mirrors of the Rust DTOs
 
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p nirmoka-adapter-rip --tests \
+  --target x86_64-pc-windows-gnu -- -D warnings
 cargo fmt --all
 pnpm format
 ```
@@ -77,11 +80,15 @@ the mock transport — useful for styling without a backend or a Rust toolchain.
 
 ## Before pushing
 
-The pre-push hook runs this for you once `pnpm hooks:install` has been run:
+The pre-push hook runs this for you once `pnpm hooks:install` has been run. On non-Windows
+hosts it also cross-checks the platform-sensitive rip tests for Windows; install that target
+once with `rustup target add x86_64-pc-windows-gnu`.
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p nirmoka-adapter-rip --tests \
+  --target x86_64-pc-windows-gnu -- -D warnings
 cargo test --workspace
 pnpm format:check
 pnpm typecheck
