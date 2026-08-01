@@ -9,7 +9,9 @@ import { formatBytes, formatCount, plural } from "@/lib/format";
 /** Registering the scan event listeners: a round trip into Rust, so it takes
  *  time and can fail. */
 type Subscription =
-  { status: "pending" } | { status: "ready" } | { status: "failed"; message: string };
+  | { status: "pending" }
+  | { status: "ready" }
+  | { status: "failed"; message: string };
 
 type ScanState =
   | { status: "idle" }

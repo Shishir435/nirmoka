@@ -189,8 +189,11 @@ export function TreeView({
         <div
           ref={scroller}
           className="h-[26rem] overflow-auto rounded-lg border"
+          role="region"
+          aria-label="Directory entries"
           // The list is a scroll region of its own, so it takes focus for
           // keyboard scrolling rather than moving the page behind it.
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- scroll regions need keyboard focus
           tabIndex={0}
         >
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>

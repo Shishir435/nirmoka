@@ -14,7 +14,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 
 export type Route =
-  "overview" | "clean" | "space" | "developer" | "applications" | "activity" | "help";
+  | "overview"
+  | "clean"
+  | "space"
+  | "developer"
+  | "applications"
+  | "activity"
+  | "help";
 
 const primary = [
   ["overview", "Overview", LayoutDashboard],
