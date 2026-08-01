@@ -188,7 +188,7 @@ export function TreeView({
       ) : (
         <div
           ref={scroller}
-          className="h-[26rem] overflow-auto rounded-lg border"
+          className="h-104 overflow-auto rounded-lg border"
           role="region"
           aria-label="Directory entries"
           // The list is a scroll region of its own, so it takes focus for

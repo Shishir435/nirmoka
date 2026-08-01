@@ -44,8 +44,8 @@ export function AppShell({
 }) {
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen min-h-[640px] overflow-hidden bg-background">
-        <aside className="flex w-[204px] shrink-0 flex-col border-r bg-sidebar px-3 py-5 max-[960px]:w-[68px] max-[960px]:items-center max-[960px]:px-2">
+      <div className="flex h-screen min-h-160 overflow-hidden bg-background">
+        <aside className="flex w-51 shrink-0 flex-col border-r bg-sidebar px-3 py-5 max-[960px]:w-17 max-[960px]:items-center max-[960px]:px-2">
           <div className="mb-7 flex h-9 items-center gap-2 px-2">
             <div className="grid size-7 place-items-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
               N
@@ -82,9 +82,7 @@ export function AppShell({
           </div>
         </aside>
         <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto min-h-full max-w-[1320px] px-8 py-7 max-[960px]:px-5">
-            {children}
-          </div>
+          <div className="mx-auto min-h-full max-w-330 px-8 py-7 max-[960px]:px-5">{children}</div>
         </main>
       </div>
     </TooltipProvider>
@@ -130,7 +128,7 @@ function NavItem({
 export function OnboardingLayout({ step, children }: { step: number; children: ReactNode }) {
   return (
     <div className="grid min-h-screen place-items-center bg-muted/35 p-6">
-      <section className="relative w-full max-w-[620px] rounded-[20px] border bg-card px-14 py-12 shadow-lg max-[700px]:px-7">
+      <section className="relative w-full max-w-155 rounded-[20px] border bg-card px-14 py-12 shadow-lg max-[700px]:px-7">
         {children}
         <div className="mt-10 flex justify-center gap-2" aria-label={`Step ${step} of 4`}>
           {[1, 2, 3, 4].map((n) => (
