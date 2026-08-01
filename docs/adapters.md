@@ -13,7 +13,8 @@ An adapter is responsible for:
 4. **Scanning** — run the backend, stream results as ncdu-format JSON. Capability-gated:
    a backend that cannot walk a tree declares `scan: false` and refuses, rather than
    returning the part of one it could manage.
-5. **Deletion** — validate the path, then remove it via the backend's own safe path.
+5. **Deletion** — when the backend exposes a non-interactive selected-path command,
+   validate the path, then remove it via the backend's own safe path.
 6. **Cancellation** — kill the subprocess cleanly when the user stops a scan.
 
 An adapter is **not** responsible for rendering, sorting, selection state, or confirmation
@@ -25,8 +26,9 @@ Not registration order. `Registry::resolve(ability, preference)` picks, in three
 each filtered by whether the adapter is usable _and_ declares the ability being asked for:
 
 1. **The user's choice**, honoured wherever the backend can do the job.
-2. **The platform default** — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`; everywhere
-   else `ncdu, gdu, mole`.
+2. **The platform default** — macOS `mole, rip, ncdu, gdu`; Windows
+   `gdu, rip, ncdu, mole`; everywhere else `ncdu, rip, gdu, mole`. Capability filtering
+   means rip is considered only for undo and never for scanning or new deletion.
 3. **Registration order**, so a backend no default names is still reachable.
 
 A preference is a preference, not an override. Choosing Mole on macOS is honoured for
@@ -34,19 +36,19 @@ cleanup and uninstall and falls back to ncdu for scanning, because Mole cannot s
 the returned `Choice::instead_of` names the backend that was displaced so the fallback can
 be stated rather than looking like the setting was ignored.
 
-An id naming no registered backend is skipped, not an error: `gdu` sits in every default
-order and has no adapter until roadmap step 11. See
+An id naming no registered backend is skipped rather than treated as an error. See
 [ADR 0013](adr/0013-the-backend-is-a-choice.md).
 
 ## The trait
 
-Detection, capabilities, and scanning are implemented. `delete` arrives in roadmap step 10,
-with its own validation and its own tests; it is deliberately absent rather than stubbed,
-so nothing can depend on a signature that has not been designed yet.
+Detection, capabilities, scanning, and selected-path deletion share one trait. Every current
+backend refuses new selected-path deletion. rip retains exact undo for durable receipts made
+before deletion was withdrawn. See
+[ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md).
 
 ```rust
 pub trait Adapter: Send + Sync {
-    /// Stable machine identifier: "ncdu", "mole", "gdu".
+    /// Stable machine identifier: "ncdu", "mole", "gdu", "rip".
     fn id(&self) -> &'static str;
 
     /// Name shown in the backend picker.
@@ -69,6 +71,28 @@ pub trait Adapter: Send + Sync {
         sink: &mut dyn WireSink,
         cancel: &CancelToken,
     ) -> Result<ScanSummary, AdapterError>;
+
+    /// Validate and canonicalise a selected target. Default: Unsupported.
+    fn prepare_delete(
+        &self,
+        scan_root: &Path,
+        target: &Path,
+        mode: DeleteMode,
+    ) -> Result<DeletePlan, AdapterError>;
+
+    /// Revalidate and execute a confirmed plan. Default: Unsupported.
+    fn delete(
+        &self,
+        plan: &DeletePlan,
+        cancel: &CancelToken,
+    ) -> Result<DeleteReceipt, AdapterError>;
+
+    /// Restore the exact receipt through the same backend. Default: Unsupported.
+    fn undo(
+        &self,
+        receipt: &DeleteReceipt,
+        cancel: &CancelToken,
+    ) -> Result<(), AdapterError>;
 }
 ```
 
@@ -77,7 +101,7 @@ would be a dependency, a colour on every function, and a second scheduler beside
 Tauri already runs. Callers put `scan` on a worker thread and cancel it with the token.
 
 The parser and `WireSink` live in `crates/adapter` rather than in the ncdu adapter, because
-the format is part of this contract and two of three backends emit it natively. See
+the format is part of this contract and both scanner backends emit it natively. See
 [ADR 0008](adr/0008-wire-parser-in-adapter-crate.md).
 
 ## Reading a scan
@@ -180,14 +204,13 @@ what the backend would delete.
 - Preview: `mo clean --dry-run`, `mo uninstall --dry-run`. Human-readable text, not JSON —
   the ability is real, rendering it as rows is a step 10 problem
 - Status: `mo status --json`
-- Capabilities: delete, dry run, cleanup categories, app uninstall, status. **Not** trash:
-  recoverability is undocumented, and claiming it would tell a user their files can be
-  brought back
+- Capabilities: dry run, cleanup categories, app uninstall, status. Not arbitrary-path
+  deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.
 
-Mole is the reason `Capabilities::MINIMAL` is not a floor: `scan: false, delete: true` sits
-below it. A backend has to be able to do _something_, and the contract suite asserts exactly
-that — not that it can do any particular thing.
+Mole is the reason no single capability is a floor. A backend has to be able to do
+_something_, and the contract suite asserts exactly that — not that it can do any
+particular thing.
 
 ### ncdu (cross-platform)
 
@@ -196,15 +219,38 @@ that — not that it can do any particular thing.
   scriptable). `--ignore-config` matters: without it a user's `~/.config/ncdu/config`
   silently changes what a scan means.
 - Preview: none — declare `dry_run: false`
-- Capabilities: scan and delete only
+- Capabilities: scan only. Its deletion feature is a keybinding in the interactive browser,
+  not a scriptable command an adapter can safely target
 - This is the baseline. If a feature cannot be expressed here, it belongs behind a
   capability flag rather than in the core interface.
 
 ### gdu (cross-platform)
 
 - Binary: `gdu`
-- Scan: ncdu-compatible export
-- Notable as the realistic Windows path
+- Supported versions: `>=5.32, <5.33`, recorded from 5.32.0
+- Scan: `gdu --config-file <null-device> --no-progress -o - <path>`, producing ncdu
+  format 1.2 directly
+- Primary Windows scanner and an available alternative elsewhere
+- `one_file_system` maps to `--no-cross`
+- Cache-tag and glob exclusions are refused: gdu 5.32 has no CACHEDIR.TAG option and its
+  ignore patterns are regular expressions, not ncdu globs. Silently translating them would
+  change the requested scan
+- Selected-path deletion is not exposed: like ncdu, gdu deletes only inside its interactive
+  terminal browser — see [ADR 0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md)
+- Details and consequences: [ADR 0015](adr/0015-gdu-is-the-windows-scanner.md)
+
+### rip (macOS and Linux)
+
+- Binary: `rip` from the `rm-improved` package
+- Supported versions: `>=0.13, <0.14`, tested against the real 0.13.1 release
+- Scan: none
+- Selected-path deletion: none. rip 0.13.1 canonicalises a path and later moves that pathname,
+  so an ancestor replacement can redirect execution after containment validation
+- Undo: exact non-interactive `rip --graveyard <operation> --unbury <receipt>` for existing
+  durable receipts
+- Dry run and permanent deletion: none
+- GPL-3.0 and separately installed. Nirmoka invokes the binary and does not bundle or copy it
+- Details and consequences: [ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md)
 
 ## Fixtures and the contract suite
 
@@ -219,6 +265,7 @@ never parses — it is the evidence behind ADR 0012, asserted by
 
 ```bash
 ./scripts/record-ncdu-fixture.sh          # re-record after a backend upgrade
+./scripts/record-gdu-fixture.sh           # re-record after a backend upgrade
 cargo test -p nirmoka-contract-tests
 ```
 

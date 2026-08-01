@@ -16,6 +16,8 @@ nirmoka/
 │   ├── adapter/            trait, Capabilities, Detection, Registry
 │   ├── adapter-ncdu/       baseline backend
 │   ├── adapter-mole/       macOS backend (step 9)
+│   ├── adapter-gdu/        cross-platform scanner; Windows default
+│   ├── adapter-rip/        exact undo for existing receipts; no new deletion
 │   ├── cli/                bin `nrmk` — headless harness
 │   └── app/                Tauri shell — window, commands, and nothing else
 │

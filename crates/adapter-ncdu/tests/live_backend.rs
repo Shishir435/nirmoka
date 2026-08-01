@@ -104,7 +104,10 @@ fn scans_a_real_directory_into_a_tree() {
     // 4 directories (root, deep, deeper, empty) + 2 files.
     assert_eq!(summary.items, 6, "unexpected entry count in {tree:?}");
     assert_eq!(summary.directories, 4);
-    assert_eq!(summary.root, fixture.root.canonicalize().unwrap());
+    assert_eq!(
+        summary.root.canonicalize().unwrap(),
+        fixture.root.canonicalize().unwrap()
+    );
     assert!(summary.backend_version.is_some());
     assert_eq!(stats.read_errors, 0);
 
@@ -121,7 +124,7 @@ fn scans_a_real_directory_into_a_tree() {
         .find(|id| tree.get(**id).unwrap().name == "big.bin")
         .expect("big.bin is in the tree");
     assert_eq!(
-        tree.path_of(*big).unwrap(),
+        tree.path_of(*big).unwrap().canonicalize().unwrap(),
         fixture.root.canonicalize().unwrap().join("deep/big.bin")
     );
 }

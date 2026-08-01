@@ -4,7 +4,7 @@
 //! that arrived together: the backends stopped agreeing on what they can do, and
 //! the right default stopped being the same on every platform. Mole is the
 //! better tool on macOS and cannot scan; ncdu scans everywhere and cleans
-//! nothing; gdu is the realistic Windows scanner and is not adapted yet.
+//! nothing; gdu is the primary Windows scanner.
 //!
 //! So selection is two separate questions, asked in this order:
 //!
@@ -12,7 +12,7 @@
 //!    nothing, which means "whatever this platform defaults to".
 //! 2. **Can it do the thing being asked?** A preference is a preference, not an
 //!    override of reality. Choosing Mole on macOS does not make Mole a scanner —
-//!    it makes Mole the backend that deletes, while ncdu still scans, and
+//!    it makes Mole the backend for cleanup, while ncdu still scans, and
 //!    [`Choice::instead_of`] carries the fact so the UI can say so.
 //!
 //! The alternative — honouring the choice and failing the scan — would be a user
@@ -41,6 +41,7 @@ pub enum Ability {
     Scan,
     Delete,
     Trash,
+    Undo,
     DryRun,
     CleanupCategories,
     UninstallApps,
@@ -54,6 +55,7 @@ impl Ability {
             Self::Scan => "scan",
             Self::Delete => "delete",
             Self::Trash => "move to Trash",
+            Self::Undo => "undo deletion",
             Self::DryRun => "dry run",
             Self::CleanupCategories => "cleanup categories",
             Self::UninstallApps => "uninstall applications",
@@ -66,6 +68,7 @@ impl Ability {
             Self::Scan => caps.scan,
             Self::Delete => caps.delete,
             Self::Trash => caps.trash,
+            Self::Undo => caps.undo,
             Self::DryRun => caps.dry_run,
             Self::CleanupCategories => caps.cleanup_categories,
             Self::UninstallApps => caps.uninstall_apps,
@@ -80,20 +83,18 @@ impl Ability {
 /// stop offering it the moment the user's chosen backend could not do something,
 /// which is the opposite of what a default is for.
 ///
-/// `gdu` has no adapter yet — it arrives in roadmap step 11. Naming it here is
-/// deliberate: the Windows default is what Windows *should* use, and an id that
-/// matches no registered backend is skipped rather than being an error. When the
-/// adapter lands, the default becomes correct without this file changing.
+/// Every list names every shipped backend, so a user preference can always fall
+/// through to a platform-appropriate scanner.
 pub fn default_order_for(os: &str) -> &'static [&'static str] {
     match os {
         // Mole is macOS-only and does the things nothing else here can.
-        "macos" => &["mole", "ncdu", "gdu"],
+        "macos" => &["mole", "rip", "ncdu", "gdu"],
         // gdu is the backend Windows users realistically have; ncdu is a
         // distant second there.
-        "windows" => &["gdu", "ncdu", "mole"],
+        "windows" => &["gdu", "rip", "ncdu", "mole"],
         // ncdu is packaged everywhere else. Mole trails because it refuses to
         // install off macOS at all.
-        _ => &["ncdu", "gdu", "mole"],
+        _ => &["ncdu", "rip", "gdu", "mole"],
     }
 }
 
@@ -152,7 +153,7 @@ mod tests {
             sorted.sort_unstable();
             sorted.dedup();
 
-            assert_eq!(sorted, vec!["gdu", "mole", "ncdu"], "{os}");
+            assert_eq!(sorted, vec!["gdu", "mole", "ncdu", "rip"], "{os}");
             assert_eq!(sorted.len(), order.len(), "{os} names one twice");
         }
     }
@@ -167,7 +168,7 @@ mod tests {
     fn abilities_read_the_flag_they_are_named_after() {
         let ncdu = Capabilities::MINIMAL;
         assert!(Ability::Scan.is_offered_by(&ncdu));
-        assert!(Ability::Delete.is_offered_by(&ncdu));
+        assert!(!Ability::Delete.is_offered_by(&ncdu));
         assert!(!Ability::DryRun.is_offered_by(&ncdu));
         assert!(!Ability::Trash.is_offered_by(&ncdu));
 
@@ -175,6 +176,7 @@ mod tests {
             scan: false,
             delete: true,
             trash: false,
+            undo: false,
             dry_run: true,
             cleanup_categories: true,
             uninstall_apps: true,

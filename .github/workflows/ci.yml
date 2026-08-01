@@ -52,10 +52,9 @@ jobs:
             lint: true
             ncdu_install: brew install ncdu
             ncdu_expect: ok
-          # ncdu has no Windows build — it is a curses application. gdu is the
-          # planned Windows backend (roadmap step 11), so this platform proves
-          # the workspace compiles, its tests pass, and the wire format parses
-          # from recorded fixtures with no backend present at all.
+          # ncdu has no Windows build. gdu is installed below from the pinned
+          # upstream release, so Windows exercises a real scanner rather than
+          # only compiling the adapter intended for it.
           - os: windows-latest
             label: windows
             lint: true
@@ -81,6 +80,30 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf
+
+      - name: Install gdu 5.32.0 on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'gdu.zip'
+          $directory = Join-Path $env:RUNNER_TEMP 'gdu'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/dundee/gdu/releases/download/v5.32.0/gdu_windows_amd64.exe.zip' `
+            -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $directory
+          Move-Item `
+            (Join-Path $directory 'gdu_windows_amd64.exe') `
+            (Join-Path $directory 'gdu.exe')
+          $directory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # rip is the only backend with scriptable selected-path deletion and
+      # exact undo. It is Unix-only upstream, so Windows still compiles the
+      # adapter and honestly reports it missing.
+      - name: Install rip 0.13.1
+        if: runner.os != 'Windows'
+        run: |
+          cargo install rm-improved --version 0.13.1 --locked
+          echo "NIRMOKA_RIP_BIN=$(command -v rip)" >> "$GITHUB_ENV"
 
       # Lint once per platform. The second Linux entry exists for its backend,
       # not to run clippy again on the same source.
@@ -136,9 +159,10 @@ jobs:
         if: matrix.ncdu_expect != 'skip'
         run: ncdu --version
 
-      # `backends` exits non-zero when nothing usable is found, so the exit
-      # code is asserted explicitly per platform rather than assumed. This is
-      # also the proof that the whole stack runs with no display server.
+      # `backends` exits non-zero when nothing usable is found. Once rip is
+      # installed, an unsupported ncdu no longer implies that exit status, so
+      # version-gate assertions inspect ncdu's own row rather than conflating
+      # one backend's state with the whole registry.
       - name: Detect backends
         if: matrix.ncdu_expect != 'skip'
         shell: bash
@@ -171,12 +195,8 @@ jobs:
               fi
               ;;
             unsupported)
-              if [ "$status" -eq 0 ]; then
-                echo "::error::ncdu 1.x must not be accepted — the version gate failed"
-                exit 1
-              fi
-              if ! printf '%s' "$output" | grep -q 'unsupported'; then
-                echo "::error::expected ncdu reported as unsupported"
+              if ! printf '%s' "$output" | grep -qE '^ncdu +unsupported +1\.'; then
+                echo "::error::expected ncdu 1.x reported as unsupported"
                 exit 1
               fi
               ;;
@@ -243,6 +263,25 @@ jobs:
         if: matrix.ncdu_expect != 'skip'
         shell: bash
         run: cargo run -q -p nirmoka-cli -- backends --json || true
+
+      - name: Detect and scan with gdu on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          gdu --version
+          output=$(cargo run -q -p nirmoka-cli -- backends)
+          printf '%s\n' "$output"
+
+          if ! printf '%s' "$output" | grep -qE '^gdu +ok +5\.32\.[^ ]* +yes +[A-Za-z]:\\'; then
+            echo "::error::expected supported gdu at an absolute Windows path"
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -qE '^SCANS WITH +gdu$'; then
+            echo "::error::Windows must select gdu as its scanner"
+            exit 1
+          fi
+
+          cargo run -q -p nirmoka-cli -- scan crates/core --depth 1 --limit 10
 
       # The end-to-end path: a real backend, as a subprocess, streamed into a
       # core tree, with no GUI framework in the dependency graph.

@@ -19,21 +19,25 @@ Each ADR records one significant choice, the alternatives that were rejected, an
 consequences accepted along with it. They are written to be readable by someone who was
 not in the room.
 
-| ADR                                                     | Decision                                               |
-| ------------------------------------------------------- | ------------------------------------------------------ |
-| [0001](adr/0001-adapter-pattern.md)                     | Drive existing CLI tools through an adapter layer      |
-| [0002](adr/0002-wire-format-ncdu-json.md)               | Use ncdu's JSON export as the internal wire format     |
-| [0003](adr/0003-tech-stack-tauri.md)                    | Build the desktop app with Tauri v2                    |
-| [0004](adr/0004-license-apache-2.md)                    | License Nirmoka under Apache-2.0                       |
-| [0005](adr/0005-frontend-port.md)                       | Keep the frontend replaceable with a second port       |
-| [0006](adr/0006-monorepo-layout.md)                     | One repo, two package managers, split by language      |
-| [0007](adr/0007-nrmk-cli-scope.md)                      | `nrmk` is a development harness, not a product         |
-| [0008](adr/0008-wire-parser-in-adapter-crate.md)        | The wire-format parser lives in the contract crate     |
-| [0009](adr/0009-disk-usage-is-the-number.md)            | Disk usage is the number; apparent size sits beside it |
-| [0010](adr/0010-boundary-types-in-the-shell.md)         | The types that cross to TypeScript live in the shell   |
-| [0011](adr/0011-ordering-and-paging-are-server-side.md) | Ordering and paging happen in Rust                     |
-| [0012](adr/0012-mole-is-not-a-scanner.md)               | Mole is a cleanup backend, not a scanner               |
-| [0013](adr/0013-the-backend-is-a-choice.md)             | The backend is a choice, resolved per ability          |
+| ADR                                                            | Decision                                               |
+| -------------------------------------------------------------- | ------------------------------------------------------ |
+| [0001](adr/0001-adapter-pattern.md)                            | Drive existing CLI tools through an adapter layer      |
+| [0002](adr/0002-wire-format-ncdu-json.md)                      | Use ncdu's JSON export as the internal wire format     |
+| [0003](adr/0003-tech-stack-tauri.md)                           | Build the desktop app with Tauri v2                    |
+| [0004](adr/0004-license-apache-2.md)                           | License Nirmoka under Apache-2.0                       |
+| [0005](adr/0005-frontend-port.md)                              | Keep the frontend replaceable with a second port       |
+| [0006](adr/0006-monorepo-layout.md)                            | One repo, two package managers, split by language      |
+| [0007](adr/0007-nrmk-cli-scope.md)                             | `nrmk` is a development harness, not a product         |
+| [0008](adr/0008-wire-parser-in-adapter-crate.md)               | The wire-format parser lives in the contract crate     |
+| [0009](adr/0009-disk-usage-is-the-number.md)                   | Disk usage is the number; apparent size sits beside it |
+| [0010](adr/0010-boundary-types-in-the-shell.md)                | The types that cross to TypeScript live in the shell   |
+| [0011](adr/0011-ordering-and-paging-are-server-side.md)        | Ordering and paging happen in Rust                     |
+| [0012](adr/0012-mole-is-not-a-scanner.md)                      | Mole is a cleanup backend, not a scanner               |
+| [0013](adr/0013-the-backend-is-a-choice.md)                    | The backend is a choice, resolved per ability          |
+| [0014](adr/0014-interactive-deletion-is-not-an-adapter-api.md) | Interactive deletion is not an adapter API             |
+| [0015](adr/0015-gdu-is-the-windows-scanner.md)                 | gdu is the Windows scanner                             |
+| [0016](adr/0016-rip-is-the-selected-path-deletion-backend.md)  | rip was selected for recoverable deletion              |
+| [0017](adr/0017-rip-deletion-is-not-execution-bound.md)        | Withdraw rip deletion; retain legacy undo              |
 
 ## The four ideas that matter
 

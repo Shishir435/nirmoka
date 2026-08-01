@@ -28,15 +28,15 @@ This document explains the layers and the rules that keep them separate.
                         │  Adapter trait
 ┌───────────────────────┴───────────────────────┐
 │  adapter/          Trait, registry, caps       │
-└───┬───────────────────┬───────────────────┬───┘
-    │                   │                   │
-┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐
-│adapter-mole│  │ adapter-ncdu │  │ adapter-gdu │
-└───┬────────┘  └───────┬──────┘  └─────────┬───┘
-    │ subprocess        │ subprocess        │ subprocess
-┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐
-│  mo(1)     │  │   ncdu(1)    │  │   gdu(1)    │
-└────────────┘  └──────────────┘  └─────────────┘
+└───┬───────────────────┬───────────────────┬──────────────┘
+    │                   │                   │              │
+┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐  ┌───────┴─────┐
+│adapter-mole│  │ adapter-ncdu │  │ adapter-gdu │  │ adapter-rip │
+└───┬────────┘  └───────┬──────┘  └─────────┬───┘  └───────┬─────┘
+    │ subprocess        │ subprocess        │ subprocess           │ subprocess
+┌───┴────────┐  ┌───────┴──────┐  ┌─────────┴───┐  ┌───────┴─────┐
+│  mo(1)     │  │   ncdu(1)    │  │   gdu(1)    │  │   rip(1)    │
+└────────────┘  └──────────────┘  └─────────────┘  └─────────────┘
 ```
 
 ## Rules
@@ -59,18 +59,19 @@ and reporting its extra abilities through capability flags.
 
 See [ADR 0002](adr/0002-wire-format-ncdu-json.md).
 
-**3. Every ability beyond "scan and delete" is a capability flag.**
+**3. Every backend ability is a capability flag.**
 
-Backends differ enormously. ncdu browses and deletes. Mole additionally cleans by
-category, uninstalls applications, moves to Trash, and previews with a dry run. The UI
-queries capabilities and hides what the active backend cannot do, rather than offering a
-button that fails at call time.
+Backends differ enormously. ncdu scans but exposes deletion only inside its interactive
+terminal UI. Mole cleans by category and uninstalls applications, but does not remove an
+arbitrary selected path. The UI queries capabilities and hides what the active backend
+cannot do, rather than offering a button that fails at call time.
 
 ```rust
 pub struct Capabilities {
-    pub scan: bool,              // every backend
-    pub delete: bool,            // every backend
+    pub scan: bool,              // walk a directory tree
+    pub delete: bool,            // non-interactive selected-path removal
     pub trash: bool,             // recoverable delete rather than permanent
+    pub undo: bool,              // exact non-interactive restore
     pub dry_run: bool,           // preview the exact delete list first
     pub cleanup_categories: bool,// named cleanup targets, not just paths
     pub uninstall_apps: bool,    // application removal with leftovers
@@ -84,6 +85,12 @@ A path travels from the UI to the adapter as data and is validated at the adapte
 boundary before it ever reaches a subprocess argument. The GUI layer is the least
 trustworthy place in the system to make a deletion decision, because it is the layer
 closest to user input and the furthest from the backend's safety rules.
+
+Selected-path deletion uses a two-call boundary. `prepare_delete` keeps the validated
+adapter plan in Rust and returns only a one-time confirmation token; `confirm_delete`
+consumes that token. A raw path is never accepted by the execute command. No current backend
+offers this capability: rip's later pathname resolution cannot be bound to validation, so it
+fails closed and retains only exact undo for existing receipts.
 
 **5. Adapters version-pin their backend and fail closed.**
 

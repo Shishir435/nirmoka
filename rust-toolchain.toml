@@ -1,5 +1,5 @@
 [toolchain]
-# Tracking stable while the project is young. Pin to an exact version
-# (e.g. "1.85.0") once CI is established, so builds are reproducible.
-channel = "stable"
+# Exact so local builds and every CI platform use the compiler this source was
+# verified against rather than whatever "stable" means on the day they run.
+channel = "1.97.1"
 components = ["rustfmt", "clippy"]

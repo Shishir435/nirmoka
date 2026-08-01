@@ -1,0 +1,13 @@
+[package]
+name = "nirmoka-adapter-rip"
+description = "Exact undo for existing rm-improved (rip) receipts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+nirmoka-adapter = { workspace = true }
+directories = { workspace = true }

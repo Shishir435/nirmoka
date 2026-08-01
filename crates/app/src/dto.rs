@@ -252,10 +252,119 @@ pub struct Capabilities {
     pub scan: bool,
     pub delete: bool,
     pub trash: bool,
+    pub undo: bool,
     pub dry_run: bool,
     pub cleanup_categories: bool,
     pub uninstall_apps: bool,
     pub system_status: bool,
+}
+
+/// Stable failure classes for destructive commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum DeleteFailureCode {
+    NoCompletedScan,
+    StaleScan,
+    UnknownNode,
+    NoBackend,
+    ConfirmationExpired,
+    AlreadyUndone,
+    Backend,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DeleteFailure {
+    pub code: DeleteFailureCode,
+    pub message: String,
+}
+
+impl DeleteFailure {
+    pub fn new(code: DeleteFailureCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum DeleteDisposition {
+    Trash,
+    Permanent,
+}
+
+/// A validated destructive operation waiting for explicit confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DeletePreparation {
+    #[ts(type = "number")]
+    pub confirmation_token: u64,
+    pub backend: String,
+    pub backend_instead_of: Option<String>,
+    pub target_path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    pub disposition: DeleteDisposition,
+    pub recoverable: bool,
+    pub dry_run: bool,
+    pub requires_confirmation: bool,
+    pub warning: String,
+}
+
+/// One durable deletion journal entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct DeleteOperation {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub backend: String,
+    pub target_path: String,
+    pub disposition: DeleteDisposition,
+    pub recoverable: bool,
+    pub undone: bool,
+    #[ts(type = "number")]
+    pub deleted_at_ms: u64,
+    #[ts(type = "number | null")]
+    pub undone_at_ms: Option<u64>,
+    pub log_error: Option<String>,
+}
+
+impl DeleteOperation {
+    pub fn from_operation(operation: &crate::deletion::Operation) -> Self {
+        Self {
+            id: operation.id,
+            backend: operation.receipt.backend().to_string(),
+            target_path: operation.receipt.target().display().to_string(),
+            disposition: DeleteDisposition::Trash,
+            recoverable: true,
+            undone: operation.undone_at_ms.is_some(),
+            deleted_at_ms: operation.deleted_at_ms,
+            undone_at_ms: operation.undone_at_ms,
+            log_error: operation.log_error.clone(),
+        }
+    }
 }
 
 impl From<AdapterCapabilities> for Capabilities {
@@ -264,6 +373,7 @@ impl From<AdapterCapabilities> for Capabilities {
             scan: caps.scan,
             delete: caps.delete,
             trash: caps.trash,
+            undo: caps.undo,
             dry_run: caps.dry_run,
             cleanup_categories: caps.cleanup_categories,
             uninstall_apps: caps.uninstall_apps,

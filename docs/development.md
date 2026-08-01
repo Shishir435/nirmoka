@@ -2,12 +2,13 @@
 
 ## Prerequisites
 
-| Tool | Version | Notes                                                   |
-| ---- | ------- | ------------------------------------------------------- |
-| Node | ≥ 22    |                                                         |
-| pnpm | 10.32.1 | pinned via `packageManager` in `package.json`           |
-| Rust | stable  | via `rustup`; `rust-toolchain.toml` selects the channel |
-| ncdu | 2.x     | the baseline backend; `brew install ncdu`               |
+| Tool | Version | Notes                                                           |
+| ---- | ------- | --------------------------------------------------------------- |
+| Node | ≥ 22    |                                                                 |
+| pnpm | 10.32.1 | pinned via `packageManager` in `package.json`                   |
+| Rust | stable  | via `rustup`; `rust-toolchain.toml` selects the channel         |
+| ncdu | 2.x     | the baseline scanner; `brew install ncdu`                       |
+| rip  | 0.13.x  | optional undo for existing receipts; `brew install rm-improved` |
 
 On Linux the shell links against the system webview, which is a package rather than part of
 the OS:
@@ -18,7 +19,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
 ```
 
 Optional: `mo` ([Mole](https://github.com/tw93/Mole)) for the macOS-only rich backend from
-step 9.
+step 9. rip is required only to undo existing receipts; new selected-path deletion is disabled.
 
 ## First-time setup
 
@@ -29,12 +30,14 @@ source "$HOME/.cargo/env"
 
 # The backend Nirmoka drives
 brew install ncdu
+brew install rm-improved    # optional: undo existing receipts
 
 git clone git@github.com:Shishir435/nirmoka.git
 cd nirmoka
 
 pnpm install
 pnpm hooks:install          # enable the pre-push hook (once per clone)
+rustup target add x86_64-pc-windows-gnu # catch Windows-only warnings locally
 cargo check --workspace --all-targets
 ```
 
@@ -65,6 +68,8 @@ pnpm types                  # regenerate the TypeScript mirrors of the Rust DTOs
 
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p nirmoka-adapter -p nirmoka-adapter-gdu -p nirmoka-adapter-rip --tests \
+  --target x86_64-pc-windows-gnu -- -D warnings
 cargo fmt --all
 pnpm format
 ```
@@ -75,11 +80,15 @@ the mock transport — useful for styling without a backend or a Rust toolchain.
 
 ## Before pushing
 
-The pre-push hook runs this for you once `pnpm hooks:install` has been run:
+The pre-push hook runs this for you once `pnpm hooks:install` has been run. On non-Windows
+hosts it also cross-checks the platform-sensitive rip tests for Windows; install that target
+once with `rustup target add x86_64-pc-windows-gnu`.
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p nirmoka-adapter -p nirmoka-adapter-gdu -p nirmoka-adapter-rip --tests \
+  --target x86_64-pc-windows-gnu -- -D warnings
 cargo test --workspace
 pnpm format:check
 pnpm typecheck

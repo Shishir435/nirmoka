@@ -16,6 +16,9 @@
 
 use tauri::{AppHandle, State};
 
+use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
+
+use crate::deletion::PendingDelete;
 use crate::dto;
 use crate::scan;
 use crate::state::{AppState, ScanId};
@@ -159,6 +162,167 @@ pub fn rows_of(
     ))
 }
 
+/// Validate a selected row through the deletion adapter and issue a one-time
+/// confirmation token. The raw path never returns as an execute parameter.
+pub fn prepare_delete_in(
+    state: &AppState,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<dto::DeletePreparation, dto::DeleteFailure> {
+    let (scan_root, target, total_bytes) = {
+        let scan = state.scan();
+        let result = scan.result.as_ref().ok_or_else(|| {
+            dto::DeleteFailure::new(
+                dto::DeleteFailureCode::NoCompletedScan,
+                "no scan has completed yet",
+            )
+        })?;
+        if result.id != scan_id {
+            return Err(dto::DeleteFailure::new(
+                dto::DeleteFailureCode::StaleScan,
+                format!("scan {scan_id} has been replaced by scan {}", result.id),
+            ));
+        }
+        let node = result.tree.node_id(node_id).map_err(|error| {
+            dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+        })?;
+        let target = result.tree.path_of(node).map_err(|error| {
+            dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+        })?;
+        let total_bytes = result
+            .tree
+            .get(node)
+            .map(|node| node.total_bytes)
+            .map_err(|error| {
+                dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+            })?;
+        (result.tree.root_path().to_path_buf(), target, total_bytes)
+    };
+
+    let choice = state.resolve(Ability::Trash).ok_or_else(|| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::NoBackend,
+            "no backend safely supports execution-bound selected-path deletion",
+        )
+    })?;
+    let plan = choice
+        .adapter
+        .prepare_delete(&scan_root, &target, DeleteMode::Trash)
+        .map_err(backend_failure)?;
+    let target_path = plan.target().display().to_string();
+    let backend = plan.backend().to_string();
+    let token = state.deletion().prepare(PendingDelete {
+        scan_id,
+        plan,
+        total_bytes,
+    });
+
+    Ok(dto::DeletePreparation {
+        confirmation_token: token,
+        backend,
+        backend_instead_of: choice.instead_of,
+        target_path,
+        total_bytes,
+        disposition: dto::DeleteDisposition::Trash,
+        recoverable: true,
+        dry_run: false,
+        requires_confirmation: true,
+        warning: "This item will be moved to rip's recoverable graveyard. Confirm explicitly to continue."
+            .to_string(),
+    })
+}
+
+/// Consume a one-time confirmation and execute the exact plan it names.
+pub fn confirm_delete_in(
+    state: &AppState,
+    confirmation_token: u64,
+) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
+    let pending = state
+        .deletion()
+        .take_pending(confirmation_token)
+        .ok_or_else(|| {
+            dto::DeleteFailure::new(
+                dto::DeleteFailureCode::ConfirmationExpired,
+                "this deletion confirmation is invalid, expired, or was already used",
+            )
+        })?;
+
+    let current_scan = state.scan().result.as_ref().map(|result| result.id);
+    if current_scan != Some(pending.scan_id) {
+        return Err(dto::DeleteFailure::new(
+            dto::DeleteFailureCode::StaleScan,
+            "the scan changed after confirmation was prepared; select the item again",
+        ));
+    }
+
+    let adapter = state.adapter(pending.plan.backend()).ok_or_else(|| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::NoBackend,
+            "the backend that prepared this deletion is no longer registered",
+        )
+    })?;
+    let receipt = adapter
+        .delete(&pending.plan, &CancelToken::new())
+        .map_err(backend_failure)?;
+    let operation = state.deletion().record_delete(receipt).map_err(|error| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::Backend,
+            format!("deletion receipt could not be made durable: {error}"),
+        )
+    })?;
+
+    // The scan describes a path that no longer exists. Keeping it would make a
+    // second click target stale filesystem state, so require a rescan.
+    state.scan().result = None;
+    Ok(dto::DeleteOperation::from_operation(&operation))
+}
+
+pub fn undo_delete_in(
+    state: &AppState,
+    operation_id: u64,
+) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
+    let operation = state.deletion().operation(operation_id).ok_or_else(|| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::ConfirmationExpired,
+            format!("unknown deletion operation {operation_id}"),
+        )
+    })?;
+    if operation.undone_at_ms.is_some() {
+        return Err(dto::DeleteFailure::new(
+            dto::DeleteFailureCode::AlreadyUndone,
+            "this deletion has already been undone",
+        ));
+    }
+
+    let adapter = state.adapter(operation.receipt.backend()).ok_or_else(|| {
+        dto::DeleteFailure::new(
+            dto::DeleteFailureCode::NoBackend,
+            "the backend needed to undo this deletion is no longer registered",
+        )
+    })?;
+    adapter
+        .undo(&operation.receipt, &CancelToken::new())
+        .map_err(backend_failure)?;
+    let operation = state
+        .deletion()
+        .mark_undone(operation_id)
+        .map_err(|message| dto::DeleteFailure::new(dto::DeleteFailureCode::Backend, message))?;
+    Ok(dto::DeleteOperation::from_operation(&operation))
+}
+
+pub fn operation_log_of(state: &AppState) -> Vec<dto::DeleteOperation> {
+    state
+        .deletion()
+        .operations()
+        .iter()
+        .map(dto::DeleteOperation::from_operation)
+        .collect()
+}
+
+fn backend_failure(error: nirmoka_adapter::AdapterError) -> dto::DeleteFailure {
+    dto::DeleteFailure::new(dto::DeleteFailureCode::Backend, error.to_string())
+}
+
 #[tauri::command]
 pub fn list_backends(state: State<'_, AppState>) -> Vec<dto::Backend> {
     backends(&state)
@@ -207,6 +371,36 @@ pub fn rows(
     limit: u32,
 ) -> Result<dto::RowPage, String> {
     rows_of(&state, scan_id, parent_id, sort, offset, limit)
+}
+
+#[tauri::command]
+pub fn prepare_delete(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<dto::DeletePreparation, dto::DeleteFailure> {
+    prepare_delete_in(&state, scan_id, node_id)
+}
+
+#[tauri::command]
+pub fn confirm_delete(
+    state: State<'_, AppState>,
+    confirmation_token: u64,
+) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
+    confirm_delete_in(&state, confirmation_token)
+}
+
+#[tauri::command]
+pub fn undo_delete(
+    state: State<'_, AppState>,
+    operation_id: u64,
+) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
+    undo_delete_in(&state, operation_id)
+}
+
+#[tauri::command]
+pub fn operation_log(state: State<'_, AppState>) -> Vec<dto::DeleteOperation> {
+    operation_log_of(&state)
 }
 
 #[cfg(test)]
@@ -387,5 +581,81 @@ mod tests {
         assert_eq!(summary.backend_id, "ncdu");
         assert_eq!(summary.scan_id, SCAN);
         assert_eq!(summary.total_bytes, u64::from(MAX_ROWS + 5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsafe_selected_path_deletion_is_not_offered() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        use nirmoka_adapter::{Preference, Registry};
+        use nirmoka_adapter_rip::RipAdapter;
+
+        let base =
+            std::env::temp_dir().join(format!("nirmoka-command-delete-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("scan");
+        let target = root.join("file.txt");
+        let binary = base.join("rip");
+        let recovery = base.join("recovery");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&target, b"important").unwrap();
+        fs::write(
+            &binary,
+            r#"#!/bin/sh
+graveyard=""
+undo=""
+target=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version) echo "rm-improved 0.13.1"; exit 0 ;;
+    --graveyard) graveyard="$2"; shift 2 ;;
+    -u|--unbury) undo="$2"; shift 2 ;;
+    *) target="$1"; shift ;;
+  esac
+done
+if [ -n "$undo" ]; then
+  original="${undo#"$graveyard"}"
+  mkdir -p "$(dirname "$original")"
+  mv "$undo" "$original"
+else
+  destination="$graveyard$target"
+  mkdir -p "$(dirname "$destination")"
+  mv "$target" "$destination"
+fi
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary, permissions).unwrap();
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(RipAdapter::with_binary_and_recovery_root(
+            binary, recovery,
+        )));
+        let state = AppState::with_parts(Preference::platform_default(), false, registry, None);
+
+        let mut tree = Tree::new(&root);
+        let root_id = tree.push(None, Node::directory("scan"));
+        let file_id = tree.push(Some(root_id), Node::file("file.txt", 9));
+        tree.rollup();
+        state.scan().result = Some(ScanResult {
+            id: SCAN,
+            summary: dto::ScanSummary::new(
+                SCAN,
+                &tree,
+                &nirmoka_adapter::ScanSummary::default(),
+                Default::default(),
+                "test",
+            ),
+            tree,
+        });
+
+        let error = prepare_delete_in(&state, SCAN, file_id.raw()).unwrap_err();
+        assert_eq!(error.code, dto::DeleteFailureCode::NoBackend);
+        assert!(target.exists(), "refusal must leave the target untouched");
+        let _ = fs::remove_dir_all(base);
     }
 }

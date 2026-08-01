@@ -79,8 +79,10 @@ Consequences that follow, each of which is enforced rather than documented:
 - Mole contributes nothing until step 10 ships deletion. Between now and then it is a
   detected backend that visibly does not drive the browser — which the backend list has to
   explain rather than leave looking broken.
-- `Capabilities::MINIMAL` is no longer the floor it was named for. `scan: false, delete:
-true` is below it.
+- `Capabilities::MINIMAL` is no longer a universal floor. The original decision described
+  Mole as `scan: false, delete: true`; [ADR 0014](0014-interactive-deletion-is-not-an-adapter-api.md)
+  supersedes that capability interpretation because cleanup categories are not arbitrary
+  selected-path deletion.
 
 ## Notes
 

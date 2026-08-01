@@ -1,9 +1,9 @@
 //! What a backend can do.
 //!
-//! Backends differ enormously: ncdu browses and deletes, Mole additionally
-//! cleans by category, uninstalls applications, routes to Trash, and previews
-//! with a dry run. The UI queries these flags and hides what the active backend
-//! cannot do, rather than offering a control that fails at call time.
+//! Backends differ enormously: ncdu scans, while Mole cleans by category,
+//! uninstalls applications, and previews those operations with a dry run. The
+//! UI queries these flags and hides what the active backend cannot do, rather
+//! than offering a control that fails at call time.
 //!
 //! **New backend abilities are flags, never wire-format extensions.** Widening
 //! the wire format requires its own ADR — see `docs/adr/0002`.
@@ -13,14 +13,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
-    /// Walk a directory tree and report sizes. Every backend has this.
+    /// Walk a directory tree and report sizes.
     pub scan: bool,
 
-    /// Remove a path. Every backend worth adapting has this.
+    /// Non-interactively remove a caller-selected path.
     pub delete: bool,
 
-    /// Recoverable removal rather than permanent.
+    /// Recoverable mode for caller-selected path removal.
     pub trash: bool,
+
+    /// Restore a durable receipt non-interactively. This may remain true when
+    /// new recoverable deletion is withdrawn, so older receipts stay usable.
+    pub undo: bool,
 
     /// Produce the exact list of what would be removed, without removing it.
     ///
@@ -40,12 +44,13 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
-    /// The floor: scan and delete, nothing else. A useful starting point for a
-    /// new adapter, and what ncdu actually provides.
+    /// The narrow scanner: scan and nothing else. ncdu's deletion belongs to
+    /// its interactive TUI and is not a command an adapter can safely invoke.
     pub const MINIMAL: Self = Self {
         scan: true,
-        delete: true,
+        delete: false,
         trash: false,
+        undo: false,
         dry_run: false,
         cleanup_categories: false,
         uninstall_apps: false,

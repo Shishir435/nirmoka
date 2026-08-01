@@ -3,6 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Builds on** [ADR 0012](0012-mole-is-not-a-scanner.md).
+- **Extended by** [ADR 0016](0016-rip-is-the-selected-path-deletion-backend.md), then
+  [ADR 0017](0017-rip-deletion-is-not-execution-bound.md).
 
 ## Context
 
@@ -37,8 +39,9 @@ from where it cannot — never silently.
 adapter is usable _and_ declares the ability:
 
 1. **The user's choice.** Honoured whenever it can be.
-2. **The platform default order** — macOS `mole, ncdu, gdu`; Windows `gdu, ncdu, mole`;
-   everywhere else `ncdu, gdu, mole`.
+2. **The platform default order** — macOS `mole, rip, ncdu, gdu`; Windows
+   `gdu, rip, ncdu, mole`; everywhere else `ncdu, rip, gdu, mole`. rip was added by
+   ADR 0016 and capability filtering keeps it out of scans.
 3. **Registration order**, for a backend no default names.
 
 It returns a `Choice`, which carries the adapter _and_ `instead_of` — the backend that was
@@ -51,9 +54,9 @@ Consequences that follow:
 - **Registration order stops being preference order.** It is now the last tiebreak, reached
   only by a backend no default names — kept so that a new adapter is reachable rather than
   invisible before anyone updates the defaults.
-- **`gdu` is named in every default order and has no adapter.** An id matching no registered
-  backend is skipped, not an error. The Windows default is therefore aspirational until step
-  11, and becomes correct when the adapter lands without this file changing.
+- **`gdu` was named in every default order before its adapter existed.** An id matching no
+  registered backend is skipped, not an error. Step 11 later added the adapter without
+  changing this ordering decision.
 - **`None` is a real preference,** not an absent one. It means "follow the platform default"
   and keeps following it when a later release changes the defaults — which a value written
   eagerly on first run would not.
@@ -97,8 +100,8 @@ Claiming one would eventually tell somebody to install what they already have.
   every surface that mentions a backend has to say which job it means.
 - Resolution runs detection on each candidate, so it is a handful of subprocesses. Fine for a
   button press and wrong for a loop; nothing calls it in one today.
-- A default naming an unimplemented backend is a real, if small, trap: `gdu` sitting first on
-  Windows and resolving to nothing is correct behaviour that reads like a bug until step 11.
+- Before step 11, a default naming an unimplemented backend was a real, if small, trap: `gdu`
+  sat first on Windows and correctly resolved to nothing. ADR 0015 closes that gap.
 
 ## Notes
 

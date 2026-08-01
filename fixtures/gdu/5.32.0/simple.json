@@ -1,0 +1,11 @@
+[1,2,{"progname":"gdu","progver":"v5.32.0","timestamp":1785568963},
+[{"name":"/fixtures/gdu-simple","mtime":1785568963},
+[{"name":"nested","mtime":1785568963},
+{"name":"regular.txt","asize":11,"dsize":4096,"mtime":1785568963,"ino":47796271,"hlnkc":true},
+[{"name":"deeper","mtime":1785568963},
+{"name":"blocks.bin","asize":8192,"dsize":8192,"mtime":1785568963},
+{"name":"hardlink.txt","asize":11,"dsize":4096,"mtime":1785568963,"ino":47796271,"hlnkc":true},
+{"name":"link","asize":14,"mtime":1785568963,"notreg":true}]],
+[{"name":"empty","mtime":1785568963}
+],
+{"name":"sparse.img","asize":4194304,"mtime":1785568963}]]

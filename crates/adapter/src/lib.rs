@@ -5,13 +5,14 @@
 //!
 //! # Current scope
 //!
-//! Detection, capabilities, and scanning. `delete` lands in step 10 with its
-//! own validation and tests; it is deliberately absent rather than stubbed, so
-//! no caller can depend on a signature that has not been designed yet.
+//! Detection, capabilities, scanning, and the shared validation required before
+//! a delete target may reach a backend. Path deletion itself is deliberately
+//! absent until a backend exposes a non-interactive command for it.
 
 #![forbid(unsafe_code)]
 
 pub mod capabilities;
+pub mod delete;
 pub mod detect;
 pub mod error;
 pub mod preference;
@@ -23,6 +24,7 @@ pub mod wire;
 use std::path::Path;
 
 pub use capabilities::Capabilities;
+pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
 pub use error::AdapterError;
 pub use preference::{default_order, default_order_for, Ability, Preference};
@@ -76,4 +78,45 @@ pub trait Adapter: Send + Sync {
         sink: &mut dyn WireSink,
         cancel: &CancelToken,
     ) -> Result<ScanSummary, AdapterError>;
+
+    /// Validate and canonicalise one selected-path deletion.
+    ///
+    /// This method is deliberately separate from [`Adapter::delete`]: the
+    /// shell turns the returned plan into a one-time confirmation token rather
+    /// than handing a raw path back to the frontend.
+    fn prepare_delete(
+        &self,
+        _scan_root: &Path,
+        _target: &Path,
+        _mode: DeleteMode,
+    ) -> Result<DeletePlan, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "selected-path deletion",
+        })
+    }
+
+    /// Execute a previously prepared deletion.
+    ///
+    /// Implementors must validate the plan again immediately before the path
+    /// becomes a subprocess argument. Confirmation belongs to the shell and is
+    /// enforced before this method is reachable.
+    fn delete(
+        &self,
+        _plan: &DeletePlan,
+        _cancel: &CancelToken,
+    ) -> Result<DeleteReceipt, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "selected-path deletion",
+        })
+    }
+
+    /// Restore one receipt produced by this adapter.
+    fn undo(&self, _receipt: &DeleteReceipt, _cancel: &CancelToken) -> Result<(), AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "undo deletion",
+        })
+    }
 }

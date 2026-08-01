@@ -15,6 +15,8 @@ nirmoka-core = { path = "crates/core" }
 nirmoka-adapter = { path = "crates/adapter" }
 nirmoka-adapter-ncdu = { path = "crates/adapter-ncdu" }
 nirmoka-adapter-mole = { path = "crates/adapter-mole" }
+nirmoka-adapter-gdu = { path = "crates/adapter-gdu" }
+nirmoka-adapter-rip = { path = "crates/adapter-rip" }
 
 # External. Keep this list short; every addition is a maintenance cost.
 serde = { version = "1", features = ["derive"] }
