@@ -1,90 +1,180 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Toaster } from "sonner";
 
-import { resolveTransport, type Backend, type BackendSelection } from "@nirmoka/transport";
+import { AppShell, type Route } from "@/components/app-shell";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useApp } from "@/lib/app-context";
 
-import { BackendList } from "@/components/backend-list";
-import { ScanPanel } from "@/components/scan-panel";
+const Onboarding = lazy(() =>
+  import("@/pages/onboarding").then((module) => ({ default: module.Onboarding })),
+);
 
-/** A last-resort recovery has nowhere further to fall back to. */
-function noop() {}
+const pages: Record<Route, React.LazyExoticComponent<React.ComponentType>> = {
+  overview: lazy(() =>
+    import("@/pages/overview-page").then((module) => ({ default: module.OverviewPage })),
+  ),
+  clean: lazy(() => import("@/pages/clean-page").then((module) => ({ default: module.CleanPage }))),
+  space: lazy(() => import("@/pages/space-page").then((module) => ({ default: module.SpacePage }))),
+  developer: lazy(() =>
+    import("@/pages/developer-page").then((module) => ({ default: module.DeveloperPage })),
+  ),
+  applications: lazy(() =>
+    import("@/pages/applications-page").then((module) => ({ default: module.ApplicationsPage })),
+  ),
+  activity: lazy(() =>
+    import("@/pages/activity-page").then((module) => ({ default: module.ActivityPage })),
+  ),
+  help: lazy(() => import("@/pages/help-page").then((module) => ({ default: module.HelpPage }))),
+};
 
-/**
- * Every backend call goes through `Transport`. Nothing in this tree knows that
- * Tauri exists — `resolveTransport()` hands back the real implementation inside
- * the shell and the mock in a plain browser, so `pnpm dev` on its own still
- * renders something to work on.
- */
+function fromHash(): Route | "onboarding" {
+  const value = window.location.hash.replace("#/", "");
+  return value.startsWith("onboarding")
+    ? "onboarding"
+    : value in pages
+      ? (value as Route)
+      : "overview";
+}
+
 export function App() {
-  const transport = useMemo(() => resolveTransport(), []);
-  const [backends, setBackends] = useState<Backend[] | null>(null);
-  const [selection, setSelection] = useState<BackendSelection | null>(null);
-  const [choosing, setChoosing] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-
-    Promise.all([transport.listBackends(), transport.backendSelection()])
-      .then(([detected, resolved]) => {
-        if (!active) return;
-        setBackends(detected);
-        setSelection(resolved);
-      })
-      .catch(() => {
-        if (active) setBackends([]);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [transport]);
-
-  /**
-   * The answer comes from Rust rather than being computed here.
-   *
-   * A preference is resolved against what each backend can actually do, and
-   * duplicating that rule in the UI is how the two drift: the window would say
-   * one backend and the scan would run on another. The round trip costs a
-   * detection sweep, which is what the button's honesty is worth.
-   */
-  const choose = useCallback(
-    (id: string | null) => {
-      setChoosing(true);
-      transport
-        .chooseBackend(id)
-        .then(setSelection)
-        .catch(() => {
-          // The command does not reject on a failed write — that arrives as
-          // `saveError` on the selection. Reaching here means the round trip
-          // itself failed, so the selection on screen is of unknown accuracy
-          // and asking again is the only honest recovery.
-          transport.backendSelection().then(setSelection).catch(noop);
-        })
-        .finally(() => setChoosing(false));
-    },
-    [transport],
+  const { isShell, backends, selection, chooseBackend } = useApp();
+  const [route, setRoute] = useState<Route | "onboarding">(fromHash);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() =>
+    window.localStorage.getItem("nirmoka-theme") === "dark" ? "dark" : "light",
   );
-
-  // Not `usable`, and no longer a capability check done here either: Rust has
-  // already resolved which backend would run a scan, and `null` means nothing
-  // installed can. Mole is usable on macOS, is its default, and cannot scan.
-  const canScan = selection?.scanner != null;
-
+  useEffect(() => {
+    const sync = () => setRoute(fromHash());
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  useEffect(() => {
+    document.documentElement.classList.remove("light", "dark");
+    document.documentElement.classList.add(theme);
+  }, [theme]);
+  const navigate = (next: Route) => {
+    window.location.hash = `/${next}`;
+    setRoute(next);
+  };
+  const chooseTheme = (next: "light" | "dark") => {
+    document.documentElement.classList.remove("light", "dark");
+    document.documentElement.classList.add(next);
+    window.localStorage.setItem("nirmoka-theme", next);
+    setTheme(next);
+  };
+  if (route === "onboarding")
+    return (
+      <>
+        <Suspense
+          fallback={
+            <div className="grid min-h-screen place-items-center">
+              <Skeleton className="h-140 w-full max-w-155 rounded-[20px]" />
+            </div>
+          }
+        >
+          <Onboarding onComplete={() => navigate("overview")} />
+        </Suspense>
+        <Toaster richColors position="bottom-right" />
+      </>
+    );
+  const Page = pages[route];
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Nirmoka</h1>
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          Disk analysis through the scanner you already have installed. The tree stays in Rust; this
-          window asks for the rows it is about to paint.
-        </p>
-      </header>
+    <AppShell route={route} onRoute={navigate} onSettings={() => setSettingsOpen(true)}>
+      {!isShell && (
+        <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning-foreground">
+          Browser development mode: fixture transport is active. Packaged Tauri builds always use
+          the real transport.
+        </div>
+      )}
+      <Suspense fallback={<PageLoading />}>
+        <Page />
+      </Suspense>
+      <Toaster richColors position="bottom-right" />
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Settings</DialogTitle>
+            <DialogDescription>
+              Appearance and backend status for this Nirmoka installation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div>
+              <p className="text-sm font-medium">Appearance</p>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  variant={theme === "light" ? "default" : "outline"}
+                  onClick={() => chooseTheme("light")}
+                >
+                  Light
+                </Button>
+                <Button
+                  variant={theme === "dark" ? "default" : "outline"}
+                  onClick={() => chooseTheme("dark")}
+                >
+                  Dark
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-muted/40 p-4">
+              <p className="text-sm font-medium">Read Only Mode</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Active. Selected-path deletion is unavailable in this beta because no current
+                backend can bind execution to the validated filesystem object.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="backend-choice" className="text-sm font-medium">
+                Preferred backend
+              </label>
+              <select
+                id="backend-choice"
+                value={selection?.chosen ?? ""}
+                onChange={(event) => void chooseBackend(event.target.value || null)}
+                className="mt-2 h-9 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                <option value="">Platform default</option>
+                {backends?.map((backend) => (
+                  <option key={backend.id} value={backend.id} disabled={!backend.usable}>
+                    {backend.displayName} — {backend.usable ? "detected" : "unavailable"}
+                  </option>
+                ))}
+              </select>
+              {selection?.scannerInsteadOf && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selection.scanner} scans because {selection.scannerInsteadOf} cannot scan.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setSettingsOpen(false)}>Done</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </AppShell>
+  );
+}
 
-      <ScanPanel transport={transport} enabled={canScan} />
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium">Backends</h2>
-        <BackendList backends={backends} selection={selection} onChoose={choose} busy={choosing} />
-      </section>
-    </main>
+function PageLoading() {
+  return (
+    <div className="space-y-6" aria-label="Loading page">
+      <Skeleton className="h-12 w-64" />
+      <div className="grid grid-cols-4 gap-3">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
+      <Skeleton className="h-105" />
+    </div>
   );
 }

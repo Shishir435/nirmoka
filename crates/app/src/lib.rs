@@ -13,10 +13,12 @@
 pub mod commands;
 pub mod deletion;
 pub mod dto;
+pub mod inventory;
 pub mod path;
 pub mod scan;
 pub mod settings;
 pub mod state;
+pub mod volume;
 
 use state::AppState;
 
@@ -38,6 +40,9 @@ pub fn run() {
             commands::confirm_delete,
             commands::undo_delete,
             commands::operation_log,
+            commands::volume_info,
+            commands::application_inventory,
+            commands::developer_inventory,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

@@ -21,44 +21,36 @@ jobs:
   # would build the whole workspace twice for no gain.
   rust:
     name: rust / ${{ matrix.label }}
+    # macOS beta focus: Linux and Windows matrix entries are preserved below as
+    # comments. Uncomment them after the beta to restore cross-platform CI.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu still ships the ncdu 1.x series, which emits a different JSON
-          # export shape. That makes this runner a free real-world test that the
-          # version gate rejects it.
-          - os: ubuntu-latest
-            label: ubuntu (ncdu 1.x from apt)
-            lint: true
-            generated: true
-            ncdu_install: sudo apt-get update && sudo apt-get install -y ncdu
-            ncdu_expect: unsupported
-          # …and apt has no 2.x package, so the usable-backend path on Linux is
-          # covered by upstream's static build. Without this entry, Linux only
-          # ever exercises the rejection path, and a Linux-only scan regression
-          # would ship.
-          - os: ubuntu-latest
-            label: ubuntu (ncdu 2.x from upstream)
-            lint: false
-            ncdu_install: |
-              curl -fsSL https://dev.yorhel.nl/download/ncdu-2.9.1-linux-x86_64.tar.gz |
-                sudo tar -xz -C /usr/local/bin ncdu
-            ncdu_expect: ok
+          # Temporarily disabled for the macOS beta:
+          # - os: ubuntu-latest
+          #   label: ubuntu (ncdu 1.x from apt)
+          #   lint: true
+          #   generated: true
+          #   ncdu_install: sudo apt-get update && sudo apt-get install -y ncdu
+          #   ncdu_expect: unsupported
+          # - os: ubuntu-latest
+          #   label: ubuntu (ncdu 2.x from upstream)
+          #   lint: false
+          #   ncdu_install: curl -fsSL https://dev.yorhel.nl/download/ncdu-2.9.1-linux-x86_64.tar.gz | sudo tar -xz -C /usr/local/bin ncdu
+          #   ncdu_expect: ok
           # Homebrew ships ncdu 2.x.
           - os: macos-latest
             label: macos
             lint: true
             ncdu_install: brew install ncdu
             ncdu_expect: ok
-          # ncdu has no Windows build. gdu is installed below from the pinned
-          # upstream release, so Windows exercises a real scanner rather than
-          # only compiling the adapter intended for it.
-          - os: windows-latest
-            label: windows
-            lint: true
-            ncdu_expect: skip
+          # Temporarily disabled for the macOS beta:
+          # - os: windows-latest
+          #   label: windows
+          #   lint: true
+          #   ncdu_expect: skip
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

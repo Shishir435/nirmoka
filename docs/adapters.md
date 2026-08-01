@@ -44,7 +44,9 @@ An id naming no registered backend is skipped rather than treated as an error. S
 Detection, capabilities, scanning, and selected-path deletion share one trait. Every current
 backend refuses new selected-path deletion. rip retains exact undo for durable receipts made
 before deletion was withdrawn. See
-[ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md).
+[ADR 0017](adr/0017-rip-deletion-is-not-execution-bound.md). New selected-path deletion is
+deferred beyond v0.1 by
+[ADR 0018](adr/0018-selected-path-deletion-is-deferred-for-v0-1.md).
 
 ```rust
 pub trait Adapter: Send + Sync {

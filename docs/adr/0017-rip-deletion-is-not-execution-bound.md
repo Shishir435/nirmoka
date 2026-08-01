@@ -42,6 +42,10 @@ Step 10 is reopened for confirmation and Trash. A future implementation needs an
 accepts an already-bound filesystem object, performs its own atomic containment guarantee, or
 otherwise closes the validation-to-execution race without bypassing backend safety rules.
 
+[ADR 0018](0018-selected-path-deletion-is-deferred-for-v0-1.md) subsequently closes Step 10
+by deferring new selected-path deletion beyond v0.1. The safety requirement above remains the
+acceptance gate for reopening it.
+
 The operation journal can no longer report a safely recorded deletion after its durable write
 failed. This is defense in depth while new deletion is unavailable and a requirement for any
 future backend.
