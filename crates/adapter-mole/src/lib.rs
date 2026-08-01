@@ -347,10 +347,54 @@ fn parse_cleanup_preview(
     let mut declared_items = None;
     let mut declared_categories = None;
     let mut potential_cleanup = None;
+    let mut summary_fields = 0_u8;
 
     for line in lines {
         if line.is_empty() {
             continue;
+        }
+        if let Some(value) = line.strip_prefix("# Potential cleanup: ") {
+            if summary_fields != 0 || value.is_empty() {
+                return Err(malformed(
+                    "cleanup summary is missing, empty, or out of order".to_string(),
+                ));
+            }
+            potential_cleanup = Some(value.to_string());
+            summary_fields = 1;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# Items: ") {
+            if summary_fields != 1 {
+                return Err(malformed(
+                    "cleanup summary is missing or out of order".to_string(),
+                ));
+            }
+            declared_items = Some(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| malformed(format!("invalid item count: {value}")))?,
+            );
+            summary_fields = 2;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# Categories: ") {
+            if summary_fields != 2 {
+                return Err(malformed(
+                    "cleanup summary is missing or out of order".to_string(),
+                ));
+            }
+            declared_categories = Some(
+                value
+                    .parse::<usize>()
+                    .map_err(|_| malformed(format!("invalid category count: {value}")))?,
+            );
+            summary_fields = 3;
+            continue;
+        }
+        if summary_fields != 0 {
+            return Err(malformed(
+                "cleanup summary must be the terminal preview trailer".to_string(),
+            ));
         }
         if let Some(name) = line
             .strip_prefix("=== ")
@@ -370,26 +414,6 @@ fn parse_cleanup_preview(
                     categories.len() - 1
                 });
             current_category = Some(index);
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("# Potential cleanup: ") {
-            potential_cleanup = Some(value.to_string());
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("# Items: ") {
-            declared_items = Some(
-                value
-                    .parse::<u64>()
-                    .map_err(|_| malformed(format!("invalid item count: {value}")))?,
-            );
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("# Categories: ") {
-            declared_categories = Some(
-                value
-                    .parse::<usize>()
-                    .map_err(|_| malformed(format!("invalid category count: {value}")))?,
-            );
             continue;
         }
         if line.starts_with('#') {
@@ -417,9 +441,14 @@ fn parse_cleanup_preview(
         .flat_map(|category| &category.items)
         .try_fold(0_u64, |total, item| total.checked_add(item.item_count))
         .ok_or_else(|| malformed("cleanup item count overflowed".to_string()))?;
-    if !categories.is_empty() && potential_cleanup.is_none() {
+    if summary_fields != 0 && summary_fields != 3 {
         return Err(malformed(
-            "nonempty preview has no potential-cleanup summary".to_string(),
+            "cleanup summary trailer is incomplete".to_string(),
+        ));
+    }
+    if !categories.is_empty() && summary_fields != 3 {
+        return Err(malformed(
+            "nonempty preview has no complete summary trailer".to_string(),
         ));
     }
     let declared_items = match declared_items {
@@ -817,6 +846,37 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
             let changed = CLEAN_PREVIEW.replace(declaration, "");
             let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
                 .expect_err("every nonempty preview summary declaration must be present");
+
+            assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+        }
+    }
+
+    #[test]
+    fn cleanup_preview_requires_an_ordered_terminal_summary() {
+        let trailer = "# Potential cleanup: At least 192.00MB\n# Items: 6\n# Categories: 2\n";
+        let early = CLEAN_PREVIEW.replacen(
+            "=== Browser caches ===",
+            &format!("{trailer}\n=== Browser caches ==="),
+            1,
+        );
+        let first_cleanup_row = CLEAN_PREVIEW
+            .lines()
+            .find(|line| line.contains("128.00MB, 4 items"))
+            .expect("fixture has a grouped cleanup row");
+        let interleaved = CLEAN_PREVIEW.replacen(
+            &format!("{first_cleanup_row}\n"),
+            &format!("{first_cleanup_row}\n{trailer}"),
+            1,
+        );
+        let reordered = CLEAN_PREVIEW.replace(
+            "# Potential cleanup: At least 192.00MB\n# Items: 6\n",
+            "# Items: 6\n# Potential cleanup: At least 192.00MB\n",
+        );
+        let trailing = format!("{CLEAN_PREVIEW}/tmp/trailing  # 1KB\n");
+
+        for changed in [early, interleaved, reordered, trailing] {
+            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+                .expect_err("the summary must be an ordered terminal trailer");
 
             assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
         }
