@@ -45,6 +45,7 @@ pub fn run() {
             commands::installed_application_inventory,
             commands::developer_inventory,
             commands::system_status,
+            commands::cleanup_preview,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

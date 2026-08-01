@@ -34,10 +34,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use directories::BaseDirs;
 use nirmoka_adapter::process::{find_in_path, RunningProcess};
 use nirmoka_adapter::{
-    Adapter, AdapterError, CancelToken, Capabilities, Detection, InstalledApplication, ScanOptions,
-    ScanSummary, SystemStatus, WireSink,
+    Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupItem, CleanupPreview,
+    CleanupSystemScope, Detection, InstalledApplication, ScanOptions, ScanSummary, SystemStatus,
+    WireSink,
 };
 
 const BINARY: &str = "mo";
@@ -169,6 +171,23 @@ impl Adapter for MoleAdapter {
         applications_from(&binary, cancel)
     }
 
+    fn cleanup_preview(&self, cancel: &CancelToken) -> Result<CleanupPreview, AdapterError> {
+        let binary = supported_binary(self.detect()?)?;
+        let home = BaseDirs::new()
+            .ok_or_else(|| AdapterError::OperationFailed {
+                backend: "mole",
+                operation: "cleanup preview",
+                reason: "the user home directory is unavailable".to_string(),
+            })?
+            .home_dir()
+            .to_path_buf();
+        cleanup_preview_from(
+            &binary,
+            &home.join(".config").join("mole").join("clean-list.txt"),
+            cancel,
+        )
+    }
+
     /// Always [`AdapterError::Unsupported`].
     ///
     /// Not a stub and not a TODO. Faking a scan here would mean either a tree
@@ -214,6 +233,293 @@ fn applications_from(
 
 fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
     json_from_command(binary, &["status", "--json"], "system status", cancel)
+}
+
+fn cleanup_preview_from(
+    binary: &Path,
+    preview_path: &Path,
+    cancel: &CancelToken,
+) -> Result<CleanupPreview, AdapterError> {
+    use std::io::Read;
+
+    let operation = "cleanup preview";
+    let mut command = Command::new(binary);
+    command.args(["clean", "--dry-run"]);
+
+    let mut process =
+        RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+    let mut stdout = String::new();
+    let read_result = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|mut reader| {
+            reader
+                .read_to_string(&mut stdout)
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })
+        });
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    if outcome.cancelled {
+        return Err(AdapterError::Cancelled {
+            backend: "mole",
+            operation,
+        });
+    }
+    if !outcome.status.success() {
+        return Err(AdapterError::BackendFailed {
+            binary: BINARY,
+            status: outcome.status.code().unwrap_or(-1),
+            stderr: outcome.stderr,
+        });
+    }
+    read_result.map(|_| ())?;
+    if stdout.contains("Cleanup preview file could not be written safely") {
+        return Err(AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend could not publish its cleanup preview safely".to_string(),
+        });
+    }
+
+    let scope = if stdout.contains("Admin access available, system preview included") {
+        CleanupSystemScope::Included
+    } else if stdout.contains("System caches need sudo") {
+        CleanupSystemScope::UserOnly
+    } else {
+        CleanupSystemScope::Unknown
+    };
+    let metadata = std::fs::symlink_metadata(preview_path).map_err(|source| {
+        AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: format!("backend preview is unavailable: {source}"),
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend preview is not a regular file".to_string(),
+        });
+    }
+    let contents =
+        std::fs::read_to_string(preview_path).map_err(|source| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: format!("backend preview could not be read: {source}"),
+        })?;
+    parse_cleanup_preview(&contents, scope)
+}
+
+fn parse_cleanup_preview(
+    contents: &str,
+    system_scope: CleanupSystemScope,
+) -> Result<CleanupPreview, AdapterError> {
+    let malformed = |reason: String| AdapterError::MalformedBackendOutput {
+        binary: BINARY,
+        operation: "cleanup preview",
+        reason,
+    };
+    let mut lines = contents.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| malformed("preview is empty".to_string()))?;
+    let generated_at = header
+        .strip_prefix("# Mole Cleanup Preview - ")
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| malformed("preview header is missing or changed".to_string()))?
+        .to_string();
+    let mut categories: Vec<CleanupCategory> = Vec::new();
+    let mut current_category: Option<usize> = None;
+    let mut declared_items = None;
+    let mut declared_categories = None;
+    let mut potential_cleanup = None;
+    let mut summary_fields = 0_u8;
+
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# Potential cleanup: ") {
+            if summary_fields != 0 || value.is_empty() {
+                return Err(malformed(
+                    "cleanup summary is missing, empty, or out of order".to_string(),
+                ));
+            }
+            potential_cleanup = Some(value.to_string());
+            summary_fields = 1;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# Items: ") {
+            if summary_fields != 1 {
+                return Err(malformed(
+                    "cleanup summary is missing or out of order".to_string(),
+                ));
+            }
+            declared_items = Some(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| malformed(format!("invalid item count: {value}")))?,
+            );
+            summary_fields = 2;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# Categories: ") {
+            if summary_fields != 2 {
+                return Err(malformed(
+                    "cleanup summary is missing or out of order".to_string(),
+                ));
+            }
+            declared_categories = Some(
+                value
+                    .parse::<usize>()
+                    .map_err(|_| malformed(format!("invalid category count: {value}")))?,
+            );
+            summary_fields = 3;
+            continue;
+        }
+        if summary_fields != 0 {
+            return Err(malformed(
+                "cleanup summary must be the terminal preview trailer".to_string(),
+            ));
+        }
+        if let Some(name) = line
+            .strip_prefix("=== ")
+            .and_then(|value| value.strip_suffix(" ==="))
+        {
+            if name.is_empty() {
+                return Err(malformed("cleanup category has no name".to_string()));
+            }
+            let index = categories
+                .iter()
+                .position(|category| category.name == name)
+                .unwrap_or_else(|| {
+                    categories.push(CleanupCategory {
+                        name: name.to_string(),
+                        items: Vec::new(),
+                    });
+                    categories.len() - 1
+                });
+            current_category = Some(index);
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let category = current_category
+            .ok_or_else(|| malformed("cleanup path appears before a category".to_string()))?;
+        let (path, detail) = line
+            .rsplit_once("  # ")
+            .ok_or_else(|| malformed(format!("cleanup row has no size marker: {line}")))?;
+        if path.is_empty() {
+            return Err(malformed("cleanup row has an empty path".to_string()));
+        }
+        let (size, item_count) = parse_cleanup_item_detail(detail).map_err(malformed)?;
+        categories[category].items.push(CleanupItem {
+            path: PathBuf::from(path),
+            reported_size: size,
+            item_count,
+        });
+    }
+
+    let total_items = categories
+        .iter()
+        .flat_map(|category| &category.items)
+        .try_fold(0_u64, |total, item| total.checked_add(item.item_count))
+        .ok_or_else(|| malformed("cleanup item count overflowed".to_string()))?;
+    if summary_fields != 3 {
+        return Err(malformed(
+            "preview has no complete summary trailer".to_string(),
+        ));
+    }
+    let declared_items = match declared_items {
+        Some(declared) => declared,
+        None => return Err(malformed("preview has no item-count summary".to_string())),
+    };
+    let declared_categories = match declared_categories {
+        Some(declared) => declared,
+        None => {
+            return Err(malformed(
+                "preview has no category-count summary".to_string(),
+            ));
+        }
+    };
+    if declared_items != total_items {
+        return Err(malformed(
+            "summary item count does not match its rows".to_string(),
+        ));
+    }
+    if declared_categories != categories.len() {
+        return Err(malformed(
+            "summary category count does not match its sections".to_string(),
+        ));
+    }
+    let warnings = match system_scope {
+        CleanupSystemScope::Included => Vec::new(),
+        CleanupSystemScope::UserOnly => vec![
+            "System-level candidates are not included because administrator access was unavailable."
+                .to_string(),
+        ],
+        CleanupSystemScope::Unknown => {
+            vec!["Mole did not report whether system-level candidates were included.".to_string()]
+        }
+    };
+
+    Ok(CleanupPreview {
+        generated_at,
+        categories,
+        potential_cleanup,
+        total_items,
+        system_scope,
+        warnings,
+    })
+}
+
+fn parse_cleanup_item_detail(detail: &str) -> Result<(Option<String>, u64), String> {
+    let (size, item_count) = match detail.rsplit_once(", ") {
+        Some((size, count)) if count.ends_with(" items") => {
+            let count = count
+                .trim_end_matches(" items")
+                .parse::<u64>()
+                .map_err(|_| format!("invalid cleanup item count: {count}"))?;
+            if count < 2 {
+                return Err("grouped cleanup item count must be at least two".to_string());
+            }
+            (size, count)
+        }
+        _ => (detail, 1),
+    };
+    if size == "size unknown" {
+        return Ok((None, item_count));
+    }
+    let unit_start = size
+        .find(|character: char| character.is_ascii_alphabetic())
+        .ok_or_else(|| format!("cleanup size has no unit: {size}"))?;
+    let (number, unit) = size.split_at(unit_start);
+    if !matches!(unit, "B" | "KB" | "MB" | "GB" | "TB" | "PB")
+        || number.is_empty()
+        || number.matches('.').count() > 1
+        || !number
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+    {
+        return Err(format!("invalid cleanup size: {size}"));
+    }
+    Ok((Some(size.to_string()), item_count))
 }
 
 fn json_from_command<T: serde::de::DeserializeOwned>(
@@ -337,6 +643,7 @@ mod tests {
 
     const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
     const APPLICATIONS: &str = include_str!("../../../fixtures/mole/1.48.1/applications.json");
+    const CLEAN_PREVIEW: &str = include_str!("../../../fixtures/mole/1.48.1/clean-list.txt");
 
     /// Byte-for-byte what `mo --version` printed on Mole 1.48.1, leading blank
     /// line included. Trimming it here to make the parser's job easier is how
@@ -490,6 +797,153 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
 
         assert_eq!(applications[0].uninstall_name, "Example");
         assert_eq!(applications[0].size, 42);
+    }
+
+    #[test]
+    fn parses_the_sanitized_cleanup_preview_fixture() {
+        let preview = parse_cleanup_preview(CLEAN_PREVIEW, CleanupSystemScope::UserOnly)
+            .expect("cleanup preview fixture");
+
+        assert_eq!(preview.generated_at, "2026-08-01 12:30:00");
+        assert_eq!(preview.categories.len(), 2);
+        assert_eq!(preview.categories[0].items[0].item_count, 4);
+        assert_eq!(preview.categories[1].items[0].reported_size, None);
+        assert_eq!(
+            preview.potential_cleanup.as_deref(),
+            Some("At least 192.00MB")
+        );
+        assert_eq!(preview.total_items, 6);
+        assert_eq!(preview.warnings.len(), 1);
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_summary_drift() {
+        let changed = CLEAN_PREVIEW.replace("# Items: 6", "# Items: 600");
+        let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+            .expect_err("inconsistent preview must fail");
+
+        assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_a_missing_or_partial_summary() {
+        for declaration in [
+            "# Potential cleanup: At least 192.00MB\n",
+            "# Items: 6\n",
+            "# Categories: 2\n",
+        ] {
+            let changed = CLEAN_PREVIEW.replace(declaration, "");
+            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+                .expect_err("every nonempty preview summary declaration must be present");
+
+            assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+        }
+    }
+
+    #[test]
+    fn cleanup_preview_requires_an_ordered_terminal_summary() {
+        let trailer = "# Potential cleanup: At least 192.00MB\n# Items: 6\n# Categories: 2\n";
+        let early = CLEAN_PREVIEW.replacen(
+            "=== Browser caches ===",
+            &format!("{trailer}\n=== Browser caches ==="),
+            1,
+        );
+        let first_cleanup_row = CLEAN_PREVIEW
+            .lines()
+            .find(|line| line.contains("128.00MB, 4 items"))
+            .expect("fixture has a grouped cleanup row");
+        let interleaved = CLEAN_PREVIEW.replacen(
+            &format!("{first_cleanup_row}\n"),
+            &format!("{first_cleanup_row}\n{trailer}"),
+            1,
+        );
+        let reordered = CLEAN_PREVIEW.replace(
+            "# Potential cleanup: At least 192.00MB\n# Items: 6\n",
+            "# Items: 6\n# Potential cleanup: At least 192.00MB\n",
+        );
+        let trailing = format!("{CLEAN_PREVIEW}/tmp/trailing  # 1KB\n");
+
+        for changed in [early, interleaved, reordered, trailing] {
+            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+                .expect_err("the summary must be an ordered terminal trailer");
+
+            assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+        }
+    }
+
+    #[test]
+    fn cleanup_preview_accepts_an_empty_backend_plan() {
+        let preview = parse_cleanup_preview(
+            "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# Potential cleanup: 0B\n# Items: 0\n# Categories: 0\n",
+            CleanupSystemScope::Included,
+        )
+        .expect("empty cleanup preview");
+
+        assert!(preview.categories.is_empty());
+        assert_eq!(preview.total_items, 0);
+        assert_eq!(preview.potential_cleanup.as_deref(), Some("0B"));
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_category_free_output_without_summary() {
+        let preview = "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# How to protect files:\n";
+        let error = parse_cleanup_preview(preview, CleanupSystemScope::Included)
+            .expect_err("category-free output needs completeness evidence");
+
+        assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
+    }
+
+    #[test]
+    fn cleanup_preview_rejects_unrecognized_sizes() {
+        let preview = "# Mole Cleanup Preview - now\n=== Cache ===\n/tmp/cache  # lots\n";
+        let error = parse_cleanup_preview(preview, CleanupSystemScope::Unknown)
+            .expect_err("unrecognized size must fail");
+
+        assert!(error.to_string().contains("invalid cleanup size"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cleanup_preview_runs_only_moles_dry_run_and_reads_its_published_file() {
+        let script = executable_script(
+            r#"#!/bin/sh
+[ "$1" = "clean" ] && [ "$2" = "--dry-run" ] && [ "$#" = "2" ] || exit 12
+printf '%s' 'System caches need sudo'
+"#,
+        );
+        let preview_path = script.with_extension("preview");
+        std::fs::write(&preview_path, CLEAN_PREVIEW).unwrap();
+
+        let preview = cleanup_preview_from(&script, &preview_path, &CancelToken::new())
+            .expect("cleanup preview");
+        let _ = std::fs::remove_file(script);
+        let _ = std::fs::remove_file(preview_path);
+
+        assert_eq!(preview.system_scope, CleanupSystemScope::UserOnly);
+        assert_eq!(preview.total_items, 6);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cancelling_cleanup_preview_kills_the_subprocess() {
+        use std::thread;
+        use std::time::Duration;
+
+        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let preview_path = script.with_extension("preview");
+        let cancel = CancelToken::new();
+        let worker_cancel = cancel.clone();
+        let worker_script = script.clone();
+        let worker_preview = preview_path.clone();
+        let worker = thread::spawn(move || {
+            cleanup_preview_from(&worker_script, &worker_preview, &worker_cancel)
+        });
+        thread::sleep(Duration::from_millis(100));
+        cancel.cancel();
+
+        let error = worker.join().unwrap().expect_err("preview was cancelled");
+        let _ = std::fs::remove_file(script);
+        assert!(matches!(error, AdapterError::Cancelled { .. }), "{error}");
     }
 
     #[test]

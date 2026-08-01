@@ -18,7 +18,8 @@
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
 use nirmoka_adapter::{
-    Capabilities as AdapterCapabilities, Detection as AdapterDetection,
+    Capabilities as AdapterCapabilities, CleanupPreview as AdapterCleanupPreview,
+    CleanupSystemScope as AdapterCleanupSystemScope, Detection as AdapterDetection,
     InstalledApplication as AdapterInstalledApplication, SystemStatus as AdapterSystemStatus,
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
@@ -143,6 +144,99 @@ pub struct SystemStatus {
     pub disks: Vec<DiskStatus>,
     pub batteries: Vec<BatteryStatus>,
     pub thermal: ThermalStatus,
+}
+
+/// Exact path groups published by a backend dry run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupPreview {
+    pub backend: String,
+    pub backend_instead_of: Option<String>,
+    pub generated_at: String,
+    pub categories: Vec<CleanupCategory>,
+    pub potential_cleanup: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub system_scope: CleanupSystemScope,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupCategory {
+    pub name: String,
+    pub items: Vec<CleanupItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupItem {
+    pub path: String,
+    pub reported_size: Option<String>,
+    #[ts(type = "number")]
+    pub item_count: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum CleanupSystemScope {
+    Included,
+    UserOnly,
+    Unknown,
+}
+
+impl CleanupPreview {
+    pub fn from_adapter(
+        backend: impl Into<String>,
+        backend_instead_of: Option<String>,
+        preview: AdapterCleanupPreview,
+    ) -> Self {
+        Self {
+            backend: backend.into(),
+            backend_instead_of,
+            generated_at: preview.generated_at,
+            categories: preview
+                .categories
+                .into_iter()
+                .map(|category| CleanupCategory {
+                    name: category.name,
+                    items: category
+                        .items
+                        .into_iter()
+                        .map(|item| CleanupItem {
+                            path: item.path.display().to_string(),
+                            reported_size: item.reported_size,
+                            item_count: item.item_count,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            potential_cleanup: preview.potential_cleanup,
+            total_items: preview.total_items,
+            system_scope: match preview.system_scope {
+                AdapterCleanupSystemScope::Included => CleanupSystemScope::Included,
+                AdapterCleanupSystemScope::UserOnly => CleanupSystemScope::UserOnly,
+                AdapterCleanupSystemScope::Unknown => CleanupSystemScope::Unknown,
+            },
+            warnings: preview.warnings,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

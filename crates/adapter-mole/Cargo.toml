@@ -8,6 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+directories = { workspace = true }
 nirmoka-adapter = { workspace = true }
 nirmoka-core = { workspace = true }
 # Mole's supported status and application-list boundaries are JSON; parsing stays here.

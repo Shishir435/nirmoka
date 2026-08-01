@@ -1,0 +1,24 @@
+# Mole Cleanup Preview - 2026-08-01 12:30:00
+#
+# How to protect files:
+# 1. Copy any path below to ~/.config/mole/whitelist
+# 2. Run: mo clean --whitelist
+#
+# Example:
+#   /Users/*/Library/Caches/com.example.app
+#
+
+
+=== Browser caches ===
+/Users/fixture/Library/Caches/com.example.browser  # 128.00MB, 4 items
+/Users/fixture/Library/Caches/com.example.helper  # 64.00MB
+
+=== Developer caches ===
+/Users/fixture/Library/Developer/Example  # size unknown
+
+# ============================================
+# Summary
+# ============================================
+# Potential cleanup: At least 192.00MB
+# Items: 6
+# Categories: 2
