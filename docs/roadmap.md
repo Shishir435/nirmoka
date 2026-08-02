@@ -245,7 +245,7 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 
 ### Phase 3 — cleanup execution
 
-- [ ] Add a one-time confirmation boundary for the reviewed operation
+- [x] Add a one-time confirmation boundary for the reviewed operation
 - [ ] State and test that Mole re-discovers candidates at execution time
 - [ ] Handle authorization, cancellation, partial failure, and backend version changes
 - [ ] Append exact results to the durable operation journal

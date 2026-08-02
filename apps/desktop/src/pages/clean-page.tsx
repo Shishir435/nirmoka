@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, RefreshCw, ShieldAlert } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, ShieldAlert, Square } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { CleanupPreview } from "@nirmoka/transport";
@@ -25,6 +25,7 @@ export function CleanPage() {
     installed && mole?.capabilities.cleanupCategories && mole.capabilities.dryRun;
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
 
@@ -40,12 +41,21 @@ export function CleanPage() {
 
   const loadPreview = () => {
     setLoading(true);
+    setStopping(false);
     setError(null);
     setPage(0);
     transport
       .cleanupPreview()
       .then(setPreview, (reason: unknown) => setError(String(reason)))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setStopping(false);
+      });
+  };
+
+  const cancelPreview = () => {
+    setStopping(true);
+    void transport.cancelCleanupPreview();
   };
 
   return (
@@ -54,9 +64,18 @@ export function CleanPage() {
         title="Clean"
         subtitle="Review Mole’s current cleanup candidates"
         action={
-          <Button onClick={loadPreview} disabled={!previewCapable || loading}>
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-            {preview ? "Refresh preview" : "Generate preview"}
+          <Button
+            onClick={loading ? cancelPreview : loadPreview}
+            disabled={!previewCapable || stopping}
+          >
+            {loading ? <Square /> : <RefreshCw />}
+            {stopping
+              ? "Stopping preview"
+              : loading
+                ? "Cancel preview"
+                : preview
+                  ? "Refresh preview"
+                  : "Generate preview"}
           </Button>
         }
       />

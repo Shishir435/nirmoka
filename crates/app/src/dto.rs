@@ -165,6 +165,30 @@ pub struct CleanupPreview {
     pub warnings: Vec<String>,
 }
 
+/// Latest Rust-held cleanup review, bound to a short-lived one-time token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupPreparation {
+    #[ts(type = "number")]
+    pub confirmation_token: u64,
+    pub backend: String,
+    pub backend_instead_of: Option<String>,
+    pub preview_generated_at: String,
+    pub potential_cleanup: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub system_scope: CleanupSystemScope,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub expires_in_seconds: u64,
+    pub requires_confirmation: bool,
+    pub warning: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(
@@ -229,13 +253,36 @@ impl CleanupPreview {
                 .collect(),
             potential_cleanup: preview.potential_cleanup,
             total_items: preview.total_items,
-            system_scope: match preview.system_scope {
-                AdapterCleanupSystemScope::Included => CleanupSystemScope::Included,
-                AdapterCleanupSystemScope::UserOnly => CleanupSystemScope::UserOnly,
-                AdapterCleanupSystemScope::Unknown => CleanupSystemScope::Unknown,
-            },
+            system_scope: cleanup_system_scope(preview.system_scope),
             warnings: preview.warnings,
         }
+    }
+}
+
+impl CleanupPreparation {
+    pub fn from_state(preparation: crate::cleanup::CleanupPreparation) -> Self {
+        Self {
+            confirmation_token: preparation.token,
+            backend: preparation.pending.backend,
+            backend_instead_of: preparation.pending.backend_instead_of,
+            preview_generated_at: preparation.pending.preview.generated_at,
+            potential_cleanup: preparation.pending.preview.potential_cleanup,
+            total_items: preparation.pending.preview.total_items,
+            system_scope: cleanup_system_scope(preparation.pending.preview.system_scope),
+            warnings: preparation.pending.preview.warnings,
+            expires_in_seconds: preparation.expires_in.as_secs(),
+            requires_confirmation: true,
+            warning: "Mole will re-discover eligible candidates during execution. Results may differ from this preview."
+                .to_string(),
+        }
+    }
+}
+
+fn cleanup_system_scope(scope: AdapterCleanupSystemScope) -> CleanupSystemScope {
+    match scope {
+        AdapterCleanupSystemScope::Included => CleanupSystemScope::Included,
+        AdapterCleanupSystemScope::UserOnly => CleanupSystemScope::UserOnly,
+        AdapterCleanupSystemScope::Unknown => CleanupSystemScope::Unknown,
     }
 }
 

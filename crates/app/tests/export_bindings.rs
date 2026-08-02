@@ -48,6 +48,7 @@ fn the_bindings_land_where_the_frontend_imports_them_from() {
         "export type Capabilities",
         "export type CleanupCategory",
         "export type CleanupItem",
+        "export type CleanupPreparation",
         "export type CleanupPreview",
         "export type CleanupSystemScope",
         "export type Detection",

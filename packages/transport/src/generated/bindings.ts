@@ -91,6 +91,11 @@ export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
 export type CleanupItem = { path: string, reportedSize: string | null, itemCount: number, };
 
 /**
+ * Latest Rust-held cleanup review, bound to a short-lived one-time token.
+ */
+export type CleanupPreparation = { confirmationToken: number, backend: string, backendInsteadOf: string | null, previewGeneratedAt: string, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, expiresInSeconds: number, requiresConfirmation: boolean, warning: string, };
+
+/**
  * Exact path groups published by a backend dry run.
  */
 export type CleanupPreview = { backend: string, backendInsteadOf: string | null, generatedAt: string, categories: Array<CleanupCategory>, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, };

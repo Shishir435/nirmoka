@@ -348,8 +348,23 @@ fn parse_cleanup_preview(
     let mut declared_categories = None;
     let mut potential_cleanup = None;
     let mut summary_fields = 0_u8;
+    let mut pending_row: Option<String> = None;
 
     for line in lines {
+        if let Some(mut row) = pending_row.take() {
+            row.push('\n');
+            row.push_str(line);
+            match parse_cleanup_row(&row).map_err(malformed)? {
+                Some(item) => {
+                    let category = current_category.ok_or_else(|| {
+                        malformed("cleanup path appears before a category".to_string())
+                    })?;
+                    categories[category].items.push(item);
+                }
+                None => pending_row = Some(row),
+            }
+            continue;
+        }
         if line.is_empty() {
             continue;
         }
@@ -420,20 +435,21 @@ fn parse_cleanup_preview(
             continue;
         }
 
-        let category = current_category
-            .ok_or_else(|| malformed("cleanup path appears before a category".to_string()))?;
-        let (path, detail) = line
-            .rsplit_once("  # ")
-            .ok_or_else(|| malformed(format!("cleanup row has no size marker: {line}")))?;
-        if path.is_empty() {
-            return Err(malformed("cleanup row has an empty path".to_string()));
+        match parse_cleanup_row(line).map_err(malformed)? {
+            Some(item) => {
+                let category = current_category.ok_or_else(|| {
+                    malformed("cleanup path appears before a category".to_string())
+                })?;
+                categories[category].items.push(item);
+            }
+            None => pending_row = Some(line.to_string()),
         }
-        let (size, item_count) = parse_cleanup_item_detail(detail).map_err(malformed)?;
-        categories[category].items.push(CleanupItem {
-            path: PathBuf::from(path),
-            reported_size: size,
-            item_count,
-        });
+    }
+
+    if let Some(row) = pending_row {
+        return Err(malformed(format!(
+            "cleanup row has no terminal size marker: {row}"
+        )));
     }
 
     let total_items = categories
@@ -487,6 +503,24 @@ fn parse_cleanup_preview(
         system_scope,
         warnings,
     })
+}
+
+/// Mole's preview is line-oriented, but macOS paths may contain newlines. A
+/// row is complete only when its final physical line carries Mole's detail
+/// marker; callers retain incomplete text and append the next line verbatim.
+fn parse_cleanup_row(line: &str) -> Result<Option<CleanupItem>, String> {
+    let Some((path, detail)) = line.rsplit_once("  # ") else {
+        return Ok(None);
+    };
+    if path.is_empty() {
+        return Err("cleanup row has an empty path".to_string());
+    }
+    let (size, item_count) = parse_cleanup_item_detail(detail)?;
+    Ok(Some(CleanupItem {
+        path: PathBuf::from(path),
+        reported_size: size,
+        item_count,
+    }))
 }
 
 fn parse_cleanup_item_detail(detail: &str) -> Result<(Option<String>, u64), String> {
@@ -626,16 +660,18 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
+    static TEST_SCRIPT_SEQUENCE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    #[cfg(unix)]
     fn executable_script(contents: &str) -> PathBuf {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
-        use std::time::SystemTime;
-
-        let unique = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let script = std::env::temp_dir().join(format!("nirmoka-mole-test-{unique}.sh"));
+        let sequence = TEST_SCRIPT_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let script = std::env::temp_dir().join(format!(
+            "nirmoka-mole-test-{}-{sequence}.sh",
+            std::process::id()
+        ));
         fs::write(&script, contents).unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
         script
@@ -900,6 +936,19 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
             .expect_err("unrecognized size must fail");
 
         assert!(error.to_string().contains("invalid cleanup size"));
+    }
+
+    #[test]
+    fn cleanup_preview_preserves_newlines_inside_backend_paths() {
+        let preview = "# Mole Cleanup Preview - now\n=== Logs ===\n/fixtures/mole/logs\n,  # 0B\n# Potential cleanup: 0B\n# Items: 1\n# Categories: 1\n";
+
+        let parsed = parse_cleanup_preview(preview, CleanupSystemScope::UserOnly)
+            .expect("newline-bearing path");
+
+        assert_eq!(
+            parsed.categories[0].items[0].path,
+            PathBuf::from("/fixtures/mole/logs\n,")
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ use nirmoka_adapter_ncdu::NcduAdapter;
 use nirmoka_adapter_rip::RipAdapter;
 use nirmoka_core::Tree;
 
+use crate::cleanup::CleanupState;
 use crate::deletion::DeletionState;
 use crate::{dto, settings};
 
@@ -89,6 +90,7 @@ pub struct AppState {
     /// configuration directory, which the UI says out loud rather than letting
     /// the setting silently evaporate on quit.
     persistent: bool,
+    cleanup: Mutex<CleanupState>,
     deletion: Mutex<DeletionState>,
 }
 
@@ -121,6 +123,7 @@ impl AppState {
             scan: Mutex::new(ScanState::default()),
             preference: Mutex::new(preference),
             persistent,
+            cleanup: Mutex::new(CleanupState::default()),
             deletion: Mutex::new(DeletionState::new(operation_log)),
         }
     }
@@ -142,6 +145,12 @@ impl AppState {
 
     pub fn deletion(&self) -> MutexGuard<'_, DeletionState> {
         self.deletion
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn cleanup(&self) -> MutexGuard<'_, CleanupState> {
+        self.cleanup
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
