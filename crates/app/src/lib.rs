@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cleanup;
 pub mod commands;
 pub mod deletion;
 pub mod dto;
@@ -46,6 +47,7 @@ pub fn run() {
             commands::developer_inventory,
             commands::system_status,
             commands::cleanup_preview,
+            commands::prepare_cleanup,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

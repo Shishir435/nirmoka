@@ -23,6 +23,7 @@ import type {
   BackendSelection,
   ApplicationInventory,
   Capabilities,
+  CleanupPreparation,
   CleanupPreview,
   DeleteOperation,
   DeletePreparation,
@@ -160,6 +161,9 @@ export interface Transport {
   /** Fresh backend-owned cleanup discovery. Never removes anything. */
   cleanupPreview(): Promise<CleanupPreview>;
 
+  /** Bind latest Rust-held cleanup preview to a short-lived one-time token. */
+  prepareCleanup(): Promise<CleanupPreparation>;
+
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
@@ -213,6 +217,7 @@ export function tauriTransport(): Transport {
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
     systemStatus: () => invoke<SystemStatus>("system_status"),
     cleanupPreview: () => invoke<CleanupPreview>("cleanup_preview"),
+    prepareCleanup: () => invoke<CleanupPreparation>("prepare_cleanup"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -696,6 +701,10 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
           },
         ],
       };
+    },
+
+    async prepareCleanup() {
+      throw new Error("mock transport never prepares destructive cleanup operations");
     },
 
     async onScanProgress() {

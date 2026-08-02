@@ -14,6 +14,8 @@
 //! When it needs to — step 10, where deletion has failure modes worth
 //! distinguishing — this becomes a typed error, with an ADR for the change.
 
+use std::time::Instant;
+
 use tauri::{AppHandle, State};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
@@ -102,9 +104,23 @@ pub fn cleanup_preview_of(state: &AppState) -> Result<dto::CleanupPreview, Strin
         .cleanup_preview(&CancelToken::new())
         .map_err(|error| error.to_string())?;
 
+    state
+        .cleanup()
+        .remember(backend, instead_of.clone(), preview.clone(), Instant::now());
+
     Ok(dto::CleanupPreview::from_adapter(
         backend, instead_of, preview,
     ))
+}
+
+/// Bind the latest backend-produced preview to one short-lived, one-time token.
+/// No cleanup path returns as an execute parameter.
+pub fn prepare_cleanup_of(state: &AppState) -> Result<dto::CleanupPreparation, String> {
+    let preparation = state.cleanup().prepare(Instant::now()).ok_or_else(|| {
+        "no fresh non-empty cleanup preview is available; generate a new preview".to_string()
+    })?;
+
+    Ok(dto::CleanupPreparation::from_state(preparation))
 }
 
 /// Pick a backend, or pass `None` to go back to the platform default.
@@ -530,8 +546,16 @@ pub async fn cleanup_preview(state: State<'_, AppState>) -> Result<dto::CleanupP
     cleanup_preview_of(&state)
 }
 
+#[tauri::command]
+pub fn prepare_cleanup(state: State<'_, AppState>) -> Result<dto::CleanupPreparation, String> {
+    prepare_cleanup_of(&state)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
+    use nirmoka_adapter::{CleanupPreview, CleanupSystemScope};
     use nirmoka_core::{Node, Tree};
 
     use super::*;
@@ -566,6 +590,33 @@ mod tests {
 
     fn state_with_a_scan() -> AppState {
         state_with_a_scan_of(SCAN, MAX_ROWS + 5)
+    }
+
+    #[test]
+    fn cleanup_preparation_uses_only_the_preview_held_in_rust() {
+        let state = AppState::with_preference(nirmoka_adapter::Preference::of("mole"), false);
+        state.cleanup().remember(
+            "mole",
+            None,
+            CleanupPreview {
+                generated_at: "2026-08-02 12:00:00".to_string(),
+                categories: Vec::new(),
+                potential_cleanup: Some("12MB".to_string()),
+                total_items: 3,
+                system_scope: CleanupSystemScope::UserOnly,
+                warnings: vec!["partial preview".to_string()],
+            },
+            Instant::now(),
+        );
+
+        let preparation = prepare_cleanup_of(&state).expect("fresh preview");
+
+        assert_eq!(preparation.backend, "mole");
+        assert_eq!(preparation.preview_generated_at, "2026-08-02 12:00:00");
+        assert_eq!(preparation.total_items, 3);
+        assert_eq!(preparation.warnings, ["partial preview"]);
+        assert!(preparation.requires_confirmation);
+        assert!(preparation.warning.contains("re-discover"));
     }
 
     /// The window and the process must never disagree about the setting.
