@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use nirmoka_adapter::CleanupPreview;
+use nirmoka_adapter::{CancelToken, CleanupPreview};
 
 /// Review state expires quickly because Mole performs fresh discovery during
 /// execution. A preview is evidence, not an immutable delete list.
@@ -33,12 +33,48 @@ pub struct CleanupPreparation {
 
 #[derive(Default)]
 pub struct CleanupState {
+    next_preview: u64,
+    active_preview: Option<ActivePreview>,
     next_confirmation: u64,
     latest: Option<ReviewedCleanup>,
     pending: HashMap<u64, ReviewedCleanup>,
 }
 
+struct ActivePreview {
+    id: u64,
+    cancel: CancelToken,
+}
+
 impl CleanupState {
+    pub fn start_preview(&mut self) -> Result<(u64, CancelToken), String> {
+        if self.active_preview.is_some() {
+            return Err("a cleanup preview is already running".to_string());
+        }
+
+        self.next_preview = self.next_preview.saturating_add(1);
+        let id = self.next_preview;
+        let cancel = CancelToken::new();
+        self.active_preview = Some(ActivePreview {
+            id,
+            cancel: cancel.clone(),
+        });
+        Ok((id, cancel))
+    }
+
+    pub fn finish_preview(&mut self, id: u64) {
+        if self.active_preview.as_ref().map(|preview| preview.id) == Some(id) {
+            self.active_preview = None;
+        }
+    }
+
+    pub fn cancel_preview(&self) -> bool {
+        let Some(preview) = &self.active_preview else {
+            return false;
+        };
+        preview.cancel.cancel();
+        true
+    }
+
     pub fn remember(
         &mut self,
         backend: impl Into<String>,
@@ -163,5 +199,20 @@ mod tests {
         state.remember("mole", None, preview("empty", 0), now);
 
         assert!(state.prepare(now).is_none());
+    }
+
+    #[test]
+    fn active_preview_token_is_reachable_until_worker_finishes() {
+        let mut state = CleanupState::default();
+        let (id, token) = state.start_preview().expect("first preview");
+
+        assert!(!token.is_cancelled());
+        assert!(state.start_preview().is_err());
+        assert!(state.cancel_preview());
+        assert!(token.is_cancelled());
+
+        state.finish_preview(id);
+        assert!(!state.cancel_preview());
+        assert!(state.start_preview().is_ok());
     }
 }

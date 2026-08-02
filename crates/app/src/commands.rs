@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
@@ -93,7 +93,10 @@ pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
 }
 
 /// One fresh backend-owned cleanup discovery. This never removes anything.
-pub fn cleanup_preview_of(state: &AppState) -> Result<dto::CleanupPreview, String> {
+pub fn cleanup_preview_of(
+    state: &AppState,
+    cancel: &CancelToken,
+) -> Result<dto::CleanupPreview, String> {
     let choice = state
         .resolve(Ability::CleanupPreview)
         .ok_or_else(|| "no usable backend provides cleanup preview".to_string())?;
@@ -101,7 +104,7 @@ pub fn cleanup_preview_of(state: &AppState) -> Result<dto::CleanupPreview, Strin
     let instead_of = choice.instead_of;
     let preview = choice
         .adapter
-        .cleanup_preview(&CancelToken::new())
+        .cleanup_preview(cancel)
         .map_err(|error| error.to_string())?;
 
     state
@@ -542,8 +545,24 @@ pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, St
 }
 
 #[tauri::command]
-pub async fn cleanup_preview(state: State<'_, AppState>) -> Result<dto::CleanupPreview, String> {
-    cleanup_preview_of(&state)
+pub async fn cleanup_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<dto::CleanupPreview, String> {
+    let (preview_id, cancel) = state.cleanup().start_preview()?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        cleanup_preview_of(worker_app.state::<AppState>().inner(), &cancel)
+    })
+    .await;
+
+    state.cleanup().finish_preview(preview_id);
+    result.map_err(|error| format!("cleanup preview worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn cancel_cleanup_preview(state: State<'_, AppState>) -> bool {
+    state.cleanup().cancel_preview()
 }
 
 #[tauri::command]

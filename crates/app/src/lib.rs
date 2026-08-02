@@ -47,6 +47,7 @@ pub fn run() {
             commands::developer_inventory,
             commands::system_status,
             commands::cleanup_preview,
+            commands::cancel_cleanup_preview,
             commands::prepare_cleanup,
         ])
         .run(tauri::generate_context!())
