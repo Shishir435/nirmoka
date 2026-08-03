@@ -106,6 +106,13 @@ pub trait Adapter: Send + Sync {
     /// never turn preview rows into delete arguments. `reviewed_version` is
     /// the exact version that produced the preview; a different version must
     /// fail closed and require a new review.
+    ///
+    /// An `Err` here must mean **nothing was removed**: an unsupported version,
+    /// a missing binary, a refused review, a failed spawn. Once the backend is
+    /// running it may already have deleted files, so cancellation and backend
+    /// failure return `Ok` with [`CleanupCompletion::Cancelled`] or
+    /// [`CleanupCompletion::Failed`] — the shell has an irreversible run to
+    /// record either way, and an error would hide it.
     fn execute_cleanup(
         &self,
         _reviewed_version: &str,

@@ -237,6 +237,8 @@ pub enum CleanupSystemScope {
 pub enum CleanupCompletion {
     Finished,
     Partial,
+    Cancelled,
+    Failed,
 }
 
 /// One durable cleanup journal entry.
@@ -281,6 +283,8 @@ impl CleanupOperation {
             completion: match operation.completion {
                 AdapterCleanupCompletion::Finished => CleanupCompletion::Finished,
                 AdapterCleanupCompletion::Partial => CleanupCompletion::Partial,
+                AdapterCleanupCompletion::Cancelled => CleanupCompletion::Cancelled,
+                AdapterCleanupCompletion::Failed => CleanupCompletion::Failed,
             },
             warnings: operation.warnings.clone(),
             executed_at_ms: operation.executed_at_ms,

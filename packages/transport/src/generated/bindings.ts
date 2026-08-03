@@ -88,7 +88,7 @@ export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, und
 
 export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
 
-export type CleanupCompletion = "finished" | "partial";
+export type CleanupCompletion = "finished" | "partial" | "cancelled" | "failed";
 
 export type CleanupItem = { path: string, reportedSize: string | null, itemCount: number, };
 

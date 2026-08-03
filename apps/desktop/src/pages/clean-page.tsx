@@ -386,7 +386,7 @@ export function CleanPage() {
                         : ""}
                     </p>
                   </div>
-                  <StatusBadge tone={operation.completion === "finished" ? "success" : "warning"}>
+                  <StatusBadge tone={completionTone(operation.completion)}>
                     {completionLabel(operation.completion)}
                   </StatusBadge>
                 </div>
@@ -414,12 +414,17 @@ function CleanupResult({ operation }: { operation: CleanupOperation }) {
       <CardContent className="space-y-3 p-5">
         <div className="flex items-center gap-2">
           <h2 className="font-medium">Cleanup result</h2>
-          <StatusBadge tone={operation.completion === "finished" ? "success" : "warning"}>
+          <StatusBadge tone={completionTone(operation.completion)}>
             {completionLabel(operation.completion)}
           </StatusBadge>
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          {`${operation.backend} ${operation.backendVersion} ran at `}
+          {`${operation.backend} ${operation.backendVersion} `}
+          {operation.completion === "cancelled"
+            ? "was stopped part way through a run started at "
+            : operation.completion === "failed"
+              ? "failed part way through a run started at "
+              : "ran at "}
           {new Date(operation.executedAtMs).toLocaleString()}
           {` with ${scopeLabel(operation.systemScope).toLowerCase()} scope. The review it was `}
           {`approved from listed ${operation.reviewedItems.toLocaleString()} items`}
@@ -458,7 +463,17 @@ function completionLabel(completion: CleanupOperation["completion"]) {
       return "Finished";
     case "partial":
       return "Partial";
+    case "cancelled":
+      return "Stopped";
+    case "failed":
+      return "Failed";
   }
+}
+
+/// Only a clean finish is good news. Everything else means Mole removed an
+/// unknown amount before it stopped.
+function completionTone(completion: CleanupOperation["completion"]) {
+  return completion === "finished" ? "success" : "warning";
 }
 
 function scopeLabel(scope: CleanupPreview["systemScope"]) {

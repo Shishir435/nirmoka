@@ -213,8 +213,11 @@ what the backend would delete.
   immutable delete list; reviewed and executed candidates may differ. Execution is non-interactive:
   an already-cached sudo session enables system cleanup, otherwise Mole continues at user scope and
   the result is partial. Known timeout, permission, authentication, and removal warnings remain
-  backend-produced result warnings. Cancellation kills Mole. A Mole version different from the one
-  that produced the preview is refused, even when both versions are otherwise supported
+  backend-produced result warnings. Cancellation kills Mole, and reports `Cancelled` rather than
+  `AdapterError::Cancelled`: files removed before the kill stay removed, so a started run is always
+  an outcome. A backend that dies part way through reports `Failed` for the same reason. An `Err`
+  from cleanup execution means the run never started — a Mole version different from the one that
+  produced the preview is refused there, even when both versions are otherwise supported
 - Cleanup result: recorded in the shared operation journal as a `cleaned` event, with the reviewed
   evidence and the backend's reported scope, completion, and warnings — and no per-path result,
   because Mole publishes none. A failed journal write reports the run beside the error rather than

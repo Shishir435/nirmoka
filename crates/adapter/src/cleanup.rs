@@ -41,6 +41,11 @@ pub enum CleanupSystemScope {
 }
 
 /// Backend-reported outcome of one confirmed cleanup run.
+///
+/// Every started run produces one of these, including a run that was cancelled
+/// or that the backend failed part way through. Once the cleanup subprocess is
+/// alive it may have removed files, so an interruption is an outcome to record
+/// rather than an error to propagate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanupExecution {
     pub system_scope: CleanupSystemScope,
@@ -55,4 +60,10 @@ pub enum CleanupCompletion {
     /// Exact per-path results still come from the operation journal.
     Finished,
     Partial,
+    /// The subprocess was killed on request. Whatever it had already removed
+    /// stays removed, which is why this is not `AdapterError::Cancelled`.
+    Cancelled,
+    /// The backend died part way through. Same reasoning as `Cancelled`: the
+    /// run happened, and how far it got is not knowable from outside.
+    Failed,
 }

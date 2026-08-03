@@ -387,21 +387,45 @@ fn execute_cleanup_from(
         binary: BINARY,
         source,
     })?;
+
+    // Past this point Mole was running, so it may already have removed files.
+    // Cancellation and failure are outcomes of a real run from here on; only
+    // errors raised before the spawn mean nothing happened.
+    let mut execution = parse_cleanup_execution(&String::from_utf8_lossy(&stdout));
     if outcome.cancelled {
-        return Err(AdapterError::Cancelled {
-            backend: "mole",
-            operation,
-        });
+        execution.completion = CleanupCompletion::Cancelled;
+        execution
+            .warnings
+            .push("Cleanup was stopped part way through. Anything Mole had already removed stays removed.".to_string());
+        return Ok(execution);
     }
     if !outcome.status.success() {
-        return Err(AdapterError::BackendFailed {
-            binary: BINARY,
-            status: outcome.status.code().unwrap_or(-1),
-            stderr: outcome.stderr,
-        });
+        execution.completion = CleanupCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole exited with status {} part way through: {}",
+            outcome.status.code().unwrap_or(-1),
+            first_line(&outcome.stderr)
+        ));
+        return Ok(execution);
     }
-    read_result?;
-    Ok(parse_cleanup_execution(&String::from_utf8_lossy(&stdout)))
+    if let Err(error) = read_result {
+        execution.completion = CleanupCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole ran, and its output could not be read: {error}"
+        ));
+        return Ok(execution);
+    }
+    Ok(execution)
+}
+
+/// The first nonempty line of a backend's stderr, for a one-line warning.
+fn first_line(stderr: &str) -> String {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("no error output")
+        .to_string()
 }
 
 fn parse_cleanup_execution(stdout: &str) -> CleanupExecution {
@@ -1193,9 +1217,12 @@ printf '%s\n' 'System-level cleanup enabled, sudo session active'
         assert!(matches!(error, AdapterError::BackendVersionChanged { .. }));
     }
 
+    /// A cancelled cleanup is a run that happened, not an error. Mole may have
+    /// removed files before it was killed, so the caller gets a result to
+    /// journal rather than an `AdapterError::Cancelled` that implies nothing did.
     #[test]
     #[cfg(unix)]
-    fn cancelling_cleanup_execution_kills_the_subprocess() {
+    fn cancelling_cleanup_execution_kills_the_subprocess_and_reports_the_run() {
         use std::thread;
         use std::time::Duration;
 
@@ -1207,9 +1234,40 @@ printf '%s\n' 'System-level cleanup enabled, sudo session active'
         thread::sleep(Duration::from_millis(100));
         cancel.cancel();
 
-        let error = worker.join().unwrap().expect_err("cleanup was cancelled");
+        let execution = worker
+            .join()
+            .unwrap()
+            .expect("a stopped run still happened");
         let _ = std::fs::remove_file(script);
-        assert!(matches!(error, AdapterError::Cancelled { .. }), "{error}");
+        assert_eq!(execution.completion, CleanupCompletion::Cancelled);
+        assert!(execution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("stays removed")));
+    }
+
+    /// Same reasoning for a backend that dies part way through.
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_cleanup_run_is_reported_rather_than_raised() {
+        let script = executable_script(
+            r#"#!/bin/sh
+printf '%s\n' 'System-level cleanup enabled, sudo session active'
+printf '%s\n' 'disk full' >&2
+exit 3
+"#,
+        );
+
+        let execution =
+            execute_cleanup_from(&script, &CancelToken::new()).expect("a failed run happened");
+        let _ = std::fs::remove_file(script);
+
+        assert_eq!(execution.completion, CleanupCompletion::Failed);
+        assert_eq!(execution.system_scope, CleanupSystemScope::Included);
+        assert!(execution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("status 3") && warning.contains("disk full")));
     }
 
     #[test]

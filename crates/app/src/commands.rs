@@ -136,6 +136,11 @@ pub fn prepare_cleanup_of(state: &AppState) -> Result<dto::CleanupPreparation, S
 /// The confirmation is spent whether or not the run succeeds, and the reviewed
 /// preview is dropped either way — after a run, every path in it is a statement
 /// about the past.
+///
+/// A run that started is always journalled, cancelled and failed runs included:
+/// the adapter reports those as outcomes because they removed files up to the
+/// moment they stopped. An `Err` here is a run that never started, which is why
+/// it is the one case that records nothing. See ADR 0020.
 pub fn confirm_cleanup_in(
     state: &AppState,
     confirmation_token: u64,
@@ -755,6 +760,17 @@ mod tests {
             }
         }
 
+        /// Killed part way through, the way a real cancelled run reports itself.
+        fn cancelled() -> Self {
+            Self {
+                outcome: Ok(nirmoka_adapter::CleanupExecution {
+                    system_scope: CleanupSystemScope::Unknown,
+                    completion: nirmoka_adapter::CleanupCompletion::Cancelled,
+                    warnings: vec!["Cleanup was stopped part way through.".to_string()],
+                }),
+            }
+        }
+
         fn refusing() -> Self {
             Self {
                 outcome: Err("mo changed from reviewed version 1.48.1 to 1.49.0"),
@@ -912,6 +928,28 @@ mod tests {
             prepare_cleanup_of(&state).is_err(),
             "the spent review is gone; a new preview is required"
         );
+        let _ = std::fs::remove_file(log);
+    }
+
+    /// A stopped run removed files up to the moment it died, so it must reach the
+    /// journal like any other. Only a refusal before the backend started may
+    /// leave no trace.
+    #[test]
+    fn a_cancelled_cleanup_is_still_journalled() {
+        let log = journal_path("cancelled");
+        let state = state_with_a_reviewed_cleanup(FakeCleaner::cancelled(), Some(log.clone()));
+        let token = prepare_cleanup_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let operation =
+            confirm_cleanup_in(&state, token, &CancelToken::new()).expect("a stopped run happened");
+
+        assert_eq!(operation.completion, dto::CleanupCompletion::Cancelled);
+        assert_eq!(cleanup_log_of(&state), vec![operation]);
+        assert!(std::fs::read_to_string(&log)
+            .expect("journal file")
+            .contains("\"completion\":\"cancelled\""),);
         let _ = std::fs::remove_file(log);
     }
 

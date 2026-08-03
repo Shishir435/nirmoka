@@ -44,6 +44,14 @@ replacing it. The result is returned with a `log_error`, and the run stays in th
 This inverts the deletion rule deliberately: there, durability _is_ the operation's safety
 property; here, the operation is already irreversible and hiding it loses the only record.
 
+A run that started is always journalled, including one that was cancelled or that the backend
+failed part way through. Both remove files up to the moment they stop, so `execute_cleanup`
+returns them as outcomes — `CleanupCompletion::Cancelled` and `Failed` — rather than as an
+`AdapterError`. An `Err` from that method means the run never started: an unsupported version, a
+refused review, a missing binary, a failed spawn. Only those leave no journal entry, because only
+those can prove nothing was removed. This is the one place where cancellation is not an error;
+elsewhere in the adapter contract it still is, because elsewhere nothing has been destroyed.
+
 The reviewed preview is dropped after a run, successful or not. A refused, cancelled, or failed
 run cannot prove that nothing was removed, so its preview is a statement about the past and a
 second run must review a fresh discovery. The confirmation token is spent either way.
