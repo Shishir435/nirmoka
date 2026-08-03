@@ -81,7 +81,22 @@ surface="$out/uninstall-command-surface.txt"
 # Read the list in full before parsing. An `exit` inside awk would SIGPIPE the
 # backend, and `pipefail` would end the recording on a successful read.
 inventory=$(mo uninstall --list 2>/dev/null || true)
-app=$(printf '%s\n' "$inventory" | awk -F'"' '/uninstall_name/ && !seen++ {print $4}')
+# Split on the key itself rather than on quotes by position. Mole lists `name`
+# before `uninstall_name`, and the two differ for anything installed through
+# Homebrew — "LocalSend" is displayed, "localsend" is what the command takes.
+# Probing with a display name would record a different code path than the one
+# ADR 0021 rests on, so prefer an application where the two disagree: that
+# probe proves the identifier matters as well as that the prompt blocks.
+app=$(printf '%s\n' "$inventory" | awk '
+  /"uninstall_name": "/ {
+    split($0, after_name, /"name": "/)
+    split(after_name[2], name, "\"")
+    split($0, after_id, /"uninstall_name": "/)
+    split(after_id[2], id, "\"")
+    if (any == "") any = id[1]
+    if (name[1] != id[1] && distinct == "") distinct = id[1]
+  }
+  END { print (distinct != "" ? distinct : any) }')
 
 {
   echo "# Recorded from Mole $version by scripts/record-mole-fixture.sh"
