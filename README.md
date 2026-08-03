@@ -9,8 +9,10 @@ sort by size, and reclaim space — without memorising keybindings or parsing `d
 > **निर्मोक** (_nirmoka_) is Sanskrit for the skin a snake sheds — the dead layer a living
 > system leaves behind. That is exactly what this tool helps you find and remove.
 
-**Status: early development.** Nothing is installable yet. Watch the repo if you want to know
-when the first build lands.
+**Status: macOS beta, in preparation.** The first build is a signed macOS app; the release
+pipeline is in place and waiting on a tag. Linux and Windows compile and are tested in CI but are
+not packaged yet, because the cleanup workflow that makes this worth installing runs on Mole, which
+is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md).
 
 ---
 
@@ -22,7 +24,8 @@ Existing GUI options are usually single-platform, abandoned, or several hundred 
 
 Nirmoka aims at a specific gap:
 
-- **Cross-platform from day one.** One app on macOS, Linux, and Windows.
+- **Cross-platform code from day one.** The core carries no platform conditionals and CI builds it
+  everywhere. macOS is packaged first; the others follow a cleanup backend that runs there.
 - **Small.** Built with Tauri, so the download is measured in single-digit megabytes.
   A disk cleanup tool that eats 300 MB of disk is a joke.
 - **Not a reimplementation.** Nirmoka does not write its own disk scanner. It drives

@@ -1,0 +1,110 @@
+name: Release
+
+# Tag-driven, and deliberately not run on every push: a build that produces an
+# installer nobody asked for is a build that eventually publishes one.
+on:
+  push:
+    tags: ["v*"]
+  # Runs the same build with no tag, which produces no release: `tagName` below
+  # is empty unless a tag triggered this.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS installer
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # Job-level, because a step's own `env:` is not available to that step's
+      # `if:` and the `secrets` context is not available in a step condition at
+      # all. This says whether credentials exist, never what they are.
+      SIGNED: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag that disagrees with the version inside the bundle produces a
+      # release whose name is not what it contains, and the mismatch is only
+      # visible to whoever downloads it.
+      - name: The tag and the bundled version agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          bundled=$(node -p "require('./crates/app/tauri.conf.json').version")
+          echo "tag ${tagged}, bundle ${bundled}"
+          if [ "$tagged" != "$bundled" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match tauri.conf.json ${bundled}"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # One bundle for both architectures. Two downloads with near-identical
+          # names is a choice the person downloading should not have to make.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Signing and notarization are driven entirely by these variables. When
+      # the secrets are absent the build still succeeds and produces an
+      # *unsigned* bundle — useful for a dry run, and not something to publish.
+      # See docs/releasing.md.
+      - name: Build, sign, and notarize
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/app
+          args: --target universal-apple-darwin
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: Nirmoka ${{ github.ref_name }}
+          releaseBody: |
+            Requires a supported backend to be installed — see the README.
+            macOS 12 or later, Apple silicon and Intel.
+          # Draft, always. The last look at a release belongs to a person.
+          releaseDraft: true
+          prerelease: true
+          includeUpdaterJson: false
+
+      # What the user's Mac will ask, asked here first. Without this the first
+      # report of a broken signature is a user seeing "Nirmoka is damaged".
+      - name: Verify the signature and the notarization ticket
+        if: env.SIGNED == 'true'
+        run: |
+          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          echo "verifying ${app}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Gatekeeper's own answer, which is the one that matters: a signed but
+          # un-notarized build passes codesign and still fails here.
+          spctl --assess --type execute --verbose=4 "$app"
+
+      - name: Report what was produced
+        run: |
+          find target/universal-apple-darwin/release/bundle -maxdepth 2 \
+            \( -name '*.dmg' -o -name '*.app' \) |
+            while read -r artifact; do
+              printf '%s (%s)\n' "$artifact" "$(du -sh "$artifact" | cut -f1)"
+            done
+
+          if [ "$SIGNED" != "true" ]; then
+            echo "::warning::built without signing credentials — this bundle is unsigned and must not be published"
+          fi
