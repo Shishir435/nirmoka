@@ -45,6 +45,7 @@ pub enum Ability {
     DryRun,
     CleanupCategories,
     CleanupPreview,
+    AppInventory,
     UninstallApps,
     SystemStatus,
 }
@@ -60,6 +61,7 @@ impl Ability {
             Self::DryRun => "dry run",
             Self::CleanupCategories => "cleanup categories",
             Self::CleanupPreview => "cleanup preview",
+            Self::AppInventory => "list installed applications",
             Self::UninstallApps => "uninstall applications",
             Self::SystemStatus => "system status",
         }
@@ -74,6 +76,7 @@ impl Ability {
             Self::DryRun => caps.dry_run,
             Self::CleanupCategories => caps.cleanup_categories,
             Self::CleanupPreview => caps.cleanup_categories && caps.dry_run,
+            Self::AppInventory => caps.app_inventory,
             Self::UninstallApps => caps.uninstall_apps,
             Self::SystemStatus => caps.system_status,
         }
@@ -182,14 +185,18 @@ mod tests {
             undo: false,
             dry_run: true,
             cleanup_categories: true,
-            uninstall_apps: true,
+            app_inventory: true,
+            uninstall_apps: false,
             system_status: true,
         };
         assert!(!Ability::Scan.is_offered_by(&mole));
         assert!(Ability::CleanupCategories.is_offered_by(&mole));
         assert!(Ability::CleanupPreview.is_offered_by(&mole));
-        assert!(Ability::UninstallApps.is_offered_by(&mole));
         assert!(Ability::SystemStatus.is_offered_by(&mole));
+        // Listing applications and removing one are different claims, and this
+        // backend can only make the first. See ADR 0021.
+        assert!(Ability::AppInventory.is_offered_by(&mole));
+        assert!(!Ability::UninstallApps.is_offered_by(&mole));
     }
 
     #[test]

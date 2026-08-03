@@ -36,7 +36,17 @@ pub struct Capabilities {
     /// user-selected paths.
     pub cleanup_categories: bool,
 
-    /// Application removal including leftover files.
+    /// List installed applications with the identifier the backend's own
+    /// uninstall command accepts.
+    ///
+    /// Separate from [`Capabilities::uninstall_apps`] because Mole 1.48.1 can do
+    /// this and cannot do that: `mo uninstall --list` is a machine-readable
+    /// one-shot, while every named uninstall stops at an interactive prompt.
+    /// One flag for both would either hide the inventory or promise a removal
+    /// that fails at the prompt — see ADR 0021.
+    pub app_inventory: bool,
+
+    /// Application removal including leftover files, driven non-interactively.
     pub uninstall_apps: bool,
 
     /// System health metrics.
@@ -53,6 +63,7 @@ impl Capabilities {
         undo: false,
         dry_run: false,
         cleanup_categories: false,
+        app_inventory: false,
         uninstall_apps: false,
         system_status: false,
     };

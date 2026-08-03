@@ -255,12 +255,33 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
       the deletion rule, and why — see
       [ADR 0020](adr/0020-cleanup-runs-are-journalled-without-a-receipt.md)
 
-### Phase 4 — application uninstall
+### Phase 4 — application uninstall ✅
 
-- [ ] Use Mole's uninstall name as the backend identifier; display names are not commands
-- [ ] Preview application bundle, leftovers, sensitive/review-only items, and recovery mode
-- [ ] Execute through Mole with explicit confirmation and partial-result reporting
-- [ ] Default to Mole's recoverable Trash route; permanent removal is not a beta default
+Closed as **not possible against Mole 1.48.1**, on recorded evidence rather than on a guess. Every
+named `mo uninstall` — `--dry-run` included — matches the app and then blocks on
+`Proceed with uninstallation? [y/N]`, and the release exposes no non-interactive flag. The plan is
+behind the prompt, so previewing and executing are the same unreachable call. See
+[ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md).
+
+- [x] Use Mole's uninstall name as the backend identifier; display names are not commands. It
+      crosses the boundary unchanged and the window shows it, which is what makes the Terminal
+      fallback usable rather than a guess at what `mo uninstall` accepts
+- [x] ~~Preview application bundle, leftovers, sensitive/review-only items, and recovery mode~~ —
+      **not possible.** `mo uninstall --dry-run <app>` prints its plan only after the confirmation
+      prompt is answered; with stdin closed it exits 1 having printed nothing but the match.
+      Recorded in `fixtures/mole/1.48.1/uninstall-command-surface.txt`
+- [x] ~~Execute through Mole with explicit confirmation and partial-result reporting~~ —
+      **not possible.** The only way past Mole's prompt is writing to its stdin, which would mean
+      answering another tool's safety gate on the user's behalf. `uninstall_apps` is false and the
+      `Adapter` trait gains no uninstall method
+- [x] Default to Mole's recoverable Trash route; permanent removal is not a beta default. Satisfied
+      by construction: Mole trashes by default, `--permanent` is opt-in, and Nirmoka never invokes
+      uninstall at all
+- [x] Capability split so the honest answer is expressible: `app_inventory` for listing, which Mole
+      can do, separate from `uninstall_apps` for removing, which it cannot. One flag for both would
+      have hidden a working inventory or offered a removal that dies at a prompt
+- [x] A test over the recorded command surface fails if a Mole release documents a way past the
+      prompt, so the decision is re-checked on upgrade rather than remembered
 
 ### Phase 5 — consumer navigation and accessibility
 

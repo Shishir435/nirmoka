@@ -152,7 +152,19 @@ impl Adapter for MoleAdapter {
             // ability is missing.
             dry_run: true,
             cleanup_categories: true,
-            uninstall_apps: true,
+            // `mo uninstall --list` is a machine-readable one-shot, and it
+            // publishes the exact name the uninstall command accepts.
+            app_inventory: true,
+            // The second headline exception. `mo uninstall <name>` — with or
+            // without `--dry-run` — matches the app and then stops at
+            // `Proceed with uninstallation? [y/N]`. There is no `--yes`, no
+            // `--force`, and no environment override; the flag set is `--list`,
+            // `--dry-run`, `--permanent`, `--whitelist`, `--debug`. Neither the
+            // plan nor the removal is reachable without writing to that prompt,
+            // and answering a backend's own safety prompt on its behalf is not
+            // something an adapter may do. See ADR 0021, and
+            // `fixtures/mole/1.48.1/uninstall-command-surface.txt`.
+            uninstall_apps: false,
             // `mo status --json`.
             system_status: true,
         }
@@ -895,6 +907,8 @@ mod tests {
     const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
     const APPLICATIONS: &str = include_str!("../../../fixtures/mole/1.48.1/applications.json");
     const CLEAN_PREVIEW: &str = include_str!("../../../fixtures/mole/1.48.1/clean-list.txt");
+    const UNINSTALL_SURFACE: &str =
+        include_str!("../../../fixtures/mole/1.48.1/uninstall-command-surface.txt");
 
     /// Byte-for-byte what `mo --version` printed on Mole 1.48.1, leading blank
     /// line included. Trimming it here to make the parser's job easier is how
@@ -981,8 +995,65 @@ mod tests {
             !caps.trash,
             "recoverability is not documented, so not claimed"
         );
-        assert!(caps.dry_run && caps.cleanup_categories && caps.uninstall_apps);
+        assert!(caps.dry_run && caps.cleanup_categories);
         assert!(caps.system_status);
+        assert!(
+            caps.app_inventory,
+            "mo uninstall --list is machine-readable"
+        );
+        assert!(
+            !caps.uninstall_apps,
+            "every named uninstall stops at an interactive prompt"
+        );
+    }
+
+    /// The gate that makes ADR 0021 re-testable rather than remembered.
+    ///
+    /// If a Mole release adds a way past `Proceed with uninstallation?`, this
+    /// fails and the capability should be reconsidered — which is the whole
+    /// reason the command surface is recorded.
+    #[test]
+    fn the_recorded_uninstall_surface_offers_no_non_interactive_flag() {
+        let options = UNINSTALL_SURFACE
+            .split("== mo uninstall --dry-run")
+            .next()
+            .expect("the recorded help section");
+
+        for flag in [
+            "--yes",
+            "--force",
+            "--assume-yes",
+            "--non-interactive",
+            "-y ",
+        ] {
+            assert!(
+                !options.contains(flag),
+                "Mole now documents {flag}; uninstall may be scriptable, so revisit ADR 0021"
+            );
+        }
+        assert!(
+            UNINSTALL_SURFACE.contains("Proceed with uninstallation?"),
+            "the recorded probe no longer shows the prompt this decision rests on"
+        );
+    }
+
+    /// The capability split has to leave inventory working. Refusing uninstall by
+    /// refusing everything app-shaped would be the easy wrong answer.
+    #[test]
+    fn application_inventory_does_not_inherit_the_uninstall_refusal() {
+        let error = MoleAdapter::new()
+            .installed_applications(&CancelToken::new())
+            .err();
+
+        // Inventory stays available wherever Mole is installed; the refusal
+        // being asserted is the capability split, checked above. This only
+        // pins that inventory is not refused *because* uninstall is.
+        if let Some(error) = error {
+            assert!(
+                !matches!(error, AdapterError::Unsupported { .. }),
+                "inventory must not inherit the uninstall refusal: {error}"
+            );
+        }
     }
 
     #[test]

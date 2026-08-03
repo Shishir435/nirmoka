@@ -1,6 +1,7 @@
 # ADR 0019: Mole consumer operations gate the macOS beta
 
-- Status: accepted
+- Status: accepted; the uninstall half superseded by
+  [ADR 0021](0021-application-uninstall-is-not-an-adapter-api.md)
 - Date: 2026-08-01
 
 ## Context
@@ -34,6 +35,8 @@ The macOS consumer beta is gated on two complete Mole workflows:
 
 1. cleanup preview, confirmation, execution, and exact result reporting;
 2. application inventory, uninstall preview, confirmation, execution, and exact result reporting.
+   **Superseded by ADR 0021**: the inventory is implemented, and uninstall is not reachable without
+   answering Mole's own confirmation prompt, so it is not part of the beta.
 
 System status is the first implementation because its JSON boundary is already suitable and it
 proves the capability-specific adapter shape without destructive behavior.

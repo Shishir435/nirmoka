@@ -2,7 +2,13 @@ import { ArrowUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
 
-import { EmptyState, MetricCard, PageHeader, SectionTitle } from "@/components/shared";
+import {
+  EmptyState,
+  MetricCard,
+  PageHeader,
+  SafetyBanner,
+  SectionTitle,
+} from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +16,9 @@ import { useApp } from "@/lib/app-context";
 import { formatBytes, formatCount } from "@/lib/format";
 
 export function ApplicationsPage() {
-  const { transport, scan } = useApp();
+  const { transport, scan, backends } = useApp();
+  const mole = backends?.find((backend) => backend.id === "mole");
+  const uninstallCapable = mole?.usable === true && mole.capabilities.uninstallApps;
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
   const [installed, setInstalled] = useState<InstalledApplicationInventory | null>(null);
@@ -66,6 +74,10 @@ export function ApplicationsPage() {
             totalBytes: app.totalBytes,
             sizeIsPartial: false,
             detail: `${app.bundleId} · ${app.source}`,
+            // The exact string Mole's uninstall command accepts. A display name
+            // is not a command: "Google Chrome" is listed, "google-chrome" is
+            // what the backend takes.
+            uninstallName: app.uninstallName,
           }))
         : (inventory?.rows.map((app) => ({
             key: `${app.id}-${app.path}`,
@@ -74,6 +86,8 @@ export function ApplicationsPage() {
             totalBytes: app.totalBytes,
             sizeIsPartial: app.sizeIsPartial,
             detail: null,
+            // A scanned bundle is a directory, not a backend identifier.
+            uninstallName: null,
           })) ?? []),
     [installed, inventory],
   );
@@ -167,6 +181,21 @@ export function ApplicationsPage() {
               Showing {allRows.length} of {total} applications.
             </p>
           )}
+
+          {installed && !uninstallCapable && (
+            <SafetyBanner>
+              <p className="text-sm font-medium">Uninstall runs in Terminal, not here</p>
+              <p className="text-xs text-muted-foreground">
+                {`${installed.backend} lists these applications and the exact name its uninstall
+                command accepts, but every named uninstall stops at its own confirmation prompt and
+                the release exposes no non-interactive flag. Nirmoka will not answer another tool's
+                safety prompt for you, so run `}
+                <code className="font-mono">mo uninstall &lt;name&gt;</code>
+                {` yourself and confirm it there. Files go to the Trash unless you pass
+                --permanent.`}
+              </p>
+            </SafetyBanner>
+          )}
         </>
       )}
     </div>
@@ -180,6 +209,7 @@ interface ApplicationRowModel {
   totalBytes: number;
   sizeIsPartial: boolean;
   detail: string | null;
+  uninstallName: string | null;
 }
 
 function ApplicationRow({ app }: { app: ApplicationRowModel }) {
@@ -193,6 +223,11 @@ function ApplicationRow({ app }: { app: ApplicationRowModel }) {
         <span className="block truncate font-mono text-xs text-muted-foreground">{app.path}</span>
         {app.detail && (
           <span className="block truncate text-xs text-muted-foreground">{app.detail}</span>
+        )}
+        {app.uninstallName && app.uninstallName !== app.name && (
+          <span className="block truncate text-xs text-muted-foreground">
+            uninstall name: <code className="font-mono">{app.uninstallName}</code>
+          </span>
         )}
       </span>
       {app.sizeIsPartial && <span className="text-xs text-warning-foreground">Partial</span>}

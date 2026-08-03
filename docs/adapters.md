@@ -32,7 +32,7 @@ each filtered by whether the adapter is usable _and_ declares the ability being 
 3. **Registration order**, so a backend no default names is still reachable.
 
 A preference is a preference, not an override. Choosing Mole on macOS is honoured for
-cleanup and uninstall and falls back to ncdu for scanning, because Mole cannot scan — and
+cleanup and app inventory and falls back to ncdu for scanning, because Mole cannot scan — and
 the returned `Choice::instead_of` names the backend that was displaced so the fallback can
 be stated rather than looking like the setting was ignored.
 
@@ -203,7 +203,8 @@ what the backend would delete.
   sizes and stops; the analyzer takes no depth or recursion flag, so a tree would cost one
   subprocess per directory. The adapter declares `scan: false` and returns `Unsupported`.
   See [ADR 0012](adr/0012-mole-is-not-a-scanner.md) and `fixtures/mole/1.48.1/`
-- Preview: `mo clean --dry-run`, `mo uninstall --dry-run`. Human-readable text, not JSON —
+- Preview: `mo clean --dry-run` only. `mo uninstall --dry-run` prints its plan _after_
+  `Proceed with uninstallation? [y/N]`, so there is no preview to read. Human-readable text, not JSON —
   the ability is real, and step 11 parses only plans Mole itself produced
 - Cleanup preview: the adapter reads Mole's safely published `clean-list.txt`, preserving its
   category names, paths, rounded size labels, grouped counts, summary, and system-scope warning.
@@ -226,9 +227,17 @@ what the backend would delete.
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
 - Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's
-  `uninstall_name` crosses the boundary unchanged so later execution never guesses from a label
-- Capabilities: dry run, cleanup categories, app uninstall, status. Not arbitrary-path
-  deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such
+  `uninstall_name` crosses the boundary unchanged so nothing downstream guesses from a label
+- Application uninstall: **none.** Every named `mo uninstall`, `--dry-run` included, stops at
+  `Proceed with uninstallation? [y/N]` and blocks on stdin; the flag set is `--list`, `--dry-run`,
+  `--permanent`, `--whitelist`, `--debug`, with no non-interactive escape. Answering another tool's
+  confirmation prompt is not something an adapter may do, so `uninstall_apps` is false and the trait
+  gains no uninstall method. The window shows the inventory and the exact name, and the user runs the
+  command. See [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md) and
+  `fixtures/mole/1.48.1/uninstall-command-surface.txt`
+- Capabilities: dry run, cleanup categories, app inventory, status. Not arbitrary-path
+  deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such. Not app
+  uninstall, which is a prompt rather than a command surface
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.
 
 Mole is the reason no single capability is a floor. A backend has to be able to do

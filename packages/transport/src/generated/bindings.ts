@@ -84,7 +84,7 @@ export type BatteryStatus = { percent: number, status: string, timeLeft: string,
 /**
  * What the active backend can do, so the UI can hide controls it cannot honour.
  */
-export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, uninstallApps: boolean, systemStatus: boolean, };
+export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, appInventory: boolean, uninstallApps: boolean, systemStatus: boolean, };
 
 export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
 
