@@ -247,8 +247,13 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 
 - [x] Add a one-time confirmation boundary for the reviewed operation
 - [x] State and test that Mole re-discovers candidates at execution time
-- [ ] Handle authorization, cancellation, partial failure, and backend version changes
-- [ ] Append exact results to the durable operation journal
+- [x] Handle authorization, cancellation, partial failure, and backend version changes
+- [x] Append exact results to the durable operation journal. One journal, one id space, a
+      `cleaned` event carrying the reviewed evidence and the backend's reported scope, completion,
+      and warnings — and no per-path receipt, because Mole publishes none. A failed append reports
+      the run beside the error rather than hiding a removal that already happened; the inverse of
+      the deletion rule, and why — see
+      [ADR 0020](adr/0020-cleanup-runs-are-journalled-without-a-receipt.md)
 
 ### Phase 4 — application uninstall
 

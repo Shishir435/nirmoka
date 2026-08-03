@@ -210,7 +210,16 @@ what the backend would delete.
   The UI offers no category selector because Mole 1.48.1 removed that command surface
 - Cleanup execution: `mo clean` receives no paths or categories from the preview. Mole performs
   fresh discovery at execution time, so the preview is evidence for confirmation rather than an
-  immutable delete list; reviewed and executed candidates may differ
+  immutable delete list; reviewed and executed candidates may differ. Execution is non-interactive:
+  an already-cached sudo session enables system cleanup, otherwise Mole continues at user scope and
+  the result is partial. Known timeout, permission, authentication, and removal warnings remain
+  backend-produced result warnings. Cancellation kills Mole. A Mole version different from the one
+  that produced the preview is refused, even when both versions are otherwise supported
+- Cleanup result: recorded in the shared operation journal as a `cleaned` event, with the reviewed
+  evidence and the backend's reported scope, completion, and warnings — and no per-path result,
+  because Mole publishes none. A failed journal write reports the run beside the error rather than
+  hiding it: the removal already happened and cannot be undone. See
+  [ADR 0020](adr/0020-cleanup-runs-are-journalled-without-a-receipt.md)
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
 - Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's

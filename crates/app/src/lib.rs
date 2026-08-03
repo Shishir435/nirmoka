@@ -49,6 +49,9 @@ pub fn run() {
             commands::cleanup_preview,
             commands::cancel_cleanup_preview,
             commands::prepare_cleanup,
+            commands::confirm_cleanup,
+            commands::cancel_cleanup,
+            commands::cleanup_log,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

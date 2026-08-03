@@ -1,8 +1,12 @@
-//! Confirmation state and the durable, human-readable deletion journal.
+//! Confirmation state and the durable, human-readable operation journal.
 //!
 //! Raw paths never cross back into an execute command. A prepared adapter plan
 //! is held here behind a one-time token, which makes explicit confirmation an
 //! enforced backend property rather than a convention in a future button.
+//!
+//! One journal file holds every destructive operation — selected-path deletions
+//! and backend cleanup runs — because they share an id space and a reader. Two
+//! files with two writers would eventually disagree about what happened first.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -10,7 +14,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nirmoka_adapter::{DeletePlan, DeleteReceipt};
+use nirmoka_adapter::{
+    CleanupCompletion, CleanupExecution, CleanupSystemScope, DeletePlan, DeleteReceipt,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::state::ScanId;
@@ -31,6 +37,38 @@ pub struct Operation {
     pub log_error: Option<String>,
 }
 
+/// One completed cleanup run, recorded exactly as the backend reported it.
+///
+/// There is no per-path result here because Mole publishes none: it re-discovers
+/// candidates at execution time and reports scope, completion, and warnings.
+/// Journalling the reviewed preview rows as if they had been removed would
+/// record a guess as a fact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanupOperation {
+    pub id: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub preview_generated_at: String,
+    pub reviewed_items: u64,
+    pub reviewed_potential_cleanup: Option<String>,
+    pub system_scope: CleanupSystemScope,
+    pub completion: CleanupCompletion,
+    pub warnings: Vec<String>,
+    pub executed_at_ms: u64,
+    pub log_error: Option<String>,
+}
+
+/// What a finished cleanup run knows before it has an id or a timestamp.
+#[derive(Debug, Clone)]
+pub struct CleanupRecord {
+    pub backend: String,
+    pub backend_version: String,
+    pub preview_generated_at: String,
+    pub reviewed_items: u64,
+    pub reviewed_potential_cleanup: Option<String>,
+    pub execution: CleanupExecution,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 enum LogEvent {
@@ -46,6 +84,20 @@ enum LogEvent {
         id: u64,
         at_ms: u64,
     },
+    /// A cleanup run is terminal: the backend removed what it found, and there
+    /// is no receipt to undo. Nothing ever supersedes this event.
+    Cleaned {
+        id: u64,
+        backend: String,
+        backend_version: String,
+        preview_generated_at: String,
+        reviewed_items: u64,
+        reviewed_potential_cleanup: Option<String>,
+        system_scope: CleanupSystemScope,
+        completion: CleanupCompletion,
+        warnings: Vec<String>,
+        at_ms: u64,
+    },
 }
 
 pub struct DeletionState {
@@ -53,19 +105,28 @@ pub struct DeletionState {
     next_operation: u64,
     pending: HashMap<u64, PendingDelete>,
     operations: Vec<Operation>,
+    cleanups: Vec<CleanupOperation>,
     log_path: Option<PathBuf>,
 }
 
 impl DeletionState {
     pub fn new(log_path: Option<PathBuf>) -> Self {
-        let operations = log_path.as_deref().map(load_operations).unwrap_or_default();
-        let next_operation = operations.iter().map(|op| op.id).max().unwrap_or(0);
+        let (operations, cleanups) = log_path.as_deref().map(load_journal).unwrap_or_default();
+        // One id space across both kinds, so "operation 4" in the journal names
+        // one event rather than two.
+        let next_operation = operations
+            .iter()
+            .map(|op| op.id)
+            .chain(cleanups.iter().map(|op| op.id))
+            .max()
+            .unwrap_or(0);
 
         Self {
             next_confirmation: 0,
             next_operation,
             pending: HashMap::new(),
             operations,
+            cleanups,
             log_path,
         }
     }
@@ -135,8 +196,57 @@ impl DeletionState {
         Ok(operation.clone())
     }
 
+    /// Record one completed cleanup run.
+    ///
+    /// This cannot fail the operation the way `record_delete` does. A deletion
+    /// receipt is what makes recovery possible, so an unwritable journal means
+    /// the operation was not safely performed. A cleanup run has already
+    /// happened inside the backend and cannot be undone, so hiding it behind a
+    /// write error would lose the only record the user has. The failure travels
+    /// beside the result instead.
+    pub fn record_cleanup(&mut self, record: CleanupRecord) -> CleanupOperation {
+        self.next_operation = self.next_operation.saturating_add(1);
+        let id = self.next_operation;
+        let at_ms = now_ms();
+        let log_error = self
+            .append(&LogEvent::Cleaned {
+                id,
+                backend: record.backend.clone(),
+                backend_version: record.backend_version.clone(),
+                preview_generated_at: record.preview_generated_at.clone(),
+                reviewed_items: record.reviewed_items,
+                reviewed_potential_cleanup: record.reviewed_potential_cleanup.clone(),
+                system_scope: record.execution.system_scope,
+                completion: record.execution.completion,
+                warnings: record.execution.warnings.clone(),
+                at_ms,
+            })
+            .err()
+            .map(|error| error.to_string());
+
+        let operation = CleanupOperation {
+            id,
+            backend: record.backend,
+            backend_version: record.backend_version,
+            preview_generated_at: record.preview_generated_at,
+            reviewed_items: record.reviewed_items,
+            reviewed_potential_cleanup: record.reviewed_potential_cleanup,
+            system_scope: record.execution.system_scope,
+            completion: record.execution.completion,
+            warnings: record.execution.warnings,
+            executed_at_ms: at_ms,
+            log_error,
+        };
+        self.cleanups.push(operation.clone());
+        operation
+    }
+
     pub fn operations(&self) -> Vec<Operation> {
         self.operations.iter().rev().cloned().collect()
+    }
+
+    pub fn cleanups(&self) -> Vec<CleanupOperation> {
+        self.cleanups.iter().rev().cloned().collect()
     }
 
     fn append(&self, event: &LogEvent) -> io::Result<()> {
@@ -154,12 +264,13 @@ impl DeletionState {
     }
 }
 
-fn load_operations(path: &Path) -> Vec<Operation> {
+fn load_journal(path: &Path) -> (Vec<Operation>, Vec<CleanupOperation>) {
     let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
 
     let mut operations = Vec::<Operation>::new();
+    let mut cleanups = Vec::<CleanupOperation>::new();
     for event in text
         .lines()
         .filter_map(|line| serde_json::from_str::<LogEvent>(line).ok())
@@ -185,9 +296,35 @@ fn load_operations(path: &Path) -> Vec<Operation> {
                     operation.undone_at_ms = Some(at_ms);
                 }
             }
+            LogEvent::Cleaned {
+                id,
+                backend,
+                backend_version,
+                preview_generated_at,
+                reviewed_items,
+                reviewed_potential_cleanup,
+                system_scope,
+                completion,
+                warnings,
+                at_ms,
+            } => cleanups.push(CleanupOperation {
+                id,
+                backend,
+                backend_version,
+                preview_generated_at,
+                reviewed_items,
+                reviewed_potential_cleanup,
+                system_scope,
+                completion,
+                warnings,
+                executed_at_ms: at_ms,
+                // A reloaded entry is durable by definition — it was read back
+                // off disk.
+                log_error: None,
+            }),
         }
     }
-    operations
+    (operations, cleanups)
 }
 
 fn now_ms() -> u64 {
@@ -251,6 +388,75 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert!(loaded[0].undone_at_ms.is_some());
         let _ = fs::remove_file(path);
+    }
+
+    fn cleanup_record() -> CleanupRecord {
+        CleanupRecord {
+            backend: "mole".to_string(),
+            backend_version: "1.48.1".to_string(),
+            preview_generated_at: "2026-08-02 12:00:00".to_string(),
+            reviewed_items: 6,
+            reviewed_potential_cleanup: Some("At least 192.00MB".to_string()),
+            execution: CleanupExecution {
+                system_scope: CleanupSystemScope::UserOnly,
+                completion: CleanupCompletion::Partial,
+                warnings: vec!["System-level cleanup was skipped.".to_string()],
+            },
+        }
+    }
+
+    #[test]
+    fn a_cleanup_run_survives_reload_and_shares_the_deletion_id_space() {
+        let path = std::env::temp_dir().join(format!(
+            "nirmoka-cleanup-journal-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut state = DeletionState::new(Some(path.clone()));
+        let deleted = state
+            .record_delete(DeleteReceipt::new(
+                "rip",
+                PathBuf::from("/scan/file"),
+                PathBuf::from("/recovery/1"),
+                PathBuf::from("/recovery/1/scan/file"),
+            ))
+            .unwrap();
+        let cleaned = state.record_cleanup(cleanup_record());
+        assert_eq!(cleaned.id, deleted.id + 1);
+        assert!(cleaned.log_error.is_none());
+
+        let reloaded = DeletionState::new(Some(path.clone()));
+        let cleanups = reloaded.cleanups();
+        assert_eq!(cleanups.len(), 1);
+        assert_eq!(cleanups[0], cleaned);
+        assert_eq!(reloaded.operations().len(), 1);
+
+        // A later run must not reuse an id either kind already took.
+        let mut reloaded = reloaded;
+        assert_eq!(reloaded.record_cleanup(cleanup_record()).id, cleaned.id + 1);
+        let _ = fs::remove_file(path);
+    }
+
+    /// The mirror image of the deletion rule. A cleanup run cannot be undone, so
+    /// a failed journal write must report the result it could not record rather
+    /// than swallowing it.
+    #[test]
+    fn a_failed_cleanup_journal_write_still_reports_the_run() {
+        let directory = std::env::temp_dir().join(format!(
+            "nirmoka-cleanup-journal-directory-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+
+        let mut state = DeletionState::new(Some(directory.clone()));
+        let operation = state.record_cleanup(cleanup_record());
+
+        assert!(operation.log_error.is_some(), "the write failure is stated");
+        assert_eq!(operation.completion, CleanupCompletion::Partial);
+        assert_eq!(state.cleanups().len(), 1, "and the run is still known");
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]

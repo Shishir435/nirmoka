@@ -72,6 +72,18 @@ pub enum AdapterError {
         supported: &'static str,
     },
 
+    /// The backend changed after a destructive operation was reviewed. Even a
+    /// separately supported version needs a new preview because its discovery
+    /// and safety behavior may differ.
+    #[error(
+        "{binary} changed from reviewed version {reviewed} to {current}; generate a new preview"
+    )]
+    BackendVersionChanged {
+        binary: &'static str,
+        reviewed: String,
+        current: String,
+    },
+
     /// A path failed validation at the adapter boundary. This is the last line
     /// before a path becomes a subprocess argument.
     #[error("refused path {path}: {reason}")]
@@ -191,6 +203,19 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "ncdu 1.19 is not supported; this build understands >=2.0, <3.0"
+        );
+    }
+
+    #[test]
+    fn a_backend_change_requires_a_new_review() {
+        let error = AdapterError::BackendVersionChanged {
+            binary: "mo",
+            reviewed: "1.48.1".to_string(),
+            current: "1.49.0".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "mo changed from reviewed version 1.48.1 to 1.49.0; generate a new preview"
         );
     }
 

@@ -126,6 +126,69 @@ pub fn prepare_cleanup_of(state: &AppState) -> Result<dto::CleanupPreparation, S
     Ok(dto::CleanupPreparation::from_state(preparation))
 }
 
+/// Consume a one-time confirmation and run the backend's own cleanup.
+///
+/// The token names a reviewed preview, not a list of arguments: Mole 1.48.1
+/// accepts neither paths nor categories and re-discovers candidates itself. What
+/// crosses into the backend is the reviewed *version*, which the adapter refuses
+/// if the installed Mole has changed since the review.
+///
+/// The confirmation is spent whether or not the run succeeds, and the reviewed
+/// preview is dropped either way — after a run, every path in it is a statement
+/// about the past.
+pub fn confirm_cleanup_in(
+    state: &AppState,
+    confirmation_token: u64,
+    cancel: &CancelToken,
+) -> Result<dto::CleanupOperation, String> {
+    let pending = state
+        .cleanup()
+        .take(confirmation_token, Instant::now())
+        .ok_or_else(|| {
+            "this cleanup confirmation is invalid, expired, or was already used; generate a new preview"
+                .to_string()
+        })?;
+
+    let result = state
+        .adapter(&pending.backend)
+        .ok_or_else(|| {
+            format!(
+                "the backend that produced this cleanup review ({}) is no longer registered",
+                pending.backend
+            )
+        })
+        .and_then(|adapter| {
+            adapter
+                .execute_cleanup(&pending.preview.backend_version, cancel)
+                .map_err(|error| error.to_string())
+        });
+
+    state.cleanup().forget();
+
+    let execution = result?;
+    let operation = state
+        .deletion()
+        .record_cleanup(crate::deletion::CleanupRecord {
+            backend: pending.backend,
+            backend_version: pending.preview.backend_version,
+            preview_generated_at: pending.preview.generated_at,
+            reviewed_items: pending.preview.total_items,
+            reviewed_potential_cleanup: pending.preview.potential_cleanup,
+            execution,
+        });
+
+    Ok(dto::CleanupOperation::from_operation(&operation))
+}
+
+pub fn cleanup_log_of(state: &AppState) -> Vec<dto::CleanupOperation> {
+    state
+        .deletion()
+        .cleanups()
+        .iter()
+        .map(dto::CleanupOperation::from_operation)
+        .collect()
+}
+
 /// Pick a backend, or pass `None` to go back to the platform default.
 ///
 /// Returns the selection as it now stands rather than the id that was passed in.
@@ -570,6 +633,41 @@ pub fn prepare_cleanup(state: State<'_, AppState>) -> Result<dto::CleanupPrepara
     prepare_cleanup_of(&state)
 }
 
+/// Runs on a worker thread, because Mole's cleanup takes minutes and a blocked
+/// command would freeze the window it is reporting to.
+#[tauri::command]
+pub async fn confirm_cleanup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirmation_token: u64,
+) -> Result<dto::CleanupOperation, String> {
+    let cancel = state.cleanup().start_execution()?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        confirm_cleanup_in(
+            worker_app.state::<AppState>().inner(),
+            confirmation_token,
+            &cancel,
+        )
+    })
+    .await;
+
+    state.cleanup().finish_execution();
+    result.map_err(|error| format!("cleanup worker failed: {error}"))?
+}
+
+/// Returns whether there was a run to stop. Cancellation kills Mole; what it
+/// had already removed stays removed, which the returned operation says.
+#[tauri::command]
+pub fn cancel_cleanup(state: State<'_, AppState>) -> bool {
+    state.cleanup().cancel_execution()
+}
+
+#[tauri::command]
+pub fn cleanup_log(state: State<'_, AppState>) -> Vec<dto::CleanupOperation> {
+    cleanup_log_of(&state)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -618,6 +716,7 @@ mod tests {
             "mole",
             None,
             CleanupPreview {
+                backend_version: "1.48.1".to_string(),
                 generated_at: "2026-08-02 12:00:00".to_string(),
                 categories: Vec::new(),
                 potential_cleanup: Some("12MB".to_string()),
@@ -631,11 +730,202 @@ mod tests {
         let preparation = prepare_cleanup_of(&state).expect("fresh preview");
 
         assert_eq!(preparation.backend, "mole");
+        assert_eq!(preparation.backend_version, "1.48.1");
         assert_eq!(preparation.preview_generated_at, "2026-08-02 12:00:00");
         assert_eq!(preparation.total_items, 3);
         assert_eq!(preparation.warnings, ["partial preview"]);
         assert!(preparation.requires_confirmation);
         assert!(preparation.warning.contains("re-discover"));
+    }
+
+    /// A stand-in for Mole. It cleans only when handed the version that produced
+    /// the review, which is the plumbing this fake exists to check.
+    struct FakeCleaner {
+        outcome: Result<nirmoka_adapter::CleanupExecution, &'static str>,
+    }
+
+    impl FakeCleaner {
+        fn finishing() -> Self {
+            Self {
+                outcome: Ok(nirmoka_adapter::CleanupExecution {
+                    system_scope: CleanupSystemScope::UserOnly,
+                    completion: nirmoka_adapter::CleanupCompletion::Partial,
+                    warnings: vec!["System-level cleanup was skipped.".to_string()],
+                }),
+            }
+        }
+
+        fn refusing() -> Self {
+            Self {
+                outcome: Err("mo changed from reviewed version 1.48.1 to 1.49.0"),
+            }
+        }
+    }
+
+    impl nirmoka_adapter::Adapter for FakeCleaner {
+        fn id(&self) -> &'static str {
+            "mole"
+        }
+        fn display_name(&self) -> &'static str {
+            "Mole"
+        }
+        fn supported_versions(&self) -> &'static str {
+            "1.48.x"
+        }
+        fn detect(&self) -> Result<nirmoka_adapter::Detection, nirmoka_adapter::AdapterError> {
+            Ok(nirmoka_adapter::Detection::Found {
+                path: std::path::PathBuf::from("/fixtures/mo"),
+                version: "1.48.1".to_string(),
+            })
+        }
+        fn capabilities(&self) -> nirmoka_adapter::Capabilities {
+            nirmoka_adapter::Capabilities {
+                scan: false,
+                dry_run: true,
+                cleanup_categories: true,
+                ..nirmoka_adapter::Capabilities::MINIMAL
+            }
+        }
+        fn execute_cleanup(
+            &self,
+            reviewed_version: &str,
+            _cancel: &CancelToken,
+        ) -> Result<nirmoka_adapter::CleanupExecution, nirmoka_adapter::AdapterError> {
+            assert_eq!(
+                reviewed_version, "1.48.1",
+                "execution must carry the version the preview was produced by"
+            );
+            self.outcome
+                .clone()
+                .map_err(|reason| nirmoka_adapter::AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation: "cleanup execution",
+                    reason: reason.to_string(),
+                })
+        }
+        fn scan(
+            &self,
+            _root: &std::path::Path,
+            _options: &nirmoka_adapter::ScanOptions,
+            _sink: &mut dyn nirmoka_adapter::WireSink,
+            _cancel: &CancelToken,
+        ) -> Result<nirmoka_adapter::ScanSummary, nirmoka_adapter::AdapterError> {
+            unreachable!("the cleanup backend never scans")
+        }
+    }
+
+    fn reviewed_preview() -> CleanupPreview {
+        CleanupPreview {
+            backend_version: "1.48.1".to_string(),
+            generated_at: "2026-08-02 12:00:00".to_string(),
+            categories: Vec::new(),
+            potential_cleanup: Some("At least 192.00MB".to_string()),
+            total_items: 6,
+            system_scope: CleanupSystemScope::UserOnly,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// A state whose only backend is `cleaner`, journalling to `log`.
+    fn state_with_a_reviewed_cleanup(
+        cleaner: FakeCleaner,
+        log: Option<std::path::PathBuf>,
+    ) -> AppState {
+        let mut registry = nirmoka_adapter::Registry::new();
+        registry.register(Box::new(cleaner));
+        let state = AppState::with_parts(
+            nirmoka_adapter::Preference::of("mole"),
+            false,
+            registry,
+            log,
+        );
+        state
+            .cleanup()
+            .remember("mole", None, reviewed_preview(), Instant::now());
+        state
+    }
+
+    fn journal_path(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "nirmoka-cleanup-command-{name}-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn a_confirmed_cleanup_is_journalled_with_the_reviewed_evidence() {
+        let log = journal_path("recorded");
+        let state = state_with_a_reviewed_cleanup(FakeCleaner::finishing(), Some(log.clone()));
+        let token = prepare_cleanup_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let operation =
+            confirm_cleanup_in(&state, token, &CancelToken::new()).expect("cleanup ran");
+
+        assert_eq!(operation.backend, "mole");
+        assert_eq!(operation.backend_version, "1.48.1");
+        assert_eq!(operation.preview_generated_at, "2026-08-02 12:00:00");
+        assert_eq!(operation.reviewed_items, 6);
+        assert_eq!(operation.completion, dto::CleanupCompletion::Partial);
+        assert_eq!(operation.system_scope, dto::CleanupSystemScope::UserOnly);
+        assert_eq!(operation.warnings.len(), 1);
+        assert!(operation.log_error.is_none());
+        assert!(operation.executed_at_ms > 0);
+
+        // Durable, and the same entry the log command serves.
+        assert_eq!(cleanup_log_of(&state), vec![operation.clone()]);
+        let recorded = std::fs::read_to_string(&log).expect("journal file");
+        assert!(recorded.contains("\"event\":\"cleaned\""), "{recorded}");
+        assert!(recorded.contains("\"reviewed_items\":6"), "{recorded}");
+
+        let reloaded = AppState::with_parts(
+            nirmoka_adapter::Preference::of("mole"),
+            false,
+            crate::state::registry(),
+            Some(log.clone()),
+        );
+        assert_eq!(cleanup_log_of(&reloaded), vec![operation]);
+        let _ = std::fs::remove_file(log);
+    }
+
+    /// The confirmation is spent and the review is dropped even when the backend
+    /// refuses, because a refusal at this point cannot prove nothing was removed.
+    #[test]
+    fn a_refused_cleanup_spends_the_confirmation_and_journals_nothing() {
+        let log = journal_path("refused");
+        let state = state_with_a_reviewed_cleanup(FakeCleaner::refusing(), Some(log.clone()));
+        let token = prepare_cleanup_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let error =
+            confirm_cleanup_in(&state, token, &CancelToken::new()).expect_err("backend refused");
+        assert!(error.contains("changed from reviewed version"), "{error}");
+
+        assert!(cleanup_log_of(&state).is_empty(), "nothing to report");
+        assert!(!log.exists(), "and nothing written");
+        assert!(confirm_cleanup_in(&state, token, &CancelToken::new()).is_err());
+        assert!(
+            prepare_cleanup_of(&state).is_err(),
+            "the spent review is gone; a new preview is required"
+        );
+        let _ = std::fs::remove_file(log);
+    }
+
+    #[test]
+    fn cleanup_execution_needs_a_live_confirmation() {
+        let state = state_with_a_reviewed_cleanup(FakeCleaner::finishing(), None);
+
+        let error = confirm_cleanup_in(&state, 999, &CancelToken::new())
+            .expect_err("an unknown token is not a confirmation");
+
+        assert!(
+            error.contains("invalid, expired, or was already used"),
+            "{error}"
+        );
     }
 
     /// The window and the process must never disagree about the setting.
