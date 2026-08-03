@@ -601,8 +601,10 @@ pub struct InstalledApplication {
     pub source: String,
     pub uninstall_name: String,
     pub path: String,
-    #[ts(type = "number")]
-    pub total_bytes: u64,
+    /// Mole's own rounded label, e.g. `"410.9MB"`. Not a byte count, and
+    /// deliberately not converted into one — see `InstalledApplication` in
+    /// `nirmoka-adapter`.
+    pub reported_size: String,
 }
 
 impl InstalledApplicationInventory {
@@ -620,14 +622,12 @@ impl InstalledApplicationInventory {
                 source: application.source,
                 uninstall_name: application.uninstall_name,
                 path: application.path.display().to_string(),
-                total_bytes: application.size,
+                reported_size: application.reported_size,
             })
             .collect::<Vec<_>>();
-        rows.sort_unstable_by(|a, b| {
-            b.total_bytes
-                .cmp(&a.total_bytes)
-                .then_with(|| a.path.cmp(&b.path))
-        });
+        // The backend publishes rounded text, so there is nothing to sort by
+        // size without inventing an order. Path is stable and says so.
+        rows.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         Self {
             backend: backend.into(),
             backend_instead_of,
@@ -1369,8 +1369,10 @@ mod tests {
         }
     }
 
+    /// Sorting is by path, not by the size label: `"9.9MB"` and `"10.1GB"` are
+    /// strings, and ordering them as text puts the gigabyte second.
     #[test]
-    fn backend_application_identity_survives_and_rows_sort_by_size() {
+    fn backend_application_identity_survives_and_rows_order_stably() {
         let inventory = InstalledApplicationInventory::from_adapter(
             "mole",
             None,
@@ -1381,7 +1383,7 @@ mod tests {
                     source: "user".into(),
                     uninstall_name: "Small Command".into(),
                     path: "/Applications/Small.app".into(),
-                    size: 10,
+                    reported_size: "9.9MB".into(),
                 },
                 AdapterInstalledApplication {
                     name: "Large".into(),
@@ -1389,12 +1391,13 @@ mod tests {
                     source: "system".into(),
                     uninstall_name: "Large Command".into(),
                     path: "/Applications/Large.app".into(),
-                    size: 20,
+                    reported_size: "10.1GB".into(),
                 },
             ],
         );
 
         assert_eq!(inventory.rows[0].name, "Large");
+        assert_eq!(inventory.rows[0].reported_size, "10.1GB");
         assert_eq!(inventory.rows[1].uninstall_name, "Small Command");
     }
 }

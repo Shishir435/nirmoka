@@ -98,6 +98,36 @@ app=$(printf '%s\n' "$inventory" | awk '
   }
   END { print (distinct != "" ? distinct : any) }')
 
+# The application inventory, sanitized. Shape is the point: this fixture is
+# parsed by the adapter, and a hand-written one that disagrees with the backend
+# is worse than none — `size` is a rounded *string* here ("410.9MB"), and a
+# fixture claiming a byte count let a schema mismatch reach a release.
+applications="$out/applications.json"
+{
+  echo "["
+  # One entry from each source Mole distinguishes, so the fixture covers both
+  # the App case and the Homebrew case where the display name and the uninstall
+  # identifier disagree. Keys, order, and value types are the backend's.
+  printf '%s\n' "$inventory" |
+    awk '
+      /"source": "App"/ && !app++ { print "APP" $0 }
+      /"source": "Homebrew"/ && !cask++ { print "CASK" $0 }
+    ' |
+    sed -E \
+      -e 's/^APP//' -e 's/^CASK//' \
+      -e 's/"bundle_id": "[^"]*"/"bundle_id": "com.example.desktop"/' \
+      -e 's|"path": "[^"]*"|"path": "/Applications/Example.app"|' |
+    sed -E \
+      -e '1 s/"name": "[^"]*"/"name": "Example"/' \
+      -e '1 s/"uninstall_name": "[^"]*"/"uninstall_name": "Example"/' \
+      -e '2 s/"name": "[^"]*"/"name": "Example Cask"/' \
+      -e '2 s/"uninstall_name": "[^"]*"/"uninstall_name": "example-cask"/' \
+      -e '1 s/,$//' -e '1 s/$/,/' -e '2 s/,$//' |
+    sed -E 's/^[[:space:]]*/  /'
+  echo "]"
+} >"$applications"
+echo "recorded $applications ($(wc -c <"$applications" | tr -d ' ') bytes)"
+
 {
   echo "# Recorded from Mole $version by scripts/record-mole-fixture.sh"
   echo "#"
