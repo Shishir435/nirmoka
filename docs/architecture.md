@@ -74,7 +74,8 @@ pub struct Capabilities {
     pub undo: bool,              // exact non-interactive restore
     pub dry_run: bool,           // preview the exact delete list first
     pub cleanup_categories: bool,// named cleanup targets, not just paths
-    pub uninstall_apps: bool,    // application removal with leftovers
+    pub app_inventory: bool,     // list apps with the backend's own identifier
+    pub uninstall_apps: bool,    // non-interactive application removal
     pub system_status: bool,     // health metrics
 }
 ```

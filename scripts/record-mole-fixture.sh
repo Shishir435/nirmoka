@@ -70,7 +70,50 @@ record() {
 record root "$tree"
 record nested "$tree/nested"
 
+# The uninstall command surface, which is the evidence behind ADR 0021.
+#
+# Two facts are recorded, both re-checkable after a Mole upgrade: the flags `mo
+# uninstall` accepts, and what a named uninstall does when nothing can answer
+# its prompt. Neither the plan nor the removal is reachable without writing to
+# that prompt, which is why the adapter refuses the operation instead of
+# synthesizing an answer.
+surface="$out/uninstall-command-surface.txt"
+# Read the list in full before parsing. An `exit` inside awk would SIGPIPE the
+# backend, and `pipefail` would end the recording on a successful read.
+inventory=$(mo uninstall --list 2>/dev/null || true)
+app=$(printf '%s\n' "$inventory" | awk -F'"' '/uninstall_name/ && !seen++ {print $4}')
+
+{
+  echo "# Recorded from Mole $version by scripts/record-mole-fixture.sh"
+  echo "#"
+  echo "# Evidence for ADR 0021. Nirmoka parses none of this; it is the proof that"
+  echo "# uninstall cannot be driven non-interactively."
+  echo
+  echo "== mo uninstall --help =="
+  mo uninstall --help 2>&1
+  echo
+  echo "== mo uninstall --dry-run <app> with stdin closed =="
+  if [[ -n "$app" ]]; then
+    set +e
+    transcript=$(mo uninstall --dry-run "$app" </dev/null 2>&1)
+    status=$?
+    set -e
+    # Strip ANSI control sequences, the probed app's name, and the matched line,
+    # which carries this machine's app size and last-used time.
+    printf '%s\n' "$transcript" |
+      sed -e $'s/\033\\[[0-9;]*[a-zA-Z]//g' -e "s|$app|Example|g" |
+      sed -E 's/^[0-9]+\. .*/1. Example  <size>  |  Last: <when>/'
+    echo
+    echo "(exit status: $status, and the plan never printed)"
+  else
+    echo "(no installed application was available to probe)"
+  fi
+} >"$surface"
+echo "recorded $surface ($(wc -c <"$surface" | tr -d ' ') bytes)"
+
 echo
 echo "Recorded from Mole $version into $out."
 echo "If root.json now contains entries below its immediate children, ADR 0012"
 echo "is out of date and the adapter should be reconsidered."
+echo "If uninstall-command-surface.txt now shows a non-interactive flag, ADR 0021"
+echo "is out of date and uninstall should be reconsidered."

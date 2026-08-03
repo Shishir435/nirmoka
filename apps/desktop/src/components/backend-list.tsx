@@ -39,6 +39,7 @@ function Abilities({ backend }: { backend: Backend }) {
   const abilities = [
     backend.capabilities.scan && "scan",
     backend.capabilities.cleanupCategories && "clean",
+    backend.capabilities.appInventory && "list apps",
     backend.capabilities.uninstallApps && "uninstall",
     backend.capabilities.systemStatus && "status",
   ].filter(Boolean);

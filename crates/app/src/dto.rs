@@ -823,6 +823,7 @@ pub struct Capabilities {
     pub undo: bool,
     pub dry_run: bool,
     pub cleanup_categories: bool,
+    pub app_inventory: bool,
     pub uninstall_apps: bool,
     pub system_status: bool,
 }
@@ -944,6 +945,7 @@ impl From<AdapterCapabilities> for Capabilities {
             undo: caps.undo,
             dry_run: caps.dry_run,
             cleanup_categories: caps.cleanup_categories,
+            app_inventory: caps.app_inventory,
             uninstall_apps: caps.uninstall_apps,
             system_status: caps.system_status,
         }

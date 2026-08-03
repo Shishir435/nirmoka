@@ -461,8 +461,8 @@ pub fn installed_application_inventory_of(
     state: &AppState,
 ) -> Result<dto::InstalledApplicationInventory, String> {
     let choice = state
-        .resolve(Ability::UninstallApps)
-        .ok_or_else(|| "no usable backend provides application uninstall".to_string())?;
+        .resolve(Ability::AppInventory)
+        .ok_or_else(|| "no usable backend can list installed applications".to_string())?;
     let backend = choice.adapter.id();
     let instead_of = choice.instead_of;
     let applications = choice

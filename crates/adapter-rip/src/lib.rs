@@ -131,6 +131,7 @@ impl Adapter for RipAdapter {
             undo: true,
             dry_run: false,
             cleanup_categories: false,
+            app_inventory: false,
             uninstall_apps: false,
             system_status: false,
         }

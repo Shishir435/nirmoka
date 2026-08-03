@@ -1,0 +1,39 @@
+# Recorded from Mole 1.48.1 by scripts/record-mole-fixture.sh
+#
+# Evidence for ADR 0021. Nirmoka parses none of this; it is the proof that
+# uninstall cannot be driven non-interactively.
+
+== mo uninstall --help ==
+Usage: mo uninstall [OPTIONS] [APP_NAME ...]
+
+Interactively remove applications and their leftover files.
+Optionally specify one or more app names to uninstall directly.
+For leftovers from apps that are already gone, use mo clean.
+
+Examples:
+  mo uninstall                   Open interactive app selector
+  mo uninstall slack             Uninstall Slack
+  mo uninstall slack zoom        Uninstall Slack and Zoom
+  mo uninstall --dry-run slack   Preview Slack uninstallation
+  mo uninstall --list            Show installed apps and the names mo uninstall accepts
+
+Options:
+  --list            List installed apps with the exact name mo uninstall accepts
+  --dry-run         Preview app uninstallation without making changes
+  --permanent       Bypass macOS Trash and rm -rf immediately
+  --whitelist       Not supported for uninstall (use clean/optimize)
+  --debug           Show detailed operation logs
+  -h, --help        Show this help message
+
+By default, uninstalled files go to the macOS Trash so they can be
+recovered. Use --permanent to skip the Trash step.
+
+== mo uninstall --dry-run <app> with stdin closed ==
+→ DRY RUN MODE, No app files or settings will be modified
+
+◎ Matched 1 app(s):
+1. Example  <size>  |  Last: <when>
+
+Proceed with uninstallation? [y/N] 
+
+(exit status: 1, and the plan never printed)
