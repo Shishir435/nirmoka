@@ -377,27 +377,48 @@ fn execute_cleanup_from(
         .and_then(|mut reader| {
             reader
                 .read_to_end(&mut stdout)
+                .map(|_| ())
                 .map_err(|source| AdapterError::OperationFailed {
                     backend: "mole",
                     operation,
                     reason: source.to_string(),
                 })
         });
-    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
-        binary: BINARY,
-        source,
-    })?;
-
     // Past this point Mole was running, so it may already have removed files.
-    // Cancellation and failure are outcomes of a real run from here on; only
-    // errors raised before the spawn mean nothing happened.
-    let mut execution = parse_cleanup_execution(&String::from_utf8_lossy(&stdout));
+    // Every way this can end is an outcome to report; only the errors raised
+    // before the spawn above mean nothing happened.
+    Ok(execution_of(&stdout, process.finish(), read_result))
+}
+
+/// Turn everything one finished run produced into a single outcome.
+///
+/// Deliberately infallible. Each argument can carry a failure, and none of them
+/// can show that Mole removed nothing — so a `Result` here would let a real
+/// removal be reported as a run that never happened.
+fn execution_of(
+    stdout: &[u8],
+    finished: std::io::Result<nirmoka_adapter::process::Outcome>,
+    read_result: Result<(), AdapterError>,
+) -> CleanupExecution {
+    let mut execution = parse_cleanup_execution(&String::from_utf8_lossy(stdout));
+
+    let outcome = match finished {
+        Ok(outcome) => outcome,
+        // Waiting on the child failed, so how far Mole got is unknowable.
+        Err(source) => {
+            execution.completion = CleanupCompletion::Failed;
+            execution.warnings.push(format!(
+                "Mole ran, and its exit status could not be read: {source}"
+            ));
+            return execution;
+        }
+    };
     if outcome.cancelled {
         execution.completion = CleanupCompletion::Cancelled;
         execution
             .warnings
             .push("Cleanup was stopped part way through. Anything Mole had already removed stays removed.".to_string());
-        return Ok(execution);
+        return execution;
     }
     if !outcome.status.success() {
         execution.completion = CleanupCompletion::Failed;
@@ -406,16 +427,16 @@ fn execute_cleanup_from(
             outcome.status.code().unwrap_or(-1),
             first_line(&outcome.stderr)
         ));
-        return Ok(execution);
+        return execution;
     }
     if let Err(error) = read_result {
         execution.completion = CleanupCompletion::Failed;
         execution.warnings.push(format!(
             "Mole ran, and its output could not be read: {error}"
         ));
-        return Ok(execution);
+        return execution;
     }
-    Ok(execution)
+    execution
 }
 
 /// The first nonempty line of a backend's stderr, for a one-line warning.
@@ -861,6 +882,16 @@ mod tests {
         script
     }
 
+    /// A backend that blocks until it is killed.
+    ///
+    /// `exec` is load-bearing: without it the shell's `sleep` survives the
+    /// killed shell, holds the stdout pipe open, and the cancellation tests wait
+    /// the full minute for a process they already stopped.
+    #[cfg(unix)]
+    fn blocking_script() -> PathBuf {
+        executable_script("#!/bin/sh\nexec sleep 60\n")
+    }
+
     const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
     const APPLICATIONS: &str = include_str!("../../../fixtures/mole/1.48.1/applications.json");
     const CLEAN_PREVIEW: &str = include_str!("../../../fixtures/mole/1.48.1/clean-list.txt");
@@ -1226,7 +1257,7 @@ printf '%s\n' 'System-level cleanup enabled, sudo session active'
         use std::thread;
         use std::time::Duration;
 
-        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let script = blocking_script();
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();
         let worker_script = script.clone();
@@ -1244,6 +1275,54 @@ printf '%s\n' 'System-level cleanup enabled, sudo session active'
             .warnings
             .iter()
             .any(|warning| warning.contains("stays removed")));
+    }
+
+    /// Nothing that can go wrong after the spawn may be raised as an error.
+    ///
+    /// A failed wait and unreadable output both leave the removals unknowable,
+    /// and an `Err` would report them as a run that never happened.
+    #[test]
+    fn post_spawn_failures_are_outcomes_rather_than_errors() {
+        let stdout = b"System-level cleanup enabled, sudo session active\n";
+
+        let unwaitable = execution_of(stdout, Err(std::io::Error::other("waitpid failed")), Ok(()));
+        assert_eq!(unwaitable.completion, CleanupCompletion::Failed);
+        assert_eq!(unwaitable.system_scope, CleanupSystemScope::Included);
+        assert!(unwaitable
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("exit status could not be read")));
+
+        let unreadable = execution_of(
+            b"",
+            Ok(nirmoka_adapter::process::Outcome {
+                status: successful_status(),
+                stderr: String::new(),
+                cancelled: false,
+            }),
+            Err(AdapterError::OperationFailed {
+                backend: "mole",
+                operation: "cleanup execution",
+                reason: "backend stdout was unavailable".to_string(),
+            }),
+        );
+        assert_eq!(unreadable.completion, CleanupCompletion::Failed);
+        assert!(unreadable
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("output could not be read")));
+    }
+
+    #[cfg(unix)]
+    fn successful_status() -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0)
+    }
+
+    #[cfg(windows)]
+    fn successful_status() -> std::process::ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0)
     }
 
     /// Same reasoning for a backend that dies part way through.
@@ -1276,7 +1355,7 @@ exit 3
         use std::thread;
         use std::time::Duration;
 
-        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let script = blocking_script();
         let preview_path = script.with_extension("preview");
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();
@@ -1299,7 +1378,7 @@ exit 3
         use std::thread;
         use std::time::Duration;
 
-        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let script = blocking_script();
 
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();
