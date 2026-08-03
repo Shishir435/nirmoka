@@ -188,6 +188,11 @@ impl Adapter for MoleAdapter {
         )
     }
 
+    fn execute_cleanup(&self, cancel: &CancelToken) -> Result<(), AdapterError> {
+        let binary = supported_binary(self.detect()?)?;
+        execute_cleanup_from(&binary, cancel)
+    }
+
     /// Always [`AdapterError::Unsupported`].
     ///
     /// Not a stub and not a TODO. Faking a scan here would mean either a tree
@@ -322,6 +327,59 @@ fn cleanup_preview_from(
             reason: format!("backend preview could not be read: {source}"),
         })?;
     parse_cleanup_preview(&contents, scope)
+}
+
+/// Run Mole's normal cleanup command without forwarding paths or categories
+/// from the preview. Mole 1.48.1 removed category-selection flags and performs
+/// a new discovery here, so the reviewed preview and execution result may
+/// differ by design.
+fn execute_cleanup_from(binary: &Path, cancel: &CancelToken) -> Result<(), AdapterError> {
+    use std::io::Read;
+
+    let operation = "cleanup execution";
+    let mut command = Command::new(binary);
+    command.arg("clean");
+
+    let mut process =
+        RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+    let mut stdout = Vec::new();
+    let read_result = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|mut reader| {
+            reader
+                .read_to_end(&mut stdout)
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })
+        });
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    if outcome.cancelled {
+        return Err(AdapterError::Cancelled {
+            backend: "mole",
+            operation,
+        });
+    }
+    if !outcome.status.success() {
+        return Err(AdapterError::BackendFailed {
+            binary: BINARY,
+            status: outcome.status.code().unwrap_or(-1),
+            stderr: outcome.stderr,
+        });
+    }
+    read_result.map(|_| ())
 }
 
 fn parse_cleanup_preview(
@@ -970,6 +1028,27 @@ printf '%s' 'System caches need sudo'
 
         assert_eq!(preview.system_scope, CleanupSystemScope::UserOnly);
         assert_eq!(preview.total_items, 6);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cleanup_execution_asks_mole_to_rediscover_without_preview_paths() {
+        let script = executable_script(
+            r#"#!/bin/sh
+[ "$1" = "clean" ] && [ "$#" = "1" ] || exit 12
+printf '%s' 'fresh backend discovery' > "$0.executed"
+"#,
+        );
+        let marker = PathBuf::from(format!("{}.executed", script.display()));
+
+        execute_cleanup_from(&script, &CancelToken::new()).expect("cleanup execution");
+
+        assert_eq!(
+            std::fs::read_to_string(&marker).expect("backend ran"),
+            "fresh backend discovery"
+        );
+        let _ = std::fs::remove_file(script);
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]
