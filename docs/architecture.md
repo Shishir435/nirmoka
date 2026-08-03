@@ -80,6 +80,12 @@ pub struct Capabilities {
 }
 ```
 
+Shell integrations — Reveal in Finder, Quick Look — are deliberately _not_ capability
+flags. They involve no disk tool, they work with no backend installed, and every
+adapter would implement them identically. They live in `crates/app` and report what
+the desktop offers as data. See
+[ADR 0022](adr/0022-shell-integrations-are-not-adapter-abilities.md).
+
 **4. Adapters own path validation. The UI never builds a delete command.**
 
 A path travels from the UI to the adapter as data and is validated at the adapter

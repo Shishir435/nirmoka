@@ -176,6 +176,15 @@ export type MemoryStatus = { used: number, total: number, available: number, use
 export type NodeKind = "directory" | "file" | "symlink" | "other";
 
 /**
+ * What the desktop this is running on can do with a selected path.
+ *
+ * Reveal and Quick Look are shell integrations rather than backend abilities,
+ * so they are not `Capabilities` flags — see ADR 0022. The label travels with
+ * the flag because every platform has its own word for the same action.
+ */
+export type PlatformFeatures = { revealLabel: string, quickLook: boolean, };
+
+/**
  * One rendered line. The frontend never receives anything else about the tree.
  */
 export type Row = { 

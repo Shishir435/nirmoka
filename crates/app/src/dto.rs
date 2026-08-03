@@ -105,6 +105,22 @@ pub struct Crumb {
     pub name: String,
 }
 
+/// What the desktop this is running on can do with a selected path.
+///
+/// Reveal and Quick Look are shell integrations rather than backend abilities,
+/// so they are not `Capabilities` flags — see ADR 0022. The label travels with
+/// the flag because every platform has its own word for the same action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct PlatformFeatures {
+    pub reveal_label: String,
+    pub quick_look: bool,
+}
+
 /// Capacity of the filesystem containing a path. This is deliberately separate
 /// from a scan summary: bytes reached by a scan are not disk capacity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

@@ -17,12 +17,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Crumb, Row, Sort, Transport } from "@nirmoka/transport";
 
-/**
- * Rows per request. Big enough that a scroll of one screen is usually already
- * loaded, small enough that a directory of a hundred thousand entries never
- * arrives in one message. The Rust side caps anything larger regardless.
- */
-export const CHUNK = 100;
+import { CHUNK, chunkOffsets } from "@/hooks/chunk-window";
+
+export { CHUNK };
 
 /** What the directory is, separate from what is in it. */
 export interface DirectoryHeader {
@@ -137,13 +134,9 @@ export function useDirectory(transport: Transport, request: Request | null): Dir
     (start: number, end: number) => {
       if (!request || state.status !== "ready") return;
 
-      const first = Math.floor(Math.max(0, start) / CHUNK);
-      const last = Math.floor(Math.min(end, state.header.total - 1) / CHUNK);
-
       const era = generation.current;
 
-      for (let chunk = first; chunk <= last; chunk += 1) {
-        const offset = chunk * CHUNK;
+      for (const offset of chunkOffsets(start, end, state.header.total)) {
         if (inFlight.current.has(offset) || rows.current[offset] !== undefined) continue;
 
         inFlight.current.add(offset);
