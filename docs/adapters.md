@@ -208,6 +208,9 @@ what the backend would delete.
 - Cleanup preview: the adapter reads Mole's safely published `clean-list.txt`, preserving its
   category names, paths, rounded size labels, grouped counts, summary, and system-scope warning.
   The UI offers no category selector because Mole 1.48.1 removed that command surface
+- Cleanup execution: `mo clean` receives no paths or categories from the preview. Mole performs
+  fresh discovery at execution time, so the preview is evidence for confirmation rather than an
+  immutable delete list; reviewed and executed candidates may differ
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
 - Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's

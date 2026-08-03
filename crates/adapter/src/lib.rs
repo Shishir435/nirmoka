@@ -94,6 +94,20 @@ pub trait Adapter: Send + Sync {
         })
     }
 
+    /// Run one backend-owned cleanup after the shell has consumed an explicit
+    /// confirmation token.
+    ///
+    /// A cleanup preview is evidence, not an execution plan. Backends such as
+    /// Mole do not accept previewed paths or categories as command arguments;
+    /// they perform fresh discovery when this method runs. Implementors must
+    /// never turn preview rows into delete arguments.
+    fn execute_cleanup(&self, _cancel: &CancelToken) -> Result<(), AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "cleanup execution",
+        })
+    }
+
     /// Walk `root`, streaming entries into `sink` as the backend produces them.
     ///
     /// # Requirements on implementors
