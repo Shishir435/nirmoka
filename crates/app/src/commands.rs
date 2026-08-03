@@ -185,6 +185,35 @@ pub fn confirm_cleanup_in(
     Ok(dto::CleanupOperation::from_operation(&operation))
 }
 
+/// The path a row names, resolved from the tree that produced it.
+///
+/// The window sends the pair that identifies a node and never a path of its own.
+/// A path assembled in the frontend is a path Rust cannot vouch for, and the one
+/// thing worse than revealing the wrong file is revealing it in a command line.
+pub fn node_path_of(
+    state: &AppState,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<std::path::PathBuf, String> {
+    let scan = state.scan();
+    let result = scan
+        .result
+        .as_ref()
+        .ok_or_else(|| "no scan has completed yet".to_string())?;
+    if result.id != scan_id {
+        return Err(format!(
+            "scan {scan_id} has been replaced by scan {}; select the item again",
+            result.id
+        ));
+    }
+
+    let node = result
+        .tree
+        .node_id(node_id)
+        .map_err(|error| error.to_string())?;
+    result.tree.path_of(node).map_err(|error| error.to_string())
+}
+
 pub fn cleanup_log_of(state: &AppState) -> Vec<dto::CleanupOperation> {
     state
         .deletion()
@@ -582,6 +611,35 @@ pub fn operation_log(state: State<'_, AppState>) -> Vec<dto::DeleteOperation> {
 #[tauri::command]
 pub fn volume_info(path: String) -> Result<dto::VolumeInfo, String> {
     crate::volume::info(std::path::Path::new(&path))
+}
+
+/// What this desktop can do with a selected path, and what to call it.
+#[tauri::command]
+pub fn platform_features() -> dto::PlatformFeatures {
+    crate::reveal::features()
+}
+
+#[tauri::command]
+pub fn reveal_in_file_manager(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<(), String> {
+    crate::reveal::reveal(&node_path_of(&state, scan_id, node_id)?)
+}
+
+/// Runs on a worker thread: `qlmanage -p` blocks for as long as the panel is
+/// open, and a blocked command would freeze the window behind it.
+#[tauri::command]
+pub async fn quick_look(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<(), String> {
+    let path = node_path_of(&state, scan_id, node_id)?;
+    tauri::async_runtime::spawn_blocking(move || crate::reveal::quick_look(&path))
+        .await
+        .map_err(|error| format!("Quick Look worker failed: {error}"))?
 }
 
 #[tauri::command]

@@ -28,6 +28,7 @@ import type {
   CleanupPreview,
   DeleteOperation,
   DeletePreparation,
+  PlatformFeatures,
   Row,
   RowPage,
   DeveloperInventory,
@@ -184,6 +185,25 @@ export interface Transport {
   cleanupLog(): Promise<CleanupOperation[]>;
 
   /**
+   * What this desktop can do with a selected path, and what to call it.
+   *
+   * Not a backend capability: revealing a file involves no disk tool. The label
+   * travels with the flag because every platform names the action differently.
+   */
+  platformFeatures(): Promise<PlatformFeatures>;
+
+  /**
+   * Open the platform's file manager with this row selected.
+   *
+   * Takes the scan-and-node pair, not a path: Rust resolves the path from the
+   * tree that issued the id, so the frontend never assembles one.
+   */
+  revealInFileManager(scanId: number, nodeId: number): Promise<void>;
+
+  /** Show this row in Quick Look. Rejects where the platform has none. */
+  quickLook(scanId: number, nodeId: number): Promise<void>;
+
+  /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
    *
@@ -242,6 +262,10 @@ export function tauriTransport(): Transport {
       invoke<CleanupOperation>("confirm_cleanup", { confirmationToken }),
     cancelCleanup: () => invoke<boolean>("cancel_cleanup"),
     cleanupLog: () => invoke<CleanupOperation[]>("cleanup_log"),
+    platformFeatures: () => invoke<PlatformFeatures>("platform_features"),
+    revealInFileManager: (scanId, nodeId) =>
+      invoke<void>("reveal_in_file_manager", { scanId, nodeId }),
+    quickLook: (scanId, nodeId) => invoke<void>("quick_look", { scanId, nodeId }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -751,6 +775,20 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
     async cleanupLog() {
       return [];
+    },
+
+    // Outside the shell there is no desktop to hand a path to, so the mock says
+    // what it can do rather than pretending the buttons work.
+    async platformFeatures() {
+      return { revealLabel: "Reveal in Finder", quickLook: false };
+    },
+
+    async revealInFileManager() {
+      throw new Error("mock transport cannot reach a file manager");
+    },
+
+    async quickLook() {
+      throw new Error("mock transport cannot open Quick Look");
     },
 
     async onScanProgress() {

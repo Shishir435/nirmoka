@@ -13,12 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
+import { uninstallOffer } from "@/lib/engine/backend-gating";
 import { formatBytes, formatCount } from "@/lib/format";
 
 export function ApplicationsPage() {
   const { transport, scan, backends } = useApp();
-  const mole = backends?.find((backend) => backend.id === "mole");
-  const uninstallCapable = mole?.usable === true && mole.capabilities.uninstallApps;
+  const offer = uninstallOffer(backends);
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
   const [installed, setInstalled] = useState<InstalledApplicationInventory | null>(null);
@@ -182,7 +182,7 @@ export function ApplicationsPage() {
             </p>
           )}
 
-          {installed && !uninstallCapable && (
+          {installed && offer === "terminal" && (
             <SafetyBanner>
               <p className="text-sm font-medium">Uninstall runs in Terminal, not here</p>
               <p className="text-xs text-muted-foreground">

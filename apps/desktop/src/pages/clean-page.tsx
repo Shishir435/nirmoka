@@ -7,9 +7,9 @@ import {
   ShieldAlert,
   Square,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
-import type { CleanupOperation, CleanupPreparation, CleanupPreview } from "@nirmoka/transport";
+import type { CleanupOperation, CleanupPreview } from "@nirmoka/transport";
 
 import {
   EmptyState,
@@ -29,25 +29,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
+import { cleanupAvailability } from "@/lib/engine/backend-gating";
+import {
+  canReview,
+  INITIAL_CLEANUP,
+  outcomeLabel,
+  outcomeTone,
+  reduceCleanup,
+} from "@/lib/engine/cleanup-flow";
 
 const PAGE_SIZE = 50;
 
 export function CleanPage() {
   const { backends, transport } = useApp();
-  const mole = backends?.find((backend) => backend.id === "mole");
-  const installed = mole?.usable ?? false;
-  const previewCapable =
-    installed && mole?.capabilities.cleanupCategories && mole.capabilities.dryRun;
-  const [preview, setPreview] = useState<CleanupPreview | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const cleanup = cleanupAvailability(backends);
+  const previewCapable = cleanup.available;
+  // Every transition lives in `cleanup-flow`, where the endings that matter —
+  // stopped, failed, partial — are covered by tests instead of by clicking.
+  const [flow, dispatch] = useReducer(reduceCleanup, INITIAL_CLEANUP);
+  const { preview, preparation, running, result } = flow;
   const [page, setPage] = useState(0);
-  const [preparation, setPreparation] = useState<CleanupPreparation | null>(null);
-  const [running, setRunning] = useState(false);
-  const [stoppingRun, setStoppingRun] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [result, setResult] = useState<CleanupOperation | null>(null);
   const [history, setHistory] = useState<CleanupOperation[]>([]);
 
   const rows = useMemo(
@@ -67,53 +68,39 @@ export function CleanPage() {
   useEffect(loadHistory, [loadHistory]);
 
   const loadPreview = () => {
-    setLoading(true);
-    setStopping(false);
-    setError(null);
+    dispatch({ type: "previewStarted" });
     setPage(0);
-    transport
-      .cleanupPreview()
-      .then(setPreview, (reason: unknown) => setError(String(reason)))
-      .finally(() => {
-        setLoading(false);
-        setStopping(false);
-      });
+    transport.cleanupPreview().then(
+      (value) => dispatch({ type: "previewArrived", preview: value }),
+      (reason: unknown) => dispatch({ type: "previewFailed", message: String(reason) }),
+    );
   };
 
   const cancelPreview = () => {
-    setStopping(true);
+    dispatch({ type: "previewStopRequested" });
     void transport.cancelCleanupPreview();
   };
 
   const review = () => {
-    setRunError(null);
-    setResult(null);
-    transport
-      .prepareCleanup()
-      .then(setPreparation, (reason: unknown) => setRunError(String(reason)));
+    transport.prepareCleanup().then(
+      (value) => dispatch({ type: "reviewed", preparation: value }),
+      (reason: unknown) => dispatch({ type: "reviewFailed", message: String(reason) }),
+    );
   };
 
   const run = (confirmationToken: number) => {
-    setPreparation(null);
-    setRunning(true);
-    setStoppingRun(false);
-    setRunError(null);
+    dispatch({ type: "runStarted" });
     transport
       .confirmCleanup(confirmationToken)
-      .then(setResult, (reason: unknown) => setRunError(String(reason)))
-      .finally(() => {
-        setRunning(false);
-        setStoppingRun(false);
-        // Mole re-discovered candidates as it ran, so every row of the reviewed
-        // preview is now a statement about the past. Rust has already dropped
-        // it; the window must not keep offering it.
-        setPreview(null);
-        loadHistory();
-      });
+      .then(
+        (operation) => dispatch({ type: "runFinished", operation }),
+        (reason: unknown) => dispatch({ type: "runFailed", message: String(reason) }),
+      )
+      .finally(loadHistory);
   };
 
   const stopRun = () => {
-    setStoppingRun(true);
+    dispatch({ type: "stopRequested" });
     void transport.cancelCleanup();
   };
 
@@ -124,13 +111,13 @@ export function CleanPage() {
         subtitle="Review Mole’s current cleanup candidates"
         action={
           <Button
-            onClick={loading ? cancelPreview : loadPreview}
-            disabled={!previewCapable || stopping || running}
+            onClick={flow.previewing ? cancelPreview : loadPreview}
+            disabled={!previewCapable || flow.stoppingPreview || running}
           >
-            {loading ? <Square /> : <RefreshCw />}
-            {stopping
+            {flow.previewing ? <Square /> : <RefreshCw />}
+            {flow.stoppingPreview
               ? "Stopping preview"
-              : loading
+              : flow.previewing
                 ? "Cancel preview"
                 : preview
                   ? "Refresh preview"
@@ -155,35 +142,33 @@ export function CleanPage() {
               <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
                 {previewCapable
                   ? "Mole will inspect this Mac and publish the paths it currently considers eligible. Generating a preview removes nothing."
-                  : installed
-                    ? "This Mole version does not expose the capabilities required for a cleanup preview."
-                    : "Install a supported Mole release to use its curated cleanup rules. ncdu scans disks; it does not decide what is safe to clean."}
+                  : cleanup.reason}
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {runError && <EmptyState title="Cleanup did not complete" text={runError} />}
+      {flow.runError && <EmptyState title="Cleanup did not run" text={flow.runError} />}
 
       {result && <CleanupResult operation={result} />}
 
-      {error ? (
-        <EmptyState title="Preview failed" text={error} />
+      {flow.previewError ? (
+        <EmptyState title="Preview failed" text={flow.previewError} />
       ) : running ? (
         <EmptyState
           title="Mole is cleaning this Mac"
           text={
-            stoppingRun
+            flow.stopping
               ? "Stopping Mole. Anything it already removed stays removed."
               : "Mole is re-discovering candidates and removing what it finds. This can take several minutes."
           }
         />
       ) : !preview ? (
         <EmptyState
-          title={loading ? "Mole is inspecting this Mac" : "No cleanup preview yet"}
+          title={flow.previewing ? "Mole is inspecting this Mac" : "No cleanup preview yet"}
           text={
-            loading
+            flow.previewing
               ? "This can take a few minutes. No files are being removed."
               : "Generate a fresh preview to see backend-produced categories, paths, sizes, and scope."
           }
@@ -293,18 +278,21 @@ export function CleanPage() {
       )}
 
       {running ? (
-        <Button variant="outline" onClick={stopRun} disabled={stoppingRun}>
+        <Button variant="outline" onClick={stopRun} disabled={flow.stopping}>
           <Square />
-          {stoppingRun ? "Stopping Mole" : "Stop cleanup"}
+          {flow.stopping ? "Stopping Mole" : "Stop cleanup"}
         </Button>
       ) : (
-        <Button onClick={review} disabled={!preview || preview.totalItems === 0 || loading}>
+        <Button onClick={review} disabled={!canReview(flow)}>
           <Play />
           Review and run cleanup
         </Button>
       )}
 
-      <Dialog open={preparation !== null} onOpenChange={(open) => !open && setPreparation(null)}>
+      <Dialog
+        open={preparation !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "reviewDismissed" })}
+      >
         <DialogContent>
           {preparation && (
             <>
@@ -341,7 +329,7 @@ export function CleanPage() {
                 </p>
               ))}
               <div className="mt-6 flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setPreparation(null)}>
+                <Button variant="outline" onClick={() => dispatch({ type: "reviewDismissed" })}>
                   Keep reviewing
                 </Button>
                 <Button onClick={() => run(preparation.confirmationToken)}>
@@ -386,8 +374,8 @@ export function CleanPage() {
                         : ""}
                     </p>
                   </div>
-                  <StatusBadge tone={completionTone(operation.completion)}>
-                    {completionLabel(operation.completion)}
+                  <StatusBadge tone={outcomeTone(operation.completion)}>
+                    {outcomeLabel(operation.completion)}
                   </StatusBadge>
                 </div>
               ))}
@@ -414,8 +402,8 @@ function CleanupResult({ operation }: { operation: CleanupOperation }) {
       <CardContent className="space-y-3 p-5">
         <div className="flex items-center gap-2">
           <h2 className="font-medium">Cleanup result</h2>
-          <StatusBadge tone={completionTone(operation.completion)}>
-            {completionLabel(operation.completion)}
+          <StatusBadge tone={outcomeTone(operation.completion)}>
+            {outcomeLabel(operation.completion)}
           </StatusBadge>
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">
@@ -455,25 +443,6 @@ function ConfirmationFact({ label, value }: { label: string; value: string }) {
       <dd className="text-right font-medium">{value}</dd>
     </div>
   );
-}
-
-function completionLabel(completion: CleanupOperation["completion"]) {
-  switch (completion) {
-    case "finished":
-      return "Finished";
-    case "partial":
-      return "Partial";
-    case "cancelled":
-      return "Stopped";
-    case "failed":
-      return "Failed";
-  }
-}
-
-/// Only a clean finish is good news. Everything else means Mole removed an
-/// unknown amount before it stopped.
-function completionTone(completion: CleanupOperation["completion"]) {
-  return completion === "finished" ? "success" : "warning";
 }
 
 function scopeLabel(scope: CleanupPreview["systemScope"]) {

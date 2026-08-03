@@ -283,13 +283,26 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
 - [x] A test over the recorded command surface fails if a Mole release documents a way past the
       prompt, so the decision is re-checked on upgrade rather than remembered
 
-### Phase 5 — consumer navigation and accessibility
+### Phase 5 — consumer navigation and accessibility ✅
 
-- [ ] Add selected-row keyboard navigation: arrows, Page Up/Down, Home/End
-- [ ] Add Enter/Right to open, Left/Backspace to go up, and back/forward history
-- [ ] Add Quick Look, Reveal in Finder, visible focus, and VoiceOver labels
-- [ ] Add frontend smoke tests for missing backends, scan/cancel/rescan, large directories,
-      cleanup review, confirmation, failure, and uninstall
+- [x] Add selected-row keyboard navigation: arrows, Page Up/Down, Home/End. Which key means what
+      is a pure function in `row-keyboard.ts`, so the awkward cases — nothing selected yet, an
+      empty directory, a page jump past the end — are tested rather than tried
+- [x] Add Enter/Right to open, Left/Backspace to go up, and back/forward history. History is an
+      array and a cursor in `space-navigation.ts`; opening a directory discards the forward branch,
+      and a rescan starts a fresh history because node ids are per-scan arena indices
+- [x] Add Quick Look, Reveal in Finder, visible focus, and VoiceOver labels. The list is a
+      `listbox` driven by `aria-activedescendant` rather than by focusing rows, which is what
+      survives the virtualizer unmounting a focused row as it scrolls away. Reveal and Quick Look
+      are shell integrations reported by `platform_features`, not `Capabilities` flags, and they
+      take a scan-and-node pair so Rust resolves the path — see
+      [ADR 0022](adr/0022-shell-integrations-are-not-adapter-abilities.md)
+- [x] Add frontend smoke tests for missing backends, scan/cancel/rescan, large directories,
+      cleanup review, confirmation, failure, and uninstall. No DOM harness was added: the decisions
+      worth testing were extracted into pure modules — `scan-machine`, `cleanup-flow`,
+      `backend-gating`, `chunk-window`, `row-keyboard`, `space-navigation` — which the existing
+      `node --test` runner drives directly. 41 tests, and the pages now read their gating from the
+      same functions the tests assert on
 
 ### Phase 6 — release
 

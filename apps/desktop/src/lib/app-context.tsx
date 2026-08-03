@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useState,
   type ReactNode,
 } from "react";
@@ -13,18 +14,13 @@ import {
   resolveTransport,
   type Backend,
   type BackendSelection,
-  type ScanProgress,
-  type ScanSummary,
   type Transport,
   type Unsubscribe,
 } from "@nirmoka/transport";
 
-export type ScanState =
-  | { status: "idle" }
-  | { status: "scanning"; root: string; progress: ScanProgress }
-  | { status: "done"; summary: ScanSummary }
-  | { status: "cancelled" }
-  | { status: "failed"; message: string };
+import { INITIAL_SCAN, reduceScan, type ScanState } from "@/lib/engine/scan-machine";
+
+export type { ScanState };
 
 interface AppContextValue {
   transport: Transport;
@@ -48,7 +44,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selection, setSelection] = useState<BackendSelection | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [listenersReady, setListenersReady] = useState(false);
-  const [scan, setScan] = useState<ScanState>({ status: "idle" });
+  // The transitions live in `scan-machine`, where the ones that are easy to get
+  // wrong — late progress, cancellation, a rescan — are covered by tests.
+  const [scan, dispatchScan] = useReducer(reduceScan, INITIAL_SCAN);
 
   const refreshBackends = useCallback(async () => {
     setBackendError(null);
@@ -60,7 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
       setBackends(detected);
       setSelection(resolved);
-      if (summary) setScan({ status: "done", summary });
+      if (summary) dispatchScan({ type: "restored", summary });
     } catch (error) {
       setBackends([]);
       setBackendError(String(error));
@@ -79,23 +77,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     Promise.all([
-      keep(
-        transport.onScanProgress((progress) =>
-          setScan((current) =>
-            current.status === "scanning" ? { ...current, progress } : current,
-          ),
-        ),
-      ),
-      keep(transport.onScanFinished((summary) => setScan({ status: "done", summary }))),
-      keep(
-        transport.onScanFailed((failure) =>
-          setScan(
-            failure.cancelled
-              ? { status: "cancelled" }
-              : { status: "failed", message: failure.message },
-          ),
-        ),
-      ),
+      keep(transport.onScanProgress((progress) => dispatchScan({ type: "progress", progress }))),
+      keep(transport.onScanFinished((summary) => dispatchScan({ type: "finished", summary }))),
+      keep(transport.onScanFailed((failure) => dispatchScan({ type: "failed", failure }))),
     ]).then(
       () => live && setListenersReady(true),
       (error: unknown) => {
@@ -115,20 +99,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const startScan = useCallback(
     async (path = "~") => {
       const requested = path.trim() || "~";
-      setScan({
-        status: "scanning",
-        root: requested,
-        progress: { scanned: 0, currentPath: requested },
-      });
+      dispatchScan({ type: "requested", root: requested });
       try {
-        const root = await transport.startScan(requested);
-        setScan((current) =>
-          current.status === "scanning"
-            ? { ...current, root, progress: { ...current.progress, currentPath: root } }
-            : current,
-        );
+        dispatchScan({ type: "rooted", root: await transport.startScan(requested) });
       } catch (error) {
-        setScan({ status: "failed", message: String(error) });
+        dispatchScan({ type: "failed", failure: { message: String(error), cancelled: false } });
       }
     },
     [transport],

@@ -16,6 +16,7 @@ pub mod deletion;
 pub mod dto;
 pub mod inventory;
 pub mod path;
+pub mod reveal;
 pub mod scan;
 pub mod settings;
 pub mod state;
@@ -42,6 +43,9 @@ pub fn run() {
             commands::undo_delete,
             commands::operation_log,
             commands::volume_info,
+            commands::platform_features,
+            commands::reveal_in_file_manager,
+            commands::quick_look,
             commands::application_inventory,
             commands::installed_application_inventory,
             commands::developer_inventory,

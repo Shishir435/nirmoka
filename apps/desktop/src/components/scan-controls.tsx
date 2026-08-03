@@ -3,12 +3,13 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/lib/app-context";
+import { canStartScan } from "@/lib/engine/scan-machine";
 import { formatCount, plural } from "@/lib/format";
 
 export function ScanControls({ compact = false }: { compact?: boolean }) {
   const { selection, listenersReady, scan, startScan, cancelScan, backendError } = useApp();
   const [path, setPath] = useState("~");
-  const canScan = selection?.scanner != null && listenersReady;
+  const canScan = canStartScan({ scanner: selection?.scanner, listenersReady, state: scan });
 
   return (
     <div className={compact ? "space-y-2" : "space-y-3 rounded-xl border bg-card p-4"}>
@@ -18,7 +19,7 @@ export function ScanControls({ compact = false }: { compact?: boolean }) {
           value={path}
           onChange={(event) => setPath(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && canScan && scan.status !== "scanning") {
+            if (event.key === "Enter" && canScan) {
               void startScan(path);
             }
           }}
