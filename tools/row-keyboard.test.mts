@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PAGE, rowIntent, rowLabel } from "../apps/desktop/src/components/row-keyboard.ts";
+import {
+  activeDescendantId,
+  PAGE,
+  rowElementId,
+  rowIntent,
+  rowLabel,
+} from "../apps/desktop/src/components/row-keyboard.ts";
 
 const list = (selected: number | null, total = 1000) => ({ selected, total });
 
@@ -63,6 +69,21 @@ test("unhandled keys are reported as unhandled", () => {
   for (const key of ["a", "Tab", "Escape", "F5", "/"]) {
     assert.equal(rowIntent(key, list(2)), null, key);
   }
+});
+
+/**
+ * A virtualized list renders a window, so the id must name a row that is
+ * actually there. A dangling reference leaves a screen reader with no active
+ * option at all — worse than briefly having none while the list scrolls.
+ */
+test("the active descendant only names a row that is rendered", () => {
+  const rendered = [10, 11, 12, 13];
+
+  assert.equal(activeDescendantId(12, rendered), rowElementId(12));
+  assert.equal(activeDescendantId(12, rendered), "directory-row-12");
+  assert.equal(activeDescendantId(900, rendered), undefined, "scrolled far away");
+  assert.equal(activeDescendantId(null, rendered), undefined);
+  assert.equal(activeDescendantId(0, []), undefined, "nothing rendered yet");
 });
 
 test("a row label says what makes its number unreliable", () => {

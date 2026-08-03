@@ -22,8 +22,10 @@ export interface CleanupState {
   /** A live confirmation, which the dialog is open for. */
   preparation: CleanupPreparation | null;
   previewing: boolean;
+  /** The user asked to stop the discovery; Mole is being killed. */
+  stoppingPreview: boolean;
   running: boolean;
-  /** The user asked to stop; Mole is being killed. */
+  /** The user asked to stop the run; Mole is being killed. */
   stopping: boolean;
   /** The result of the last run, whatever kind of ending it had. */
   result: CleanupOperation | null;
@@ -33,6 +35,7 @@ export interface CleanupState {
 
 export type CleanupEvent =
   | { type: "previewStarted" }
+  | { type: "previewStopRequested" }
   | { type: "previewArrived"; preview: CleanupPreview }
   | { type: "previewFailed"; message: string }
   | { type: "reviewed"; preparation: CleanupPreparation }
@@ -47,6 +50,7 @@ export const INITIAL_CLEANUP: CleanupState = {
   preview: null,
   preparation: null,
   previewing: false,
+  stoppingPreview: false,
   running: false,
   stopping: false,
   result: null,
@@ -57,13 +61,36 @@ export const INITIAL_CLEANUP: CleanupState = {
 export function reduceCleanup(state: CleanupState, event: CleanupEvent): CleanupState {
   switch (event.type) {
     case "previewStarted":
-      return { ...state, previewing: true, previewError: null, runError: null };
+      return {
+        ...state,
+        previewing: true,
+        stoppingPreview: false,
+        previewError: null,
+        runError: null,
+      };
 
+    case "previewStopRequested":
+      return state.previewing ? { ...state, stoppingPreview: true } : state;
+
+    // Both endings clear `stoppingPreview`. A cancelled discovery comes back
+    // through `previewFailed`, and leaving the flag set there would disable the
+    // only button that can start another one.
     case "previewArrived":
-      return { ...state, previewing: false, preview: event.preview, previewError: null };
+      return {
+        ...state,
+        previewing: false,
+        stoppingPreview: false,
+        preview: event.preview,
+        previewError: null,
+      };
 
     case "previewFailed":
-      return { ...state, previewing: false, previewError: event.message };
+      return {
+        ...state,
+        previewing: false,
+        stoppingPreview: false,
+        previewError: event.message,
+      };
 
     case "reviewed":
       return { ...state, preparation: event.preparation, result: null, runError: null };

@@ -67,11 +67,8 @@ export function CleanPage() {
 
   useEffect(loadHistory, [loadHistory]);
 
-  const [stoppingPreview, setStoppingPreview] = useState(false);
-
   const loadPreview = () => {
     dispatch({ type: "previewStarted" });
-    setStoppingPreview(false);
     setPage(0);
     transport.cleanupPreview().then(
       (value) => dispatch({ type: "previewArrived", preview: value }),
@@ -80,7 +77,7 @@ export function CleanPage() {
   };
 
   const cancelPreview = () => {
-    setStoppingPreview(true);
+    dispatch({ type: "previewStopRequested" });
     void transport.cancelCleanupPreview();
   };
 
@@ -115,10 +112,10 @@ export function CleanPage() {
         action={
           <Button
             onClick={flow.previewing ? cancelPreview : loadPreview}
-            disabled={!previewCapable || stoppingPreview || running}
+            disabled={!previewCapable || flow.stoppingPreview || running}
           >
             {flow.previewing ? <Square /> : <RefreshCw />}
-            {stoppingPreview
+            {flow.stoppingPreview
               ? "Stopping preview"
               : flow.previewing
                 ? "Cancel preview"

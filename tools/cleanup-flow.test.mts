@@ -157,6 +157,39 @@ test("dismissing the dialog keeps the review for another try", () => {
   assert.equal(canReview(dismissed), true);
 });
 
+/**
+ * Cancelling a discovery comes back as a rejected request, so the ending that
+ * clears "Stopping preview" is the failure path. Leaving the flag set disables
+ * the only button that can start another one.
+ */
+test("stopping a preview never outlives the preview", () => {
+  const cancelled = run([
+    { type: "previewStarted" },
+    { type: "previewStopRequested" },
+    { type: "previewFailed", message: "cancelled" },
+  ]);
+
+  assert.equal(cancelled.stoppingPreview, false);
+  assert.equal(cancelled.previewing, false);
+
+  const arrived = run([
+    { type: "previewStarted" },
+    { type: "previewStopRequested" },
+    { type: "previewArrived", preview: preview(6) },
+  ]);
+  assert.equal(arrived.stoppingPreview, false, "a discovery that beat the kill still lands");
+  assert.equal(canReview(arrived), true);
+
+  const idle = run([{ type: "previewStopRequested" }]);
+  assert.equal(idle.stoppingPreview, false, "nothing to stop");
+
+  const restarted = run([{ type: "previewStarted" }], {
+    ...INITIAL_CLEANUP,
+    stoppingPreview: true,
+  });
+  assert.equal(restarted.stoppingPreview, false);
+});
+
 test("a failed preview says so without claiming a run happened", () => {
   const failed = run([
     { type: "previewStarted" },

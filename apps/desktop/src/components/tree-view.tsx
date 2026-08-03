@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Row, ScanSummary, Sort, Transport } from "@nirmoka/transport";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { rowIntent, rowLabel } from "@/components/row-keyboard";
+import { activeDescendantId, rowElementId, rowIntent, rowLabel } from "@/components/row-keyboard";
 import { Button } from "@/components/ui/button";
 import { useDirectory, type DirectoryHeader } from "@/hooks/use-directory";
 import { formatBytes, formatCount, plural } from "@/lib/format";
@@ -39,9 +39,6 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: "nameAscending", label: "Name A–Z" },
   { value: "nameDescending", label: "Name Z–A" },
 ];
-
-/** Stable id for a row, so `aria-activedescendant` can name one. */
-const rowElementId = (index: number) => `directory-row-${index}`;
 
 function Bar({ share }: { share: number }) {
   return (
@@ -112,10 +109,25 @@ function SortControls({ sort, onSort }: { sort: Sort; onSort: (sort: Sort) => vo
  * A row whose chunk has not arrived yet.
  *
  * It occupies the height it will occupy, so the scrollbar does not jump when
- * the real row lands.
+ * the real row lands — and it is a real option with a real name, because the
+ * selection can land on it. A placeholder rendered as an anonymous `div` would
+ * leave `aria-activedescendant` pointing at something with no role and no
+ * accessible name for as long as the chunk takes to arrive.
  */
-function Placeholder() {
-  return <div className="bg-muted/40 mx-4 my-3 h-3 animate-pulse rounded" />;
+function Placeholder({ index, selected }: { index: number; selected: boolean }) {
+  return (
+    <div
+      id={rowElementId(index)}
+      role="option"
+      aria-selected={selected}
+      aria-busy
+      aria-label={`Loading entry ${index + 1}`}
+      tabIndex={-1}
+      className={`flex h-9 w-full items-center px-4 ${selected ? "bg-accent" : ""}`}
+    >
+      <span className="bg-muted/40 h-3 w-full animate-pulse rounded" />
+    </div>
+  );
 }
 
 export function TreeView({
@@ -159,6 +171,7 @@ export function TreeView({
   });
 
   const items = virtualizer.getVirtualItems();
+  const renderedIndexes = items.map((item) => item.index);
   const ensure = directory.status === "ready" ? directory.ensure : null;
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? 0;
@@ -340,7 +353,7 @@ export function TreeView({
           className="h-104 overflow-auto rounded-lg border focus-visible:ring-3 focus-visible:ring-ring/20 focus-visible:outline-none"
           role="listbox"
           aria-label="Directory entries"
-          aria-activedescendant={selected === null ? undefined : rowElementId(selected)}
+          aria-activedescendant={activeDescendantId(selected, renderedIndexes)}
           // The list takes focus itself rather than each row: a focused row is
           // unmounted the moment it scrolls out of the virtualizer's window.
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a listbox is focusable by design
@@ -369,7 +382,7 @@ export function TreeView({
                       onOpen={() => onNavigate(row.id)}
                     />
                   ) : (
-                    <Placeholder />
+                    <Placeholder index={item.index} selected={item.index === selected} />
                   )}
                 </div>
               );

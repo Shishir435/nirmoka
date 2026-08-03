@@ -11,6 +11,26 @@
 /** Rows moved by Page Up and Page Down. One screen of the list. */
 export const PAGE = 12;
 
+/** Stable element id for a row, so `aria-activedescendant` can name one. */
+export const rowElementId = (index: number) => `directory-row-${index}`;
+
+/**
+ * The id `aria-activedescendant` may point at.
+ *
+ * It must name an element that is actually in the DOM. A virtualized list only
+ * renders a window, so a selection outside it — for the frame between a jump
+ * and the scroll that follows — has no element to name, and pointing at a
+ * missing id leaves a screen reader with no active option at all. `undefined`
+ * for that frame is recoverable; a dangling reference is not.
+ */
+export function activeDescendantId(
+  selected: number | null,
+  rendered: readonly number[],
+): string | undefined {
+  if (selected === null) return undefined;
+  return rendered.includes(selected) ? rowElementId(selected) : undefined;
+}
+
 export type RowIntent =
   /** Move the selection to `index`. */
   | { kind: "select"; index: number }
