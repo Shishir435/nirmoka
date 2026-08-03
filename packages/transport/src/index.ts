@@ -23,6 +23,7 @@ import type {
   BackendSelection,
   ApplicationInventory,
   Capabilities,
+  CleanupOperation,
   CleanupPreparation,
   CleanupPreview,
   DeleteOperation,
@@ -168,6 +169,21 @@ export interface Transport {
   prepareCleanup(): Promise<CleanupPreparation>;
 
   /**
+   * Spend one confirmation token and run the backend's own cleanup.
+   *
+   * The token carries no paths. Mole re-discovers candidates itself, so what
+   * comes back describes the run — scope, completion, backend warnings — rather
+   * than the reviewed rows.
+   */
+  confirmCleanup(confirmationToken: number): Promise<CleanupOperation>;
+
+  /** Cancel the active cleanup run. What it already removed stays removed. */
+  cancelCleanup(): Promise<boolean>;
+
+  /** Durable cleanup journal, newest first, reloaded across launches. */
+  cleanupLog(): Promise<CleanupOperation[]>;
+
+  /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
    *
@@ -222,6 +238,10 @@ export function tauriTransport(): Transport {
     cleanupPreview: () => invoke<CleanupPreview>("cleanup_preview"),
     cancelCleanupPreview: () => invoke<boolean>("cancel_cleanup_preview"),
     prepareCleanup: () => invoke<CleanupPreparation>("prepare_cleanup"),
+    confirmCleanup: (confirmationToken) =>
+      invoke<CleanupOperation>("confirm_cleanup", { confirmationToken }),
+    cancelCleanup: () => invoke<boolean>("cancel_cleanup"),
+    cleanupLog: () => invoke<CleanupOperation[]>("cleanup_log"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -670,6 +690,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return {
         backend: "mole",
         backendInsteadOf: null,
+        backendVersion: "1.48.1",
         generatedAt: "2026-08-01 12:30:00",
         potentialCleanup: "At least 192.00MB",
         totalItems: 6,
@@ -713,6 +734,18 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
 
     async prepareCleanup() {
       throw new Error("mock transport never prepares destructive cleanup operations");
+    },
+
+    async confirmCleanup() {
+      throw new Error("mock transport never runs destructive cleanup operations");
+    },
+
+    async cancelCleanup() {
+      return false;
+    },
+
+    async cleanupLog() {
+      return [];
     },
 
     async onScanProgress() {

@@ -18,9 +18,10 @@
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
 use nirmoka_adapter::{
-    Capabilities as AdapterCapabilities, CleanupPreview as AdapterCleanupPreview,
-    CleanupSystemScope as AdapterCleanupSystemScope, Detection as AdapterDetection,
-    InstalledApplication as AdapterInstalledApplication, SystemStatus as AdapterSystemStatus,
+    Capabilities as AdapterCapabilities, CleanupCompletion as AdapterCleanupCompletion,
+    CleanupPreview as AdapterCleanupPreview, CleanupSystemScope as AdapterCleanupSystemScope,
+    Detection as AdapterDetection, InstalledApplication as AdapterInstalledApplication,
+    SystemStatus as AdapterSystemStatus,
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
@@ -156,6 +157,7 @@ pub struct SystemStatus {
 pub struct CleanupPreview {
     pub backend: String,
     pub backend_instead_of: Option<String>,
+    pub backend_version: String,
     pub generated_at: String,
     pub categories: Vec<CleanupCategory>,
     pub potential_cleanup: Option<String>,
@@ -177,6 +179,7 @@ pub struct CleanupPreparation {
     pub confirmation_token: u64,
     pub backend: String,
     pub backend_instead_of: Option<String>,
+    pub backend_version: String,
     pub preview_generated_at: String,
     pub potential_cleanup: Option<String>,
     #[ts(type = "number")]
@@ -225,6 +228,71 @@ pub enum CleanupSystemScope {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum CleanupCompletion {
+    Finished,
+    Partial,
+    Cancelled,
+    Failed,
+}
+
+/// One durable cleanup journal entry.
+///
+/// The reviewed numbers are labelled as reviewed rather than as removed: Mole
+/// re-discovers candidates when it runs, so the preview is what the user
+/// approved, not what happened. What happened is the scope, the completion, and
+/// the backend's own warnings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupOperation {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub preview_generated_at: String,
+    #[ts(type = "number")]
+    pub reviewed_items: u64,
+    pub reviewed_potential_cleanup: Option<String>,
+    pub system_scope: CleanupSystemScope,
+    pub completion: CleanupCompletion,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub executed_at_ms: u64,
+    pub log_error: Option<String>,
+}
+
+impl CleanupOperation {
+    pub fn from_operation(operation: &crate::deletion::CleanupOperation) -> Self {
+        Self {
+            id: operation.id,
+            backend: operation.backend.clone(),
+            backend_version: operation.backend_version.clone(),
+            preview_generated_at: operation.preview_generated_at.clone(),
+            reviewed_items: operation.reviewed_items,
+            reviewed_potential_cleanup: operation.reviewed_potential_cleanup.clone(),
+            system_scope: cleanup_system_scope(operation.system_scope),
+            completion: match operation.completion {
+                AdapterCleanupCompletion::Finished => CleanupCompletion::Finished,
+                AdapterCleanupCompletion::Partial => CleanupCompletion::Partial,
+                AdapterCleanupCompletion::Cancelled => CleanupCompletion::Cancelled,
+                AdapterCleanupCompletion::Failed => CleanupCompletion::Failed,
+            },
+            warnings: operation.warnings.clone(),
+            executed_at_ms: operation.executed_at_ms,
+            log_error: operation.log_error.clone(),
+        }
+    }
+}
+
 impl CleanupPreview {
     pub fn from_adapter(
         backend: impl Into<String>,
@@ -234,6 +302,7 @@ impl CleanupPreview {
         Self {
             backend: backend.into(),
             backend_instead_of,
+            backend_version: preview.backend_version,
             generated_at: preview.generated_at,
             categories: preview
                 .categories
@@ -265,6 +334,7 @@ impl CleanupPreparation {
             confirmation_token: preparation.token,
             backend: preparation.pending.backend,
             backend_instead_of: preparation.pending.backend_instead_of,
+            backend_version: preparation.pending.preview.backend_version,
             preview_generated_at: preparation.pending.preview.generated_at,
             potential_cleanup: preparation.pending.preview.potential_cleanup,
             total_items: preparation.pending.preview.total_items,

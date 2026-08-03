@@ -88,17 +88,29 @@ export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, und
 
 export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
 
+export type CleanupCompletion = "finished" | "partial" | "cancelled" | "failed";
+
 export type CleanupItem = { path: string, reportedSize: string | null, itemCount: number, };
+
+/**
+ * One durable cleanup journal entry.
+ *
+ * The reviewed numbers are labelled as reviewed rather than as removed: Mole
+ * re-discovers candidates when it runs, so the preview is what the user
+ * approved, not what happened. What happened is the scope, the completion, and
+ * the backend's own warnings.
+ */
+export type CleanupOperation = { id: number, backend: string, backendVersion: string, previewGeneratedAt: string, reviewedItems: number, reviewedPotentialCleanup: string | null, systemScope: CleanupSystemScope, completion: CleanupCompletion, warnings: Array<string>, executedAtMs: number, logError: string | null, };
 
 /**
  * Latest Rust-held cleanup review, bound to a short-lived one-time token.
  */
-export type CleanupPreparation = { confirmationToken: number, backend: string, backendInsteadOf: string | null, previewGeneratedAt: string, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, expiresInSeconds: number, requiresConfirmation: boolean, warning: string, };
+export type CleanupPreparation = { confirmationToken: number, backend: string, backendInsteadOf: string | null, backendVersion: string, previewGeneratedAt: string, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, expiresInSeconds: number, requiresConfirmation: boolean, warning: string, };
 
 /**
  * Exact path groups published by a backend dry run.
  */
-export type CleanupPreview = { backend: string, backendInsteadOf: string | null, generatedAt: string, categories: Array<CleanupCategory>, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, };
+export type CleanupPreview = { backend: string, backendInsteadOf: string | null, backendVersion: string, generatedAt: string, categories: Array<CleanupCategory>, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, };
 
 export type CleanupSystemScope = "included" | "userOnly" | "unknown";
 

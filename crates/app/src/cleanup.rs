@@ -35,6 +35,7 @@ pub struct CleanupPreparation {
 pub struct CleanupState {
     next_preview: u64,
     active_preview: Option<ActivePreview>,
+    active_execution: Option<CancelToken>,
     next_confirmation: u64,
     latest: Option<ReviewedCleanup>,
     pending: HashMap<u64, ReviewedCleanup>,
@@ -73,6 +74,39 @@ impl CleanupState {
         };
         preview.cancel.cancel();
         true
+    }
+
+    /// Claim the single execution slot. Claimed before the confirmation is
+    /// consumed, so a second click cannot spend the token on a run that would
+    /// have been refused anyway.
+    pub fn start_execution(&mut self) -> Result<CancelToken, String> {
+        if self.active_execution.is_some() {
+            return Err("a cleanup run is already in progress".to_string());
+        }
+        let cancel = CancelToken::new();
+        self.active_execution = Some(cancel.clone());
+        Ok(cancel)
+    }
+
+    pub fn finish_execution(&mut self) {
+        self.active_execution = None;
+    }
+
+    pub fn cancel_execution(&self) -> bool {
+        let Some(cancel) = &self.active_execution else {
+            return false;
+        };
+        cancel.cancel();
+        true
+    }
+
+    /// Drop the reviewed preview after a run, successful or not.
+    ///
+    /// Mole removed whatever it found, so every path in the old preview is now a
+    /// claim about the past. A second run must review a fresh discovery.
+    pub fn forget(&mut self) {
+        self.latest = None;
+        self.pending.clear();
     }
 
     pub fn remember(
@@ -145,6 +179,7 @@ mod tests {
 
     fn preview(generated_at: &str, total_items: u64) -> CleanupPreview {
         CleanupPreview {
+            backend_version: "1.48.1".to_string(),
             generated_at: generated_at.to_string(),
             categories: Vec::new(),
             potential_cleanup: Some("1MB".to_string()),
@@ -199,6 +234,34 @@ mod tests {
         state.remember("mole", None, preview("empty", 0), now);
 
         assert!(state.prepare(now).is_none());
+    }
+
+    #[test]
+    fn a_spent_preview_is_forgotten_so_the_next_run_reviews_a_fresh_one() {
+        let now = Instant::now();
+        let mut state = CleanupState::default();
+        state.remember("mole", None, preview("spent", 1), now);
+        let token = state.prepare(now).expect("preparation").token;
+
+        state.forget();
+
+        assert!(state.take(token, now).is_none());
+        assert!(state.prepare(now).is_none());
+    }
+
+    #[test]
+    fn only_one_cleanup_run_holds_the_execution_slot() {
+        let mut state = CleanupState::default();
+        assert!(!state.cancel_execution(), "nothing to stop yet");
+
+        let cancel = state.start_execution().expect("first run");
+        assert!(state.start_execution().is_err());
+        assert!(state.cancel_execution());
+        assert!(cancel.is_cancelled());
+
+        state.finish_execution();
+        assert!(!state.cancel_execution());
+        assert!(state.start_execution().is_ok());
     }
 
     #[test]

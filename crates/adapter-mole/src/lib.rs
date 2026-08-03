@@ -37,9 +37,9 @@ use std::process::Command;
 use directories::BaseDirs;
 use nirmoka_adapter::process::{find_in_path, RunningProcess};
 use nirmoka_adapter::{
-    Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupItem, CleanupPreview,
-    CleanupSystemScope, Detection, InstalledApplication, ScanOptions, ScanSummary, SystemStatus,
-    WireSink,
+    Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupCompletion,
+    CleanupExecution, CleanupItem, CleanupPreview, CleanupSystemScope, Detection,
+    InstalledApplication, ScanOptions, ScanSummary, SystemStatus, WireSink,
 };
 
 const BINARY: &str = "mo";
@@ -159,7 +159,7 @@ impl Adapter for MoleAdapter {
     }
 
     fn system_status(&self, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
-        let binary = supported_binary(self.detect()?)?;
+        let (binary, _) = supported_binary(self.detect()?)?;
         status_from(&binary, cancel)
     }
 
@@ -167,12 +167,12 @@ impl Adapter for MoleAdapter {
         &self,
         cancel: &CancelToken,
     ) -> Result<Vec<InstalledApplication>, AdapterError> {
-        let binary = supported_binary(self.detect()?)?;
+        let (binary, _) = supported_binary(self.detect()?)?;
         applications_from(&binary, cancel)
     }
 
     fn cleanup_preview(&self, cancel: &CancelToken) -> Result<CleanupPreview, AdapterError> {
-        let binary = supported_binary(self.detect()?)?;
+        let (binary, version) = supported_binary(self.detect()?)?;
         let home = BaseDirs::new()
             .ok_or_else(|| AdapterError::OperationFailed {
                 backend: "mole",
@@ -184,12 +184,17 @@ impl Adapter for MoleAdapter {
         cleanup_preview_from(
             &binary,
             &home.join(".config").join("mole").join("clean-list.txt"),
+            &version,
             cancel,
         )
     }
 
-    fn execute_cleanup(&self, cancel: &CancelToken) -> Result<(), AdapterError> {
-        let binary = supported_binary(self.detect()?)?;
+    fn execute_cleanup(
+        &self,
+        reviewed_version: &str,
+        cancel: &CancelToken,
+    ) -> Result<CleanupExecution, AdapterError> {
+        let binary = execution_binary(self.detect()?, reviewed_version)?;
         execute_cleanup_from(&binary, cancel)
     }
 
@@ -212,9 +217,9 @@ impl Adapter for MoleAdapter {
     }
 }
 
-fn supported_binary(detection: Detection) -> Result<PathBuf, AdapterError> {
+fn supported_binary(detection: Detection) -> Result<(PathBuf, String), AdapterError> {
     match detection {
-        Detection::Found { path, .. } => Ok(path),
+        Detection::Found { path, version } => Ok((path, version)),
         Detection::UnsupportedVersion { version, .. } => Err(AdapterError::UnsupportedVersion {
             binary: BINARY,
             version,
@@ -222,6 +227,18 @@ fn supported_binary(detection: Detection) -> Result<PathBuf, AdapterError> {
         }),
         Detection::NotInstalled => Err(AdapterError::NotInstalled { binary: BINARY }),
     }
+}
+
+fn execution_binary(detection: Detection, reviewed_version: &str) -> Result<PathBuf, AdapterError> {
+    let (binary, current_version) = supported_binary(detection)?;
+    if current_version != reviewed_version {
+        return Err(AdapterError::BackendVersionChanged {
+            binary: BINARY,
+            reviewed: reviewed_version.to_string(),
+            current: current_version,
+        });
+    }
+    Ok(binary)
 }
 
 fn applications_from(
@@ -243,6 +260,7 @@ fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, Adap
 fn cleanup_preview_from(
     binary: &Path,
     preview_path: &Path,
+    backend_version: &str,
     cancel: &CancelToken,
 ) -> Result<CleanupPreview, AdapterError> {
     use std::io::Read;
@@ -326,14 +344,17 @@ fn cleanup_preview_from(
             operation,
             reason: format!("backend preview could not be read: {source}"),
         })?;
-    parse_cleanup_preview(&contents, scope)
+    parse_cleanup_preview(&contents, backend_version, scope)
 }
 
 /// Run Mole's normal cleanup command without forwarding paths or categories
 /// from the preview. Mole 1.48.1 removed category-selection flags and performs
 /// a new discovery here, so the reviewed preview and execution result may
 /// differ by design.
-fn execute_cleanup_from(binary: &Path, cancel: &CancelToken) -> Result<(), AdapterError> {
+fn execute_cleanup_from(
+    binary: &Path,
+    cancel: &CancelToken,
+) -> Result<CleanupExecution, AdapterError> {
     use std::io::Read;
 
     let operation = "cleanup execution";
@@ -356,34 +377,159 @@ fn execute_cleanup_from(binary: &Path, cancel: &CancelToken) -> Result<(), Adapt
         .and_then(|mut reader| {
             reader
                 .read_to_end(&mut stdout)
+                .map(|_| ())
                 .map_err(|source| AdapterError::OperationFailed {
                     backend: "mole",
                     operation,
                     reason: source.to_string(),
                 })
         });
-    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
-        binary: BINARY,
-        source,
-    })?;
+    // Past this point Mole was running, so it may already have removed files.
+    // Every way this can end is an outcome to report; only the errors raised
+    // before the spawn above mean nothing happened.
+    Ok(execution_of(&stdout, process.finish(), read_result))
+}
+
+/// Turn everything one finished run produced into a single outcome.
+///
+/// Deliberately infallible. Each argument can carry a failure, and none of them
+/// can show that Mole removed nothing — so a `Result` here would let a real
+/// removal be reported as a run that never happened.
+fn execution_of(
+    stdout: &[u8],
+    finished: std::io::Result<nirmoka_adapter::process::Outcome>,
+    read_result: Result<(), AdapterError>,
+) -> CleanupExecution {
+    let mut execution = parse_cleanup_execution(&String::from_utf8_lossy(stdout));
+
+    let outcome = match finished {
+        Ok(outcome) => outcome,
+        // Waiting on the child failed, so how far Mole got is unknowable.
+        Err(source) => {
+            execution.completion = CleanupCompletion::Failed;
+            execution.warnings.push(format!(
+                "Mole ran, and its exit status could not be read: {source}"
+            ));
+            return execution;
+        }
+    };
     if outcome.cancelled {
-        return Err(AdapterError::Cancelled {
-            backend: "mole",
-            operation,
-        });
+        execution.completion = CleanupCompletion::Cancelled;
+        execution
+            .warnings
+            .push("Cleanup was stopped part way through. Anything Mole had already removed stays removed.".to_string());
+        return execution;
     }
     if !outcome.status.success() {
-        return Err(AdapterError::BackendFailed {
-            binary: BINARY,
-            status: outcome.status.code().unwrap_or(-1),
-            stderr: outcome.stderr,
-        });
+        execution.completion = CleanupCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole exited with status {} part way through: {}",
+            outcome.status.code().unwrap_or(-1),
+            first_line(&outcome.stderr)
+        ));
+        return execution;
     }
-    read_result.map(|_| ())
+    if let Err(error) = read_result {
+        execution.completion = CleanupCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole ran, and its output could not be read: {error}"
+        ));
+        return execution;
+    }
+    execution
+}
+
+/// The first nonempty line of a backend's stderr, for a one-line warning.
+fn first_line(stderr: &str) -> String {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("no error output")
+        .to_string()
+}
+
+fn parse_cleanup_execution(stdout: &str) -> CleanupExecution {
+    let output = strip_ansi(stdout);
+    let lines: Vec<_> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    let system_scope = if lines
+        .iter()
+        .any(|line| line.contains("System-level cleanup enabled, sudo session active"))
+    {
+        CleanupSystemScope::Included
+    } else if lines
+        .iter()
+        .any(|line| line.contains("System-level cleanup skipped, requires sudo"))
+    {
+        CleanupSystemScope::UserOnly
+    } else {
+        CleanupSystemScope::Unknown
+    };
+
+    let mut warnings = Vec::new();
+    match system_scope {
+        CleanupSystemScope::Included => {}
+        CleanupSystemScope::UserOnly => warnings.push(
+            "System-level cleanup was skipped because cached administrator authorization was unavailable."
+                .to_string(),
+        ),
+        CleanupSystemScope::Unknown => warnings.push(
+            "Mole did not report whether system-level cleanup was authorized.".to_string(),
+        ),
+    }
+
+    for line in lines {
+        let lower = line.to_ascii_lowercase();
+        if ["failed", "timed out", "could not", "permission denied"]
+            .iter()
+            .any(|marker| lower.contains(marker))
+            && !warnings.iter().any(|warning| warning == line)
+        {
+            warnings.push(line.to_string());
+        }
+    }
+
+    CleanupExecution {
+        system_scope,
+        completion: if warnings.is_empty() {
+            CleanupCompletion::Finished
+        } else {
+            CleanupCompletion::Partial
+        },
+        warnings,
+    }
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut output = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
+            index += 2;
+            while index < bytes.len() {
+                let byte = bytes[index];
+                index += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 fn parse_cleanup_preview(
     contents: &str,
+    backend_version: &str,
     system_scope: CleanupSystemScope,
 ) -> Result<CleanupPreview, AdapterError> {
     let malformed = |reason: String| AdapterError::MalformedBackendOutput {
@@ -554,6 +700,7 @@ fn parse_cleanup_preview(
     };
 
     Ok(CleanupPreview {
+        backend_version: backend_version.to_string(),
         generated_at,
         categories,
         potential_cleanup,
@@ -735,6 +882,16 @@ mod tests {
         script
     }
 
+    /// A backend that blocks until it is killed.
+    ///
+    /// `exec` is load-bearing: without it the shell's `sleep` survives the
+    /// killed shell, holds the stdout pipe open, and the cancellation tests wait
+    /// the full minute for a process they already stopped.
+    #[cfg(unix)]
+    fn blocking_script() -> PathBuf {
+        executable_script("#!/bin/sh\nexec sleep 60\n")
+    }
+
     const STATUS: &str = include_str!("../../../fixtures/mole/1.48.1/status.json");
     const APPLICATIONS: &str = include_str!("../../../fixtures/mole/1.48.1/applications.json");
     const CLEAN_PREVIEW: &str = include_str!("../../../fixtures/mole/1.48.1/clean-list.txt");
@@ -895,9 +1052,10 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
 
     #[test]
     fn parses_the_sanitized_cleanup_preview_fixture() {
-        let preview = parse_cleanup_preview(CLEAN_PREVIEW, CleanupSystemScope::UserOnly)
+        let preview = parse_cleanup_preview(CLEAN_PREVIEW, "1.48.1", CleanupSystemScope::UserOnly)
             .expect("cleanup preview fixture");
 
+        assert_eq!(preview.backend_version, "1.48.1");
         assert_eq!(preview.generated_at, "2026-08-01 12:30:00");
         assert_eq!(preview.categories.len(), 2);
         assert_eq!(preview.categories[0].items[0].item_count, 4);
@@ -913,7 +1071,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     #[test]
     fn cleanup_preview_rejects_summary_drift() {
         let changed = CLEAN_PREVIEW.replace("# Items: 6", "# Items: 600");
-        let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+        let error = parse_cleanup_preview(&changed, "1.48.1", CleanupSystemScope::Included)
             .expect_err("inconsistent preview must fail");
 
         assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
@@ -927,7 +1085,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
             "# Categories: 2\n",
         ] {
             let changed = CLEAN_PREVIEW.replace(declaration, "");
-            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+            let error = parse_cleanup_preview(&changed, "1.48.1", CleanupSystemScope::Included)
                 .expect_err("every nonempty preview summary declaration must be present");
 
             assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
@@ -958,7 +1116,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
         let trailing = format!("{CLEAN_PREVIEW}/tmp/trailing  # 1KB\n");
 
         for changed in [early, interleaved, reordered, trailing] {
-            let error = parse_cleanup_preview(&changed, CleanupSystemScope::Included)
+            let error = parse_cleanup_preview(&changed, "1.48.1", CleanupSystemScope::Included)
                 .expect_err("the summary must be an ordered terminal trailer");
 
             assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
@@ -969,6 +1127,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     fn cleanup_preview_accepts_an_empty_backend_plan() {
         let preview = parse_cleanup_preview(
             "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# Potential cleanup: 0B\n# Items: 0\n# Categories: 0\n",
+            "1.48.1",
             CleanupSystemScope::Included,
         )
         .expect("empty cleanup preview");
@@ -981,7 +1140,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     #[test]
     fn cleanup_preview_rejects_category_free_output_without_summary() {
         let preview = "# Mole Cleanup Preview - 2026-08-01 12:30:00\n#\n# How to protect files:\n";
-        let error = parse_cleanup_preview(preview, CleanupSystemScope::Included)
+        let error = parse_cleanup_preview(preview, "1.48.1", CleanupSystemScope::Included)
             .expect_err("category-free output needs completeness evidence");
 
         assert!(matches!(error, AdapterError::MalformedBackendOutput { .. }));
@@ -990,7 +1149,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     #[test]
     fn cleanup_preview_rejects_unrecognized_sizes() {
         let preview = "# Mole Cleanup Preview - now\n=== Cache ===\n/tmp/cache  # lots\n";
-        let error = parse_cleanup_preview(preview, CleanupSystemScope::Unknown)
+        let error = parse_cleanup_preview(preview, "1.48.1", CleanupSystemScope::Unknown)
             .expect_err("unrecognized size must fail");
 
         assert!(error.to_string().contains("invalid cleanup size"));
@@ -1000,7 +1159,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
     fn cleanup_preview_preserves_newlines_inside_backend_paths() {
         let preview = "# Mole Cleanup Preview - now\n=== Logs ===\n/fixtures/mole/logs\n,  # 0B\n# Potential cleanup: 0B\n# Items: 1\n# Categories: 1\n";
 
-        let parsed = parse_cleanup_preview(preview, CleanupSystemScope::UserOnly)
+        let parsed = parse_cleanup_preview(preview, "1.48.1", CleanupSystemScope::UserOnly)
             .expect("newline-bearing path");
 
         assert_eq!(
@@ -1021,7 +1180,7 @@ printf '%s' 'System caches need sudo'
         let preview_path = script.with_extension("preview");
         std::fs::write(&preview_path, CLEAN_PREVIEW).unwrap();
 
-        let preview = cleanup_preview_from(&script, &preview_path, &CancelToken::new())
+        let preview = cleanup_preview_from(&script, &preview_path, "1.48.1", &CancelToken::new())
             .expect("cleanup preview");
         let _ = std::fs::remove_file(script);
         let _ = std::fs::remove_file(preview_path);
@@ -1037,12 +1196,16 @@ printf '%s' 'System caches need sudo'
             r#"#!/bin/sh
 [ "$1" = "clean" ] && [ "$#" = "1" ] || exit 12
 printf '%s' 'fresh backend discovery' > "$0.executed"
+printf '%s\n' 'System-level cleanup enabled, sudo session active'
 "#,
         );
         let marker = PathBuf::from(format!("{}.executed", script.display()));
 
-        execute_cleanup_from(&script, &CancelToken::new()).expect("cleanup execution");
+        let execution =
+            execute_cleanup_from(&script, &CancelToken::new()).expect("cleanup execution");
 
+        assert_eq!(execution.completion, CleanupCompletion::Finished);
+        assert_eq!(execution.system_scope, CleanupSystemScope::Included);
         assert_eq!(
             std::fs::read_to_string(&marker).expect("backend ran"),
             "fresh backend discovery"
@@ -1052,19 +1215,154 @@ printf '%s' 'fresh backend discovery' > "$0.executed"
     }
 
     #[test]
+    fn cleanup_execution_reports_missing_authorization_and_partial_failures() {
+        let execution = parse_cleanup_execution(
+            "\u{1b}[90mSystem-level cleanup skipped, requires sudo\u{1b}[0m\n\
+             Browser cleanup timed out after 5 minutes\n\
+             Orphaned container stubs: 2 could not be removed\n",
+        );
+
+        assert_eq!(execution.system_scope, CleanupSystemScope::UserOnly);
+        assert_eq!(execution.completion, CleanupCompletion::Partial);
+        assert_eq!(execution.warnings.len(), 3);
+        assert!(execution.warnings[0].contains("administrator authorization"));
+        assert!(execution.warnings[1].contains("timed out"));
+        assert!(execution.warnings[2].contains("could not be removed"));
+        assert!(execution
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains('\u{1b}')));
+    }
+
+    #[test]
+    fn cleanup_execution_rejects_a_backend_changed_since_review() {
+        let error = execution_binary(
+            Detection::Found {
+                path: PathBuf::from("/fixtures/mo"),
+                version: "1.49.0".to_string(),
+            },
+            "1.48.1",
+        )
+        .expect_err("changed backend needs a new preview");
+
+        assert!(matches!(error, AdapterError::BackendVersionChanged { .. }));
+    }
+
+    /// A cancelled cleanup is a run that happened, not an error. Mole may have
+    /// removed files before it was killed, so the caller gets a result to
+    /// journal rather than an `AdapterError::Cancelled` that implies nothing did.
+    #[test]
+    #[cfg(unix)]
+    fn cancelling_cleanup_execution_kills_the_subprocess_and_reports_the_run() {
+        use std::thread;
+        use std::time::Duration;
+
+        let script = blocking_script();
+        let cancel = CancelToken::new();
+        let worker_cancel = cancel.clone();
+        let worker_script = script.clone();
+        let worker = thread::spawn(move || execute_cleanup_from(&worker_script, &worker_cancel));
+        thread::sleep(Duration::from_millis(100));
+        cancel.cancel();
+
+        let execution = worker
+            .join()
+            .unwrap()
+            .expect("a stopped run still happened");
+        let _ = std::fs::remove_file(script);
+        assert_eq!(execution.completion, CleanupCompletion::Cancelled);
+        assert!(execution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("stays removed")));
+    }
+
+    /// Nothing that can go wrong after the spawn may be raised as an error.
+    ///
+    /// A failed wait and unreadable output both leave the removals unknowable,
+    /// and an `Err` would report them as a run that never happened.
+    #[test]
+    fn post_spawn_failures_are_outcomes_rather_than_errors() {
+        let stdout = b"System-level cleanup enabled, sudo session active\n";
+
+        let unwaitable = execution_of(stdout, Err(std::io::Error::other("waitpid failed")), Ok(()));
+        assert_eq!(unwaitable.completion, CleanupCompletion::Failed);
+        assert_eq!(unwaitable.system_scope, CleanupSystemScope::Included);
+        assert!(unwaitable
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("exit status could not be read")));
+
+        let unreadable = execution_of(
+            b"",
+            Ok(nirmoka_adapter::process::Outcome {
+                status: successful_status(),
+                stderr: String::new(),
+                cancelled: false,
+            }),
+            Err(AdapterError::OperationFailed {
+                backend: "mole",
+                operation: "cleanup execution",
+                reason: "backend stdout was unavailable".to_string(),
+            }),
+        );
+        assert_eq!(unreadable.completion, CleanupCompletion::Failed);
+        assert!(unreadable
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("output could not be read")));
+    }
+
+    #[cfg(unix)]
+    fn successful_status() -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0)
+    }
+
+    #[cfg(windows)]
+    fn successful_status() -> std::process::ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0)
+    }
+
+    /// Same reasoning for a backend that dies part way through.
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_cleanup_run_is_reported_rather_than_raised() {
+        let script = executable_script(
+            r#"#!/bin/sh
+printf '%s\n' 'System-level cleanup enabled, sudo session active'
+printf '%s\n' 'disk full' >&2
+exit 3
+"#,
+        );
+
+        let execution =
+            execute_cleanup_from(&script, &CancelToken::new()).expect("a failed run happened");
+        let _ = std::fs::remove_file(script);
+
+        assert_eq!(execution.completion, CleanupCompletion::Failed);
+        assert_eq!(execution.system_scope, CleanupSystemScope::Included);
+        assert!(execution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("status 3") && warning.contains("disk full")));
+    }
+
+    #[test]
     #[cfg(unix)]
     fn cancelling_cleanup_preview_kills_the_subprocess() {
         use std::thread;
         use std::time::Duration;
 
-        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let script = blocking_script();
         let preview_path = script.with_extension("preview");
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();
         let worker_script = script.clone();
         let worker_preview = preview_path.clone();
         let worker = thread::spawn(move || {
-            cleanup_preview_from(&worker_script, &worker_preview, &worker_cancel)
+            cleanup_preview_from(&worker_script, &worker_preview, "1.48.1", &worker_cancel)
         });
         thread::sleep(Duration::from_millis(100));
         cancel.cancel();
@@ -1080,7 +1378,7 @@ printf '%s' 'fresh backend discovery' > "$0.executed"
         use std::thread;
         use std::time::Duration;
 
-        let script = executable_script("#!/bin/sh\nsleep 60\n");
+        let script = blocking_script();
 
         let cancel = CancelToken::new();
         let worker_cancel = cancel.clone();

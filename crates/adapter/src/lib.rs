@@ -28,7 +28,10 @@ use std::path::Path;
 
 pub use applications::InstalledApplication;
 pub use capabilities::Capabilities;
-pub use cleanup::{CleanupCategory, CleanupItem, CleanupPreview, CleanupSystemScope};
+pub use cleanup::{
+    CleanupCategory, CleanupCompletion, CleanupExecution, CleanupItem, CleanupPreview,
+    CleanupSystemScope,
+};
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
 pub use error::AdapterError;
@@ -100,8 +103,21 @@ pub trait Adapter: Send + Sync {
     /// A cleanup preview is evidence, not an execution plan. Backends such as
     /// Mole do not accept previewed paths or categories as command arguments;
     /// they perform fresh discovery when this method runs. Implementors must
-    /// never turn preview rows into delete arguments.
-    fn execute_cleanup(&self, _cancel: &CancelToken) -> Result<(), AdapterError> {
+    /// never turn preview rows into delete arguments. `reviewed_version` is
+    /// the exact version that produced the preview; a different version must
+    /// fail closed and require a new review.
+    ///
+    /// An `Err` here must mean **nothing was removed**: an unsupported version,
+    /// a missing binary, a refused review, a failed spawn. Once the backend is
+    /// running it may already have deleted files, so cancellation and backend
+    /// failure return `Ok` with [`CleanupCompletion::Cancelled`] or
+    /// [`CleanupCompletion::Failed`] — the shell has an irreversible run to
+    /// record either way, and an error would hide it.
+    fn execute_cleanup(
+        &self,
+        _reviewed_version: &str,
+        _cancel: &CancelToken,
+    ) -> Result<CleanupExecution, AdapterError> {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "cleanup execution",
