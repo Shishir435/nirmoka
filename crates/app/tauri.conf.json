@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Nirmoka",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "identifier": "app.nirmoka.desktop",
   "build": {
     "frontendDist": "../../apps/desktop/dist",
@@ -33,7 +33,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg"],
     "category": "Utility",
     "shortDescription": "Disk analysis and cleanup",
     "longDescription": "A cross-platform desktop GUI for disk analysis and cleanup, driving the disk scanner you already have installed.",
@@ -43,6 +43,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }

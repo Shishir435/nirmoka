@@ -1,0 +1,202 @@
+name: Release
+
+# Tag-driven, and deliberately not run on every push: a build that produces an
+# installer nobody asked for is a build that eventually publishes one.
+on:
+  push:
+    tags: ["v*"]
+  # Runs the same build with no tag, which produces no release. This is the only
+  # path that tolerates an unsigned bundle.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS installer
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # Job-level, because a step's own `env:` is not available to that step's
+      # `if:` and the `secrets` context is not available in a step condition at
+      # all. This says whether credentials exist, never what they are.
+      SIGNED: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      RELEASING: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # A repository variable, not a secret, and not a default: releasing an
+      # unsigned bundle is a decision someone has to have made on purpose.
+      UNSIGNED_OK: ${{ vars.ALLOW_UNSIGNED_RELEASE == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag that disagrees with the version inside the bundle produces a
+      # release whose name is not what it contains, and the mismatch is only
+      # visible to whoever downloads it.
+      - name: The tag and the bundled version agree
+        if: env.RELEASING == 'true'
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          bundled=$(node -p "require('./crates/app/tauri.conf.json').version")
+          echo "tag ${tagged}, bundle ${bundled}"
+          if [ "$tagged" != "$bundled" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match tauri.conf.json ${bundled}"
+            exit 1
+          fi
+
+      # Before the build, not after it. An unsigned bundle is refused by every
+      # Mac but the one that built it, so a tag that produces one by accident
+      # should cost a failed run rather than a bad draft.
+      - name: A tagged build is signed, or unsigned on purpose
+        if: env.RELEASING == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=""
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            # Indirect expansion, so the loop names the secret without printing it.
+            [ -n "${!name}" ] || missing="${missing} ${name}"
+          done
+          if [ -z "$missing" ]; then
+            echo "signed and notarized release"
+            exit 0
+          fi
+          if [ "$UNSIGNED_OK" != "true" ]; then
+            echo "::error::a tag build must be signed and notarized; missing secrets:${missing}"
+            echo "::error::to release unsigned instead, set the repository variable"
+            echo "::error::ALLOW_UNSIGNED_RELEASE=true — see docs/releasing.md"
+            exit 1
+          fi
+          echo "::warning::unsigned release, allowed by ALLOW_UNSIGNED_RELEASE"
+          echo "::warning::missing:${missing} — the .dmg will be refused by Gatekeeper"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # One bundle for both architectures. Two downloads with near-identical
+          # names is a choice the person downloading should not have to make.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Signing and notarization are driven entirely by these variables. No
+      # `tagName`, so this step builds and never creates a release: publication
+      # happens below, after the bundle has been checked.
+      - name: Build, sign, and notarize
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/app
+          args: --target universal-apple-darwin
+          includeUpdaterJson: false
+
+      # What the user's Mac will ask, asked here first. Without this the first
+      # report of a broken signature is a user seeing "Nirmoka is damaged".
+      - name: Verify the signature and the notarization ticket
+        if: env.SIGNED == 'true'
+        run: |
+          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          echo "verifying ${app}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Gatekeeper's own answer, which is the one that matters: a signed but
+          # un-notarized build passes codesign and still fails here.
+          spctl --assess --type execute --verbose=4 "$app"
+
+      # After verification rather than as part of the build, which is the point:
+      # a signed release cannot leave a bundle Gatekeeper would refuse sitting
+      # in a draft. Draft always — the last look at a release belongs to a person.
+      - name: Open a draft release with the bundle
+        if: env.RELEASING == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # `|| true` so a missing bundle directory reports the count below
+          # rather than dying on find's own error, which reads as a CI glitch.
+          dmg=$(find target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' 2>/dev/null || true)
+          count=$(printf '%s\n' "$dmg" | grep -c . || true)
+          if [ "$count" != "1" ]; then
+            echo "::error::expected exactly one .dmg, found ${count}"
+            exit 1
+          fi
+          notes="${RUNNER_TEMP}/release-notes.md"
+          {
+            cat <<'BODY'
+          ## Install
+
+          ```
+          brew install shishir435/tap/nirmoka
+          ```
+
+          Builds from source on your machine, which takes a few minutes and asks
+          Gatekeeper nothing. macOS 12 or later, Apple silicon and Intel.
+
+          Nirmoka ships no disk scanner: `ncdu` comes with the formula, and the
+          Clean page additionally wants `brew install mole`.
+          BODY
+            if [ "$SIGNED" != "true" ]; then
+              cat <<'BODY'
+
+          ## About the .dmg below
+
+          It is **unsigned**, because a Developer ID certificate needs a paid
+          Apple Developer account. macOS will refuse it on first launch and
+          offer to move it to the Trash. Homebrew above is the supported path.
+          BODY
+            fi
+          } > "$notes"
+          gh release create "$GITHUB_REF_NAME" "$dmg" \
+            --draft --prerelease \
+            --title "Nirmoka ${GITHUB_REF_NAME}" \
+            --notes-file "$notes"
+
+      # Two lines change in the tap per release, and guessing either of them
+      # produces a formula that fails to install for everyone but the guesser.
+      - name: What the tap needs
+        if: env.RELEASING == 'true'
+        run: |
+          tarball="${RUNNER_TEMP}/source.tar.gz"
+          curl -fsSL -o "$tarball" \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(shasum -a 256 "$tarball" | cut -d' ' -f1)
+          {
+            echo '## packaging/homebrew/nirmoka.rb'
+            echo
+            echo '```ruby'
+            echo "  url \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz\""
+            echo "  sha256 \"${sha}\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report what was produced
+        run: |
+          find target/universal-apple-darwin/release/bundle -maxdepth 2 \
+            \( -name '*.dmg' -o -name '*.app' \) |
+            while read -r artifact; do
+              printf '%s (%s)\n' "$artifact" "$(du -sh "$artifact" | cut -f1)"
+            done
+
+          if [ "$SIGNED" != "true" ]; then
+            echo "::warning::built without signing credentials — this bundle is unsigned and must not be published"
+          fi

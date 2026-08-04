@@ -3,7 +3,10 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 11 — Mole-powered macOS beta.**
+**Current step: 11 — Mole-powered macOS beta.** Phases 0–5 are complete. Phase 6 waits on a tag and
+on `Shishir435/homebrew-tap` existing; nothing else is outstanding. Releases are unsigned until there
+is an Apple Developer account, which is why the install path is a Homebrew formula rather than a
+download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
 
 ## Sequencing rules
 
@@ -310,11 +313,32 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
       fixture-driven contract coverage, cancellation, and a real Windows CI scan. Unsupported
       scan options fail closed rather than changing semantics — see
       [ADR 0015](adr/0015-gdu-is-the-windows-scanner.md)
-- [ ] Signed macOS build
-- [ ] Linux AppImage or Flatpak
-- [ ] CI builds installers for all three platforms
+- [x] Release pipeline for a signed macOS build. `.github/workflows/release.yml` builds a universal
+      Apple silicon and Intel bundle on a `v*` tag, refuses a tag that disagrees with the bundled
+      version, signs and notarizes when the credentials are present, verifies the result with
+      `codesign` and `spctl`, and opens a **draft** release only after those checks pass. An unsigned
+      tag fails unless someone set `ALLOW_UNSIGNED_RELEASE=true`, so an unsigned artifact cannot reach
+      a release by accident — see `docs/releasing.md`
+- [x] A supported install that works without a certificate. `packaging/homebrew/nirmoka.rb` is a
+      source-built formula for a personal tap: `brew install shishir435/tap/nirmoka`. Homebrew removed
+      `--no-quarantine`, so a cask of an unsigned `.dmg` is refused by Gatekeeper, while a formula
+      compiles locally and is never quarantined — see
+      [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md)
+- [ ] `Shishir435/homebrew-tap` created, holding `Formula/nirmoka.rb`. A tap must be its own
+      repository, and only the account holder can make one
+- [ ] Signing credentials in repository secrets. Needs a paid Apple Developer account and a
+      Developer ID Application certificate, which only the account holder can produce. Until then
+      releases are unsigned and Homebrew is the install path
+- [x] ~~Linux AppImage or Flatpak~~ — **dropped.** The shipped product is the Mole cleanup loop, and
+      Mole is macOS-only; off macOS, Nirmoka is a browser for tools that already have good terminal
+      interfaces. A second cleanup backend is what reopens this, not demand for a package. See
+      [ADR 0023](adr/0023-the-first-release-is-macos-only.md)
+- [x] ~~CI builds installers for all three platforms~~ — one platform is packaged. CI still compiles
+      and tests the workspace, and the Linux and Windows matrix entries stay commented in place for
+      the end of the beta rather than deleted
 - [x] Pin `rust-toolchain.toml` to Rust 1.97.1
-- [ ] First tagged release
+- [ ] First tagged release. The pipeline is ready and the version is set to 0.1.0; tagging is a
+      decision, and publishing the draft is a person's click
 
 ---
 

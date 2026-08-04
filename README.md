@@ -9,8 +9,33 @@ sort by size, and reclaim space — without memorising keybindings or parsing `d
 > **निर्मोक** (_nirmoka_) is Sanskrit for the skin a snake sheds — the dead layer a living
 > system leaves behind. That is exactly what this tool helps you find and remove.
 
-**Status: early development.** Nothing is installable yet. Watch the repo if you want to know
-when the first build lands.
+**Status: macOS beta, in preparation.** Linux and Windows compile and are tested in CI but are
+not packaged yet, because the cleanup workflow that makes this worth installing runs on Mole, which
+is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md).
+
+---
+
+## Install
+
+```bash
+brew install shishir435/tap/nirmoka
+```
+
+macOS 12 or later, Apple silicon and Intel. The formula builds from source, which takes a few
+minutes and pulls a Rust and Node toolchain as build dependencies.
+
+Why a source build rather than a download: a signed app needs a Developer ID certificate, which
+needs a paid Apple Developer account, and there isn't one yet. Without it macOS refuses a downloaded
+`.dmg` outright — see [ADR 0024](docs/adr/0024-distribution-is-a-source-built-homebrew-formula.md).
+Releases do carry an unsigned `.dmg` for anyone who wants it, and the release notes say what that
+costs.
+
+Nirmoka bundles no disk scanner. `ncdu` comes with the formula, which covers scanning; the Clean
+page additionally wants Mole:
+
+```bash
+brew install mole
+```
 
 ---
 
@@ -22,7 +47,8 @@ Existing GUI options are usually single-platform, abandoned, or several hundred 
 
 Nirmoka aims at a specific gap:
 
-- **Cross-platform from day one.** One app on macOS, Linux, and Windows.
+- **Cross-platform code from day one.** The core carries no platform conditionals and CI builds it
+  everywhere. macOS is packaged first; the others follow a cleanup backend that runs there.
 - **Small.** Built with Tauri, so the download is measured in single-digit megabytes.
   A disk cleanup tool that eats 300 MB of disk is a joke.
 - **Not a reimplementation.** Nirmoka does not write its own disk scanner. It drives

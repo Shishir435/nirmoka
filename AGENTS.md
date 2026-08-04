@@ -157,6 +157,7 @@ fixtures/             recorded backend output, per backend and version
 apps/desktop/         React frontend. The list is virtualized and paged — see ADR 0011
 packages/transport/   THE IPC boundary. Only module that knows about Tauri.
 
+packaging/homebrew/   the tap formula, source of truth — see ADR 0024
 site/                 static landing page, deployed to Vercel, outside pnpm workspace
 docs/                 architecture, adapter contract, roadmap, ADRs
 ```
@@ -167,6 +168,10 @@ Development is macOS-first because that is the machine available, but **the code
 platform-neutral**. The mechanism that makes this work: the first backend is ncdu, which
 runs everywhere, so cross-platform-shaped code gets written and tested on one machine.
 
-CI runs `cargo check` and `cargo test` on macOS, Linux, and Windows from step 0. Mole is
-macOS-only (`install.sh` refuses other platforms; every `cmd/analyze/*.go` file is
-`//go:build darwin`), so it is a capability upgrade on one platform, never the baseline.
+CI ran `cargo check` and `cargo test` on macOS, Linux, and Windows from step 0. For the duration
+of the macOS beta the Linux and Windows matrix entries are commented out in `.github/workflows/ci.yml`
+rather than deleted, and the release pipeline packages macOS only — see
+[ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md). Mole is macOS-only (`install.sh`
+refuses other platforms; every `cmd/analyze/*.go` file is `//go:build darwin`), so it is a
+capability upgrade on one platform, never the baseline. Code stays platform-neutral regardless:
+that is what makes uncommenting those entries a one-line change instead of a project.

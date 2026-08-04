@@ -1885,7 +1885,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nirmoka-adapter"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "nirmoka-core",
  "serde",
@@ -1895,14 +1895,14 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-adapter-gdu"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "nirmoka-adapter",
 ]
 
 [[package]]
 name = "nirmoka-adapter-mole"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "directories",
  "nirmoka-adapter",
@@ -1913,7 +1913,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-adapter-ncdu"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "nirmoka-adapter",
  "nirmoka-core",
@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-adapter-rip"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "directories",
  "nirmoka-adapter",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-app"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "directories",
  "nirmoka-adapter",
@@ -1947,7 +1947,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "nirmoka-adapter",
@@ -1962,7 +1962,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-contract-tests"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "nirmoka-adapter",
  "nirmoka-adapter-gdu",
@@ -1974,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "nirmoka-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.19",
