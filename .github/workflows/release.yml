@@ -31,6 +31,9 @@ jobs:
       # A repository variable, not a secret, and not a default: releasing an
       # unsigned bundle is a decision someone has to have made on purpose.
       UNSIGNED_OK: ${{ vars.ALLOW_UNSIGNED_RELEASE == 'true' }}
+      # A semver prerelease suffix — v0.1.0-rc.1 — marks a rehearsal: the whole
+      # pipeline, on a tag nobody should install from and the tap ignores.
+      PRERELEASE: ${{ contains(github.ref_name, '-') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -41,9 +44,12 @@ jobs:
         if: env.RELEASING == 'true'
         run: |
           tagged="${GITHUB_REF_NAME#v}"
+          # A rehearsal builds the version it rehearses: v0.1.0-rc.1 is 0.1.0.
+          # Comparing the whole tag would refuse every prerelease.
+          base="${tagged%%-*}"
           bundled=$(node -p "require('./crates/app/tauri.conf.json').version")
-          echo "tag ${tagged}, bundle ${bundled}"
-          if [ "$tagged" != "$bundled" ]; then
+          echo "tag ${tagged}, version ${base}, bundle ${bundled}"
+          if [ "$base" != "$bundled" ]; then
             echo "::error::tag ${GITHUB_REF_NAME} does not match tauri.conf.json ${bundled}"
             exit 1
           fi
@@ -80,11 +86,19 @@ jobs:
           echo "::warning::unsigned release, allowed by ALLOW_UNSIGNED_RELEASE"
           echo "::warning::missing:${missing} — the .dmg will be refused by Gatekeeper"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          # One bundle for both architectures. Two downloads with near-identical
-          # names is a choice the person downloading should not have to make.
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # One bundle for both architectures. Two downloads with near-identical
+      # names is a choice the person downloading should not have to make.
+      #
+      # The targets go on the toolchain `rust-toolchain.toml` pins, which is the
+      # one cargo obeys. Asking a setup action for them instead attaches them to
+      # whatever toolchain *it* installs, and the universal build then fails on
+      # the target it was told to add — which is exactly what happened to v0.1.0.
+      - name: The pinned toolchain, with both darwin targets
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target list --installed
+
       - uses: Swatinem/rust-cache@v2.9.1
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
@@ -165,6 +179,16 @@ jobs:
           offer to move it to the Trash. Homebrew above is the supported path.
           BODY
             fi
+            if [ "$PRERELEASE" = "true" ]; then
+              cat <<'BODY'
+
+          ## This is a rehearsal
+
+          A prerelease tag, built to exercise the pipeline. The tap is not
+          updated to point at it, and the install command above still resolves
+          to the last real release. Do not publish this draft.
+          BODY
+            fi
           } > "$notes"
           gh release create "$GITHUB_REF_NAME" "$dmg" \
             --draft --prerelease \
@@ -174,7 +198,7 @@ jobs:
       # Two lines change in the tap per release, and guessing either of them
       # produces a formula that fails to install for everyone but the guesser.
       - name: What the tap needs
-        if: env.RELEASING == 'true'
+        if: env.RELEASING == 'true' && env.PRERELEASE != 'true'
         run: |
           tarball="${RUNNER_TEMP}/source.tar.gz"
           curl -fsSL -o "$tarball" \
