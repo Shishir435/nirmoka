@@ -10,7 +10,7 @@
 class Nirmoka < Formula
   desc "Desktop GUI for disk analysis and cleanup"
   homepage "https://github.com/Shishir435/nirmoka"
-  url "https://github.com/Shishir435/nirmoka/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/Shishir435/nirmoka/archive/refs/tags/v0.1.1.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "Apache-2.0"
   head "https://github.com/Shishir435/nirmoka.git", branch: "main"
