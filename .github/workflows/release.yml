@@ -108,10 +108,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Signing and notarization are driven entirely by these variables. No
-      # `tagName`, so this step builds and never creates a release: publication
-      # happens below, after the bundle has been checked.
+      # Two build steps for one build, because Tauri decides to sign on whether
+      # `APPLE_CERTIFICATE` is *set*, not whether it holds anything. A missing
+      # secret still produces an env var — an empty one — so a single step with
+      # these mapped unconditionally sends the bundler to `security import` with
+      # nothing to import. There is no way to omit a key from `env:` by
+      # expression, so the honest fix is one step per case. Neither passes
+      # `tagName`: publication happens below, after the bundle is checked.
       - name: Build, sign, and notarize
+        if: env.SIGNED == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -120,6 +125,16 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/app
+          args: --target universal-apple-darwin
+          includeUpdaterJson: false
+
+      - name: Build, unsigned
+        if: env.SIGNED != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: crates/app
