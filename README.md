@@ -9,10 +9,33 @@ sort by size, and reclaim space — without memorising keybindings or parsing `d
 > **निर्मोक** (_nirmoka_) is Sanskrit for the skin a snake sheds — the dead layer a living
 > system leaves behind. That is exactly what this tool helps you find and remove.
 
-**Status: macOS beta, in preparation.** The first build is a signed macOS app; the release
-pipeline is in place and waiting on a tag. Linux and Windows compile and are tested in CI but are
+**Status: macOS beta, in preparation.** Linux and Windows compile and are tested in CI but are
 not packaged yet, because the cleanup workflow that makes this worth installing runs on Mole, which
 is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md).
+
+---
+
+## Install
+
+```bash
+brew install shishir435/tap/nirmoka
+```
+
+macOS 12 or later, Apple silicon and Intel. The formula builds from source, which takes a few
+minutes and pulls a Rust and Node toolchain as build dependencies.
+
+Why a source build rather than a download: a signed app needs a Developer ID certificate, which
+needs a paid Apple Developer account, and there isn't one yet. Without it macOS refuses a downloaded
+`.dmg` outright — see [ADR 0024](docs/adr/0024-distribution-is-a-source-built-homebrew-formula.md).
+Releases do carry an unsigned `.dmg` for anyone who wants it, and the release notes say what that
+costs.
+
+Nirmoka bundles no disk scanner. `ncdu` comes with the formula, which covers scanning; the Clean
+page additionally wants Mole:
+
+```bash
+brew install mole
+```
 
 ---
 

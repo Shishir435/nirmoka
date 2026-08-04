@@ -3,20 +3,34 @@
 The macOS beta is the only shipped build. Other platforms compile and test in CI and are not
 packaged — see [ADR 0023](adr/0023-the-first-release-is-macos-only.md).
 
+**How users install it is the Homebrew formula, not the `.dmg`** — see
+[ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md). A release produces both, and
+the formula is the one the release notes lead with.
+
 ## What produces a release
 
 `.github/workflows/release.yml`, on a `v*` tag. It builds a universal bundle for Apple silicon and
-Intel, signs and notarizes it, verifies the result, and only then opens a **draft** release with the
-`.dmg` attached. Publishing is a person's click, always.
+Intel, signs and notarizes it when the credentials are there, verifies the result, and only then
+opens a **draft** release with the `.dmg` attached. Publishing is a person's click, always.
 
-Two things about that order. A tag with any signing secret missing fails before the build, so an
-unsigned bundle never reaches a release. And the draft is created after `codesign` and `spctl` pass
-rather than before, so a notarization failure cannot leave a refused `.dmg` sitting in a draft
-waiting to be published.
+Two things about that order. A tag that would produce an unsigned bundle fails before the build
+unless someone opted into exactly that, so an unsigned artifact cannot reach a release by accident.
+And the draft is created after `codesign` and `spctl` pass rather than by the build step, so a
+notarization failure cannot leave a refused `.dmg` sitting in a draft waiting to be published.
 
-`workflow_dispatch` runs the same build without creating a release, and is the only path that
-tolerates an unsigned bundle. Use it to check the pipeline without producing an artifact anyone can
-find.
+`workflow_dispatch` runs the same build without creating a release. Use it to check the pipeline
+without producing an artifact anyone can find.
+
+### Releasing unsigned, on purpose
+
+Set the repository **variable** (not secret) `ALLOW_UNSIGNED_RELEASE=true`. Without it a tag missing
+any signing secret fails; with it the build proceeds, the signature checks are skipped, and the
+release notes gain a section saying the `.dmg` is unsigned and what that means. This is the current
+state of the project: there is no Developer ID certificate, so 0.1.0 releases unsigned and users
+install through Homebrew instead.
+
+Remove the variable the day a certificate exists. It is an opt-in for one specific compromise, not a
+setting.
 
 ## Building one locally
 
@@ -37,13 +51,39 @@ second look:
 That last line is what an unsigned build is: it runs on the machine that built it and is refused
 everywhere else. It is the expected result of a local build, and an unacceptable one for a release.
 
+## The Homebrew tap
+
+The published formula lives in a separate repository, because a tap must be named
+`homebrew-<tap>`: **`Shishir435/homebrew-tap`**, holding `Formula/nirmoka.rb`. That file is a copy of
+[`packaging/homebrew/nirmoka.rb`](../packaging/homebrew/nirmoka.rb), which is the source of truth and
+the only one to edit.
+
+Two lines change per release — `url` and `sha256`. The workflow's **What the tap needs** step prints
+both into the run summary, already formatted; guessing either produces a formula that installs for
+nobody.
+
+Verify a change before pushing it to the tap:
+
+```bash
+brew tap-new shishir435/tap --no-git      # local only, no GitHub involved
+cp packaging/homebrew/nirmoka.rb "$(brew --repository)/Library/Taps/shishir435/homebrew-tap/Formula/"
+brew style shishir435/tap
+brew audit --formula --strict shishir435/tap/nirmoka
+brew install --build-from-source shishir435/tap/nirmoka   # the real test, and slow
+brew untap shishir435/tap
+```
+
+The install is the only step that proves the formula works, and it pulls `rust` and `node` as build
+dependencies, so it is worth doing once per release rather than once per edit.
+
 ## Credentials
 
-Six repository secrets, all required to release. A tagged build refuses to start without them; a
-`workflow_dispatch` run without them produces an **unsigned** bundle, which the workflow warns about
-and which must not be published: an unsigned app on a stranger's Mac reports itself as damaged, and
-the usual workaround is teaching people to strip quarantine attributes, which is a bad habit to
-teach for a tool that deletes files.
+Six repository secrets, all required for a **signed** release. A tagged build refuses to start
+without them unless `ALLOW_UNSIGNED_RELEASE=true` is set, and a `workflow_dispatch` run without them
+produces an **unsigned** bundle that the workflow warns about: an unsigned app on a stranger's Mac
+reports itself as damaged, and the workaround is teaching people to strip quarantine attributes,
+which is a bad habit to teach for a tool that deletes files. The formula exists so that nobody has to
+be taught it.
 
 | Secret                       | What it is                                                      |
 | ---------------------------- | --------------------------------------------------------------- |
@@ -80,26 +120,31 @@ base64 -i certificate.p12 | pbcopy
    git push origin v0.1.0
    ```
 
-5. Wait for the workflow. A green run means the bundle was signed, notarized, and verified before the
-   draft was created; a red one means no draft exists, which is the intended outcome of any failure
-   here.
-6. Download the `.dmg` from the draft release, open it on a Mac that has never seen the app, and
-   check that it launches without a Gatekeeper warning. Notarization can be verified without a
-   second machine, but first-launch behaviour cannot.
-7. Edit the release notes, then publish.
+5. Wait for the workflow. A red run means no draft exists, which is the intended outcome of any
+   failure here. A green run with the signature step **skipped** means the release is unsigned, which
+   is expected until there is a certificate.
+6. Update the tap: copy `packaging/homebrew/nirmoka.rb` into `Shishir435/homebrew-tap`, with the two
+   lines from the run summary. Then install it on a clean machine, or at least a clean prefix, and
+   launch the app. That is the path users take, so it is the one that has to be checked.
+7. If the release is signed, also download the `.dmg`, open it on a Mac that has never seen the app,
+   and check that it launches without a Gatekeeper warning. Notarization can be verified without a
+   second machine; first-launch behaviour cannot.
+8. Edit the release notes, then publish.
 
 ## What a first-time user needs
 
 Nirmoka ships no backend and never will — it detects what is installed and guides otherwise. A user
 with none of them gets a window that says so. Release notes should name the minimum:
 
-- **ncdu 2.x** for scanning, on any platform (`brew install ncdu`).
+- **ncdu 2.x** for scanning, on any platform (`brew install ncdu`). The formula depends on it, so a
+  Homebrew install already has it.
 - **Mole 1.48.x** for cleanup, macOS only. Optional, and it is what the Clean page needs.
 
 ## Versions to bump together
 
 - `crates/app/tauri.conf.json` — the version inside the bundle, and what the workflow checks.
 - `Cargo.toml` — `workspace.package.version`, inherited by every crate.
+- `packaging/homebrew/nirmoka.rb` — the `url` tag and its `sha256`, from the run summary.
 
 `package.json` files stay at `0.0.0`: they are private workspace members, never published to npm,
 and a version there would be a number nobody reads and everybody has to remember to change.

@@ -157,6 +157,7 @@ fixtures/             recorded backend output, per backend and version
 apps/desktop/         React frontend. The list is virtualized and paged — see ADR 0011
 packages/transport/   THE IPC boundary. Only module that knows about Tauri.
 
+packaging/homebrew/   the tap formula, source of truth — see ADR 0024
 site/                 static landing page, deployed to Vercel, outside pnpm workspace
 docs/                 architecture, adapter contract, roadmap, ADRs
 ```

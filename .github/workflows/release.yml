@@ -28,6 +28,9 @@ jobs:
       # all. This says whether credentials exist, never what they are.
       SIGNED: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
       RELEASING: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # A repository variable, not a secret, and not a default: releasing an
+      # unsigned bundle is a decision someone has to have made on purpose.
+      UNSIGNED_OK: ${{ vars.ALLOW_UNSIGNED_RELEASE == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -46,9 +49,9 @@ jobs:
           fi
 
       # Before the build, not after it. An unsigned bundle is refused by every
-      # Mac but the one that built it, so a tag without credentials has nothing
-      # to produce and should cost a failed run rather than a bad draft.
-      - name: A tagged build has every signing credential
+      # Mac but the one that built it, so a tag that produces one by accident
+      # should cost a failed run rather than a bad draft.
+      - name: A tagged build is signed, or unsigned on purpose
         if: env.RELEASING == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -64,11 +67,18 @@ jobs:
             # Indirect expansion, so the loop names the secret without printing it.
             [ -n "${!name}" ] || missing="${missing} ${name}"
           done
-          if [ -n "$missing" ]; then
+          if [ -z "$missing" ]; then
+            echo "signed and notarized release"
+            exit 0
+          fi
+          if [ "$UNSIGNED_OK" != "true" ]; then
             echo "::error::a tag build must be signed and notarized; missing secrets:${missing}"
-            echo "::error::use workflow_dispatch for an unsigned dry run — see docs/releasing.md"
+            echo "::error::to release unsigned instead, set the repository variable"
+            echo "::error::ALLOW_UNSIGNED_RELEASE=true — see docs/releasing.md"
             exit 1
           fi
+          echo "::warning::unsigned release, allowed by ALLOW_UNSIGNED_RELEASE"
+          echo "::warning::missing:${missing} — the .dmg will be refused by Gatekeeper"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -105,7 +115,7 @@ jobs:
       # What the user's Mac will ask, asked here first. Without this the first
       # report of a broken signature is a user seeing "Nirmoka is damaged".
       - name: Verify the signature and the notarization ticket
-        if: env.RELEASING == 'true' || env.SIGNED == 'true'
+        if: env.SIGNED == 'true'
         run: |
           app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
           echo "verifying ${app}"
@@ -114,10 +124,10 @@ jobs:
           # un-notarized build passes codesign and still fails here.
           spctl --assess --type execute --verbose=4 "$app"
 
-      # Only reached when the two checks above passed, which is the point: a
-      # draft release cannot exist holding a bundle Gatekeeper would refuse.
-      # Draft, always — the last look at a release belongs to a person.
-      - name: Open a draft release with the verified bundle
+      # After verification rather than as part of the build, which is the point:
+      # a signed release cannot leave a bundle Gatekeeper would refuse sitting
+      # in a draft. Draft always — the last look at a release belongs to a person.
+      - name: Open a draft release with the bundle
         if: env.RELEASING == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -130,15 +140,54 @@ jobs:
             echo "::error::expected exactly one .dmg, found ${count}"
             exit 1
           fi
-          notes=$(cat <<'BODY'
-          Requires a supported backend to be installed — see the README.
-          macOS 12 or later, Apple silicon and Intel.
+          notes="${RUNNER_TEMP}/release-notes.md"
+          {
+            cat <<'BODY'
+          ## Install
+
+          ```
+          brew install shishir435/tap/nirmoka
+          ```
+
+          Builds from source on your machine, which takes a few minutes and asks
+          Gatekeeper nothing. macOS 12 or later, Apple silicon and Intel.
+
+          Nirmoka ships no disk scanner: `ncdu` comes with the formula, and the
+          Clean page additionally wants `brew install mole`.
           BODY
-          )
+            if [ "$SIGNED" != "true" ]; then
+              cat <<'BODY'
+
+          ## About the .dmg below
+
+          It is **unsigned**, because a Developer ID certificate needs a paid
+          Apple Developer account. macOS will refuse it on first launch and
+          offer to move it to the Trash. Homebrew above is the supported path.
+          BODY
+            fi
+          } > "$notes"
           gh release create "$GITHUB_REF_NAME" "$dmg" \
             --draft --prerelease \
             --title "Nirmoka ${GITHUB_REF_NAME}" \
-            --notes "$notes"
+            --notes-file "$notes"
+
+      # Two lines change in the tap per release, and guessing either of them
+      # produces a formula that fails to install for everyone but the guesser.
+      - name: What the tap needs
+        if: env.RELEASING == 'true'
+        run: |
+          tarball="${RUNNER_TEMP}/source.tar.gz"
+          curl -fsSL -o "$tarball" \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(shasum -a 256 "$tarball" | cut -d' ' -f1)
+          {
+            echo '## packaging/homebrew/nirmoka.rb'
+            echo
+            echo '```ruby'
+            echo "  url \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz\""
+            echo "  sha256 \"${sha}\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report what was produced
         run: |
