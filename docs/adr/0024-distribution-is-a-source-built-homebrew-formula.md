@@ -26,10 +26,10 @@ for anyone with a checkout.
 
 ## Decision
 
-The supported install is a formula in a personal tap, building from source:
+The supported install is a formula in the project's own tap, building from source:
 
 ```
-brew install shishir435/tap/nirmoka
+brew install nirmoka/tap/nirmoka
 ```
 
 `packaging/homebrew/nirmoka.rb` is the source of truth for that formula and is copied into the tap
@@ -54,7 +54,7 @@ in as build dependencies. For an app whose audience already runs `brew install n
 smaller ask than talking someone through a "damaged application" dialog.
 
 The formula fetches from npm and crates.io during the build, which homebrew-core does not accept.
-This stays a personal tap. Vendoring both dependency trees to qualify for core is not worth it at
+This stays an independent tap. Vendoring both dependency trees to qualify for core is not worth it at
 0.1.0.
 
 The signed path is unchanged and still preferred: `.github/workflows/release.yml` signs, notarizes,
