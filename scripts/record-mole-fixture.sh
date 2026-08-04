@@ -102,30 +102,62 @@ app=$(printf '%s\n' "$inventory" | awk '
 # parsed by the adapter, and a hand-written one that disagrees with the backend
 # is worse than none — `size` is a rounded *string* here ("410.9MB"), and a
 # fixture claiming a byte count let a schema mismatch reach a release.
+#
+# One entry from each source Mole distinguishes, so the fixture covers both the
+# App case and the Homebrew case where the display name and the uninstall
+# identifier disagree. `!seen++` rather than an `exit`: the same SIGPIPE that
+# `pipefail` turns into a failed recording.
+app_row=$(printf '%s\n' "$inventory" | awk '/"source": "App"/ && !seen++')
+cask_row=$(printf '%s\n' "$inventory" | awk '/"source": "Homebrew"/ && !seen++')
+
+# A machine with no Homebrew cask, or no App-source application, can only
+# produce half a fixture. Writing it anyway would leave a file that looks
+# recorded, parses as one entry or not at all, and fails the adapter test that
+# reads both rows — with the recording machine, not the fixture, as the cause.
+missing=()
+[[ -n "$app_row" ]] || missing+=("App")
+[[ -n "$cask_row" ]] || missing+=("Homebrew")
+if ((${#missing[@]} > 0)); then
+  echo "no application with source: ${missing[*]}" >&2
+  echo "the inventory on this machine cannot produce the fixture, which needs" >&2
+  echo "one row of each source; $out/applications.json is unchanged" >&2
+  exit 1
+fi
+
+# Every field the adapter reads is rewritten, so the recording machine's own
+# applications do not end up in a committed fixture. `"name"` does not match
+# inside `"uninstall_name"`: the pattern requires the quote before it.
+sanitize() {
+  local row=$1 name=$2 uninstall_name=$3
+  printf '%s\n' "$row" |
+    sed -E \
+      -e "s/\"name\": \"[^\"]*\"/\"name\": \"$name\"/" \
+      -e "s/\"uninstall_name\": \"[^\"]*\"/\"uninstall_name\": \"$uninstall_name\"/" \
+      -e 's/"bundle_id": "[^"]*"/"bundle_id": "com.example.desktop"/' \
+      -e 's|"path": "[^"]*"|"path": "/Applications/Example.app"|' \
+      -e 's/,$//' \
+      -e 's/^[[:space:]]*/  /'
+}
+
+# Built beside the fixture and moved into place, so a failure anywhere above
+# leaves the previous recording intact rather than a half-written one.
 applications="$out/applications.json"
+staged="$work/applications.json"
 {
   echo "["
-  # One entry from each source Mole distinguishes, so the fixture covers both
-  # the App case and the Homebrew case where the display name and the uninstall
-  # identifier disagree. Keys, order, and value types are the backend's.
-  printf '%s\n' "$inventory" |
-    awk '
-      /"source": "App"/ && !app++ { print "APP" $0 }
-      /"source": "Homebrew"/ && !cask++ { print "CASK" $0 }
-    ' |
-    sed -E \
-      -e 's/^APP//' -e 's/^CASK//' \
-      -e 's/"bundle_id": "[^"]*"/"bundle_id": "com.example.desktop"/' \
-      -e 's|"path": "[^"]*"|"path": "/Applications/Example.app"|' |
-    sed -E \
-      -e '1 s/"name": "[^"]*"/"name": "Example"/' \
-      -e '1 s/"uninstall_name": "[^"]*"/"uninstall_name": "Example"/' \
-      -e '2 s/"name": "[^"]*"/"name": "Example Cask"/' \
-      -e '2 s/"uninstall_name": "[^"]*"/"uninstall_name": "example-cask"/' \
-      -e '1 s/,$//' -e '1 s/$/,/' -e '2 s/,$//' |
-    sed -E 's/^[[:space:]]*/  /'
+  sanitize "$app_row" "Example" "Example" | sed -E 's/$/,/'
+  sanitize "$cask_row" "Example Cask" "example-cask"
   echo "]"
-} >"$applications"
+} >"$staged"
+
+# The adapter deserializes this file. A fixture that is not JSON is a test
+# failure with the wrong error message attached.
+if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$staged"; then
+  echo "the recorded inventory is not valid JSON; $applications is unchanged" >&2
+  exit 1
+fi
+
+mv "$staged" "$applications"
 echo "recorded $applications ($(wc -c <"$applications" | tr -d ' ') bytes)"
 
 {
