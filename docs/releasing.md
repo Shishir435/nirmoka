@@ -21,6 +21,34 @@ notarization failure cannot leave a refused `.dmg` sitting in a draft waiting to
 `workflow_dispatch` runs the same build without creating a release. Use it to check the pipeline
 without producing an artifact anyone can find.
 
+### Rehearsing a release
+
+Three ways to exercise this without claiming a version, in increasing fidelity:
+
+| How                 | What it covers                          | What it produces           |
+| ------------------- | --------------------------------------- | -------------------------- |
+| `workflow_dispatch` | build, signing, verification            | nothing                    |
+| `v0.1.0-rc.1`       | all of the above, plus the release step | a draft marked "rehearsal" |
+| `v0.1.0`            | the real thing                          | a draft to publish         |
+
+A tag with a semver prerelease suffix builds the version it rehearses — `v0.1.0-rc.1` checks against
+a bundle version of `0.1.0`, not `0.1.0-rc.1` — and the **What the tap needs** step is skipped,
+because the tap must never point at a rehearsal. Delete the rc draft and the rc tag afterwards.
+
+A failed run is the pipeline working. Nothing is created until every check ahead of it passed, so a
+red run leaves no draft to clean up — only the tag, which `git push --delete origin <tag>` removes.
+
+### Installing from main
+
+The formula carries a `head` line, so a build of current `main` needs no second formula:
+
+```bash
+brew install --HEAD nirmoka/tap/nirmoka
+```
+
+That, or `pnpm tauri dev` from a checkout, is what "test the dev version" means here. Both install
+the same bundle identifier as the release, so they replace it rather than sitting beside it.
+
 ### Releasing unsigned, on purpose
 
 Set the repository **variable** (not secret) `ALLOW_UNSIGNED_RELEASE=true`. Without it a tag missing
