@@ -18,7 +18,7 @@ is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.m
 ## Install
 
 ```bash
-brew install shishir435/tap/nirmoka
+brew install nirmoka/tap/nirmoka
 ```
 
 macOS 12 or later, Apple silicon and Intel. The formula builds from source, which takes a few

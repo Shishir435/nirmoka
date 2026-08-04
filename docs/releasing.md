@@ -54,7 +54,7 @@ everywhere else. It is the expected result of a local build, and an unacceptable
 ## The Homebrew tap
 
 The published formula lives in a separate repository, because a tap must be named
-`homebrew-<tap>`: **`Shishir435/homebrew-tap`**, holding `Formula/nirmoka.rb`. That file is a copy of
+`homebrew-<tap>`: **`nirmoka/homebrew-tap`**, holding `Formula/nirmoka.rb`. That file is a copy of
 [`packaging/homebrew/nirmoka.rb`](../packaging/homebrew/nirmoka.rb), which is the source of truth and
 the only one to edit.
 
@@ -65,12 +65,12 @@ nobody.
 Verify a change before pushing it to the tap:
 
 ```bash
-brew tap-new shishir435/tap --no-git      # local only, no GitHub involved
-cp packaging/homebrew/nirmoka.rb "$(brew --repository)/Library/Taps/shishir435/homebrew-tap/Formula/"
-brew style shishir435/tap
-brew audit --formula --strict shishir435/tap/nirmoka
-brew install --build-from-source shishir435/tap/nirmoka   # the real test, and slow
-brew untap shishir435/tap
+brew tap-new nirmoka/tap --no-git      # local only, no GitHub involved
+cp packaging/homebrew/nirmoka.rb "$(brew --repository)/Library/Taps/nirmoka/homebrew-tap/Formula/"
+brew style nirmoka/tap
+brew audit --formula --strict nirmoka/tap/nirmoka
+brew install --build-from-source nirmoka/tap/nirmoka   # the real test, and slow
+brew untap nirmoka/tap
 ```
 
 The install is the only step that proves the formula works, and it pulls `rust` and `node` as build
@@ -123,7 +123,7 @@ base64 -i certificate.p12 | pbcopy
 5. Wait for the workflow. A red run means no draft exists, which is the intended outcome of any
    failure here. A green run with the signature step **skipped** means the release is unsigned, which
    is expected until there is a certificate.
-6. Update the tap: copy `packaging/homebrew/nirmoka.rb` into `Shishir435/homebrew-tap`, with the two
+6. Update the tap: copy `packaging/homebrew/nirmoka.rb` into `nirmoka/homebrew-tap`, with the two
    lines from the run summary. Then install it on a clean machine, or at least a clean prefix, and
    launch the app. That is the path users take, so it is the one that has to be checked.
 7. If the release is signed, also download the `.dmg`, open it on a Mac that has never seen the app,
