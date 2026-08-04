@@ -23,9 +23,8 @@
 
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use nirmoka_adapter::process::{find_in_path, RunningProcess};
+use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::wire;
 use nirmoka_adapter::{
     validate_scan_root, Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions,
@@ -86,7 +85,7 @@ impl Adapter for NcduAdapter {
         let resolved = find_in_path(BINARY);
         let program = resolved.clone().unwrap_or_else(|| PathBuf::from(BINARY));
 
-        let output = match Command::new(&program).arg("--version").output() {
+        let output = match process::command(&program).arg("--version").output() {
             Ok(output) => output,
             // A missing binary is a normal state, not an error. Anything else
             // (permission denied, exec format error) is worth surfacing.
@@ -150,7 +149,7 @@ impl Adapter for NcduAdapter {
             return Err(cancelled());
         }
 
-        let mut command = Command::new(binary);
+        let mut command = process::command(binary);
         command
             // Without this, a user's ~/.config/ncdu/config silently changes
             // what a scan means — including turning on apparent-size mode or

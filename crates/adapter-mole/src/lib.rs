@@ -32,10 +32,9 @@
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use directories::BaseDirs;
-use nirmoka_adapter::process::{find_in_path, RunningProcess};
+use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::{
     Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupCompletion,
     CleanupExecution, CleanupItem, CleanupPreview, CleanupSystemScope, Detection,
@@ -92,7 +91,7 @@ impl Adapter for MoleAdapter {
         let resolved = find_in_path(BINARY);
         let program = resolved.clone().unwrap_or_else(|| PathBuf::from(BINARY));
 
-        let output = match Command::new(&program).arg("--version").output() {
+        let output = match process::command(&program).arg("--version").output() {
             Ok(output) => output,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Detection::NotInstalled)
@@ -278,7 +277,7 @@ fn cleanup_preview_from(
     use std::io::Read;
 
     let operation = "cleanup preview";
-    let mut command = Command::new(binary);
+    let mut command = process::command(binary);
     command.args(["clean", "--dry-run"]);
 
     let mut process =
@@ -370,7 +369,7 @@ fn execute_cleanup_from(
     use std::io::Read;
 
     let operation = "cleanup execution";
-    let mut command = Command::new(binary);
+    let mut command = process::command(binary);
     command.arg("clean");
 
     let mut process =
@@ -779,7 +778,7 @@ fn json_from_command<T: serde::de::DeserializeOwned>(
     operation: &'static str,
     cancel: &CancelToken,
 ) -> Result<T, AdapterError> {
-    let mut command = Command::new(binary);
+    let mut command = process::command(binary);
     command.args(args);
 
     let mut process =
