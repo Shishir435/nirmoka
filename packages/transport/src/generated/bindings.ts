@@ -164,7 +164,13 @@ export type DiskStatus = { mount: string, device: string, used: number, total: n
 
 export type HardwareStatus = { model: string, cpuModel: string, totalRam: string, diskSize: string, osVersion: string, };
 
-export type InstalledApplication = { name: string, bundleId: string, source: string, uninstallName: string, path: string, totalBytes: number, };
+export type InstalledApplication = { name: string, bundleId: string, source: string, uninstallName: string, path: string, 
+/**
+ * Mole's own rounded label, e.g. `"410.9MB"`. Not a byte count, and
+ * deliberately not converted into one — see `InstalledApplication` in
+ * `nirmoka-adapter`.
+ */
+reportedSize: string, };
 
 /**
  * Applications addressed by a backend's own uninstall identifier.

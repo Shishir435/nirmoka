@@ -1,18 +1,4 @@
 [
-  {
-    "name": "Example",
-    "bundle_id": "com.example.desktop",
-    "source": "system",
-    "uninstall_name": "Example",
-    "path": "/Applications/Example.app",
-    "size": 268435456
-  },
-  {
-    "name": "Sample Tool",
-    "bundle_id": "org.example.sample-tool",
-    "source": "user",
-    "uninstall_name": "Sample Tool",
-    "path": "/Users/fixture/Applications/Sample Tool.app",
-    "size": 67108864
-  }
+  {"name": "Example", "bundle_id": "com.example.desktop", "source": "App", "uninstall_name": "Example", "path": "/Applications/Example.app", "size": "767.3MB"},
+  {"name": "Example Cask", "bundle_id": "com.example.desktop", "source": "Homebrew", "uninstall_name": "example-cask", "path": "/Applications/Example.app", "size": "83.2MB"}
 ]

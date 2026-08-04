@@ -227,7 +227,11 @@ what the backend would delete.
 - Status: `mo status --json`, normalized into the capability-specific system-status contract;
   the adapter rejects malformed output and unsupported Mole versions
 - Application inventory: `mo uninstall --list` in non-interactive JSON mode. The backend's
-  `uninstall_name` crosses the boundary unchanged so nothing downstream guesses from a label
+  `uninstall_name` crosses the boundary unchanged so nothing downstream guesses from a label. `size`
+  is a rounded **string** — `"410.9MB"`, not a byte count — and is carried verbatim rather than
+  parsed back into bytes, so the window shows a per-application label and no total. The fixture is
+  recorded from the real command for this reason: a hand-written one claiming a number passed every
+  test and failed every user
 - Application uninstall: **none.** Every named `mo uninstall`, `--dry-run` included, stops at
   `Proceed with uninstallation? [y/N]` and blocks on stdin; the flag set is `--list`, `--dry-run`,
   `--permanent`, `--whitelist`, `--debug`, with no non-interactive escape. Answering another tool's

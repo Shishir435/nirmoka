@@ -787,6 +787,12 @@ fn json_from_command<T: serde::de::DeserializeOwned>(
             binary: BINARY,
             source,
         })?;
+    // Read the whole stream before parsing rather than deserializing from the
+    // pipe. `from_reader` stops at the end of the value — or at the first parse
+    // error — and drops the reader, and Mole writes its inventory one line at a
+    // time: the next `printf` lands on a closed pipe, the backend dies of
+    // SIGPIPE, and the real fault is replaced by "mo exited with status -1".
+    // Draining first means a malformed field is reported as a malformed field.
     let parsed = process
         .take_stdout()
         .ok_or_else(|| AdapterError::OperationFailed {
@@ -794,8 +800,21 @@ fn json_from_command<T: serde::de::DeserializeOwned>(
             operation,
             reason: "backend stdout was unavailable".to_string(),
         })
-        .and_then(|stdout| {
-            serde_json::from_reader(stdout).map_err(|source| AdapterError::MalformedBackendOutput {
+        .and_then(|mut stdout| {
+            use std::io::Read;
+
+            let mut bytes = Vec::new();
+            stdout
+                .read_to_end(&mut bytes)
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })?;
+            Ok(bytes)
+        })
+        .and_then(|bytes| {
+            serde_json::from_slice(&bytes).map_err(|source| AdapterError::MalformedBackendOutput {
                 binary: BINARY,
                 operation,
                 reason: source.to_string(),
@@ -1093,7 +1112,75 @@ mod tests {
         assert_eq!(applications[0].bundle_id, "com.example.desktop");
         assert_eq!(applications[0].uninstall_name, "Example");
         assert_eq!(applications[0].path, Path::new("/Applications/Example.app"));
-        assert_eq!(applications[0].size, 268_435_456);
+        // A rounded string, because that is what the backend publishes. A
+        // fixture claiming a byte count is how this reached a release broken.
+        assert_eq!(applications[0].reported_size, "767.3MB");
+        assert_eq!(applications[1].uninstall_name, "example-cask");
+        assert_eq!(applications[1].source, "Homebrew");
+    }
+
+    /// The failure that shipped: Mole writes its inventory one entry at a time,
+    /// so a parser that stops at the first bad field and drops the pipe kills
+    /// the backend with SIGPIPE — and the caller is told `mo exited with status
+    /// -1: printf: write error: Broken pipe`, which names neither the field nor
+    /// the file. Draining first means the schema mismatch reports itself.
+    #[test]
+    #[cfg(unix)]
+    fn a_schema_mismatch_is_reported_instead_of_a_broken_pipe() {
+        let script = executable_script(
+            r#"#!/bin/sh
+printf '%s
+' '['
+printf '%s
+' '  {"name": "Example", "bundle_id": "com.example", "source": "App", "uninstall_name": "example", "path": "/Applications/Example.app", "size": 42},'
+# Mole emits one line per application. Sleeping here is what a real inventory
+# does between entries, and it is what turns an early close into SIGPIPE.
+sleep 0.3
+printf '%s
+' '  {"name": "Later", "bundle_id": "com.example.later", "source": "App", "uninstall_name": "later", "path": "/Applications/Later.app", "size": "1.0MB"}'
+printf '%s
+' ']'
+"#,
+        );
+
+        let error = applications_from(&script, &CancelToken::new())
+            .expect_err("a numeric size is not what this backend publishes");
+        let _ = std::fs::remove_file(script);
+
+        assert!(
+            matches!(
+                error,
+                AdapterError::MalformedBackendOutput {
+                    operation: "application inventory",
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains("Broken pipe"),
+            "the backend's death must not replace the reason: {error}"
+        );
+    }
+
+    /// Run against the Mole on this machine. Ignored by default because CI has
+    /// none — and because the hand-written fixture this replaces is exactly the
+    /// kind of thing that passes every test and fails every user.
+    ///
+    /// `cargo test -p nirmoka-adapter-mole -- --ignored live_`
+    #[test]
+    #[ignore = "requires a real Mole install"]
+    fn live_inventory_parses_against_the_installed_backend() {
+        let adapter = MoleAdapter::new();
+        let applications = adapter
+            .installed_applications(&CancelToken::new())
+            .expect("the installed Mole must produce a parseable inventory");
+
+        assert!(!applications.is_empty(), "this machine has applications");
+        for application in &applications {
+            assert!(!application.uninstall_name.is_empty());
+            assert!(!application.reported_size.is_empty());
+        }
     }
 
     #[test]
@@ -1110,7 +1197,7 @@ mod tests {
         let script = executable_script(
             r#"#!/bin/sh
 [ "$1" = "uninstall" ] && [ "$2" = "--list" ] || exit 12
-printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"system","uninstall_name":"Example","path":"/Applications/Example.app","size":42}]'
+printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"App","uninstall_name":"Example","path":"/Applications/Example.app","size":"42B"}]'
 "#,
         );
         let applications =
@@ -1118,7 +1205,7 @@ printf '%s' '[{"name":"Example","bundle_id":"com.example.desktop","source":"syst
         let _ = std::fs::remove_file(script);
 
         assert_eq!(applications[0].uninstall_name, "Example");
-        assert_eq!(applications[0].size, 42);
+        assert_eq!(applications[0].reported_size, "42B");
     }
 
     #[test]

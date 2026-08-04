@@ -625,21 +625,23 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
         backendInsteadOf: null,
         total: 2,
         rows: [
+          // Sources and size labels are the backend's own vocabulary: "App" and
+          // "Homebrew", and a rounded string rather than a byte count.
           {
             name: "Example",
             bundleId: "com.example.desktop",
-            source: "system",
+            source: "App",
             uninstallName: "Example",
             path: "/Applications/Example.app",
-            totalBytes: 256 * 1024 ** 2,
+            reportedSize: "256.0MB",
           },
           {
-            name: "Sample Tool",
+            name: "Example Cask",
             bundleId: "org.example.sample-tool",
-            source: "user",
-            uninstallName: "Sample Tool",
-            path: "/Users/fixture/Applications/Sample Tool.app",
-            totalBytes: 64 * 1024 ** 2,
+            source: "Homebrew",
+            uninstallName: "example-cask",
+            path: "/Applications/Example Cask.app",
+            reportedSize: "64.0MB",
           },
         ],
       };

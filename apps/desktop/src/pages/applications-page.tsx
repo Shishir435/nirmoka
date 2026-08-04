@@ -71,7 +71,9 @@ export function ApplicationsPage() {
             key: `${app.bundleId}-${app.path}`,
             name: app.name,
             path: app.path,
-            totalBytes: app.totalBytes,
+            // Mole's own rounded label. Nothing here converts it to bytes: a
+            // number derived from "410.9MB" would look exact and add up wrong.
+            size: app.reportedSize,
             sizeIsPartial: false,
             detail: `${app.bundleId} · ${app.source}`,
             // The exact string Mole's uninstall command accepts. A display name
@@ -83,7 +85,7 @@ export function ApplicationsPage() {
             key: `${app.id}-${app.path}`,
             name: app.name,
             path: app.path,
-            totalBytes: app.totalBytes,
+            size: formatBytes(app.totalBytes),
             sizeIsPartial: app.sizeIsPartial,
             detail: null,
             // A scanned bundle is a directory, not a backend identifier.
@@ -91,11 +93,19 @@ export function ApplicationsPage() {
           })) ?? []),
     [installed, inventory],
   );
+  // Only the scan-derived rows carry byte counts, so only they can be ordered
+  // by size. Mole's rows arrive ordered by path and stay that way: reversing
+  // rounded text would produce an order that looks like a sort and is not one.
+  const orderable = !installed;
   const rows = useMemo(() => {
     const found = allRows.filter((app) => app.name.toLowerCase().includes(search.toLowerCase()));
-    return largestFirst ? found : [...found].reverse();
-  }, [allRows, largestFirst, search]);
-  const totalBytes = allRows.reduce((sum, app) => sum + app.totalBytes, 0);
+    return orderable && !largestFirst ? [...found].reverse() : found;
+  }, [allRows, largestFirst, orderable, search]);
+  // Only the scan knows byte counts. Mole publishes a rounded string per
+  // application, and adding those up would be arithmetic on labels.
+  const scannedBytes = installed
+    ? null
+    : (inventory?.rows.reduce((sum, app) => sum + app.totalBytes, 0) ?? 0);
   const total = installed?.total ?? inventory?.total ?? 0;
   const sourceHint = installed ? `Reported by ${installed.backend}` : `Within ${summary?.rootPath}`;
 
@@ -124,8 +134,12 @@ export function ApplicationsPage() {
             <MetricCard label="Applications Found" value={formatCount(total)} hint={sourceHint} />
             <MetricCard
               label={installed ? "Application Footprint" : "Scanned Footprint"}
-              value={formatBytes(totalBytes)}
-              hint={installed ? "Mole-reported app size" : "Bundle contents only"}
+              value={scannedBytes === null ? "Per application" : formatBytes(scannedBytes)}
+              hint={
+                scannedBytes === null
+                  ? "Mole reports a rounded size per app, not a total"
+                  : "Bundle contents only"
+              }
             />
             <MetricCard label="Last Used" value="Unavailable" hint="Not reported by backend" />
             <MetricCard
@@ -137,16 +151,18 @@ export function ApplicationsPage() {
           <Card className="shadow-none">
             <CardContent className="p-5">
               <SectionTitle
-                title="Applications by Size"
+                title={orderable ? "Applications by Size" : "Applications by Path"}
                 action={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setLargestFirst((value) => !value)}
-                  >
-                    <ArrowUpDown />
-                    {largestFirst ? "Largest first" : "Smallest first"}
-                  </Button>
+                  orderable ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setLargestFirst((value) => !value)}
+                    >
+                      <ArrowUpDown />
+                      {largestFirst ? "Largest first" : "Smallest first"}
+                    </Button>
+                  ) : undefined
                 }
               />
               <div className="relative mb-3">
@@ -206,7 +222,7 @@ interface ApplicationRowModel {
   key: string;
   name: string;
   path: string;
-  totalBytes: number;
+  size: string;
   sizeIsPartial: boolean;
   detail: string | null;
   uninstallName: string | null;
@@ -231,7 +247,7 @@ function ApplicationRow({ app }: { app: ApplicationRowModel }) {
         )}
       </span>
       {app.sizeIsPartial && <span className="text-xs text-warning-foreground">Partial</span>}
-      <span className="tabular-nums">{formatBytes(app.totalBytes)}</span>
+      <span className="tabular-nums">{app.size}</span>
     </div>
   );
 }
