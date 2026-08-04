@@ -235,17 +235,36 @@ fn package_manager_dirs() -> &'static [&'static str] {
 /// application is a cask, and under launchd's `PATH` it cannot, so it reports
 /// every cask as `"source": "App"`: wrong data, no error, nothing to notice.
 pub fn augmented_path() -> OsString {
-    let existing = std::env::var_os("PATH").unwrap_or_default();
-    let mut directories: Vec<PathBuf> = std::env::split_paths(&existing).collect();
+    augment(
+        std::env::var_os("PATH").unwrap_or_default().as_os_str(),
+        package_manager_dirs(),
+    )
+}
 
-    for extra in package_manager_dirs() {
+/// The appending core of [`augmented_path`], with the environment passed in so
+/// it can be tested against a known `PATH` rather than the machine's.
+///
+/// `existing` is copied through in order, duplicates and all. What someone put
+/// in their `PATH` is their business; the only promise here is that every
+/// directory in `extras` ends up present, and no more often than it already was.
+///
+/// Empty entries are the exception, and are dropped. An empty `PATH` splits into
+/// one empty component, which POSIX reads as the current directory — so passing
+/// it through would hand a backend a `PATH` beginning with wherever the app
+/// happened to be launched from.
+fn augment(existing: &OsStr, extras: &[&str]) -> OsString {
+    let mut directories: Vec<PathBuf> = std::env::split_paths(existing)
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .collect();
+
+    for extra in extras {
         let extra = PathBuf::from(extra);
         if !directories.contains(&extra) {
             directories.push(extra);
         }
     }
 
-    std::env::join_paths(directories).unwrap_or(existing)
+    std::env::join_paths(directories).unwrap_or_else(|_| existing.to_os_string())
 }
 
 /// A [`Command`] for a backend: `program`, with a `PATH` it can work with.
@@ -614,10 +633,90 @@ mod tests {
         );
     }
 
+    fn split(path: &OsStr) -> Vec<PathBuf> {
+        std::env::split_paths(path).collect()
+    }
+
     #[test]
-    fn the_augmented_path_keeps_what_was_there_and_appends_the_rest() {
+    fn augmenting_appends_what_is_missing_and_keeps_the_order() {
+        let augmented = augment(
+            &std::env::join_paths(["/usr/bin", "/bin"]).unwrap(),
+            &["/opt/homebrew/bin", "/opt/local/bin"],
+        );
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/opt/local/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_directory_already_in_path_is_not_appended_again() {
+        let augmented = augment(
+            &std::env::join_paths(["/opt/homebrew/bin", "/usr/bin"]).unwrap(),
+            &["/opt/homebrew/bin"],
+        );
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/bin")
+            ]
+        );
+    }
+
+    /// A `PATH` that lists something twice is the operator's business. Asserting
+    /// otherwise would fail on their machine rather than on a bug here — which
+    /// is what the first version of this test did.
+    #[test]
+    fn an_inherited_duplicate_is_left_alone() {
+        let inherited = std::env::join_paths(["/usr/bin", "/bin", "/usr/bin"]).unwrap();
+        let augmented = augment(&inherited, &["/opt/homebrew/bin"]);
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ]
+        );
+    }
+
+    /// An empty `PATH` splits into one empty component, and an empty component
+    /// means the current directory. Passing that on would let whatever directory
+    /// the app was launched from supply a backend.
+    #[test]
+    fn an_empty_path_becomes_the_fallbacks_alone() {
+        let augmented = augment(OsStr::new(""), &["/opt/homebrew/bin"]);
+        assert_eq!(split(&augmented), vec![PathBuf::from("/opt/homebrew/bin")]);
+    }
+
+    #[test]
+    fn an_empty_entry_anywhere_in_path_is_dropped() {
+        let augmented = augment(OsStr::new("/usr/bin::/bin"), &["/opt/homebrew/bin"]);
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_fallback_reaches_the_real_augmented_path() {
         let augmented = augmented_path();
-        let directories: Vec<PathBuf> = std::env::split_paths(&augmented).collect();
+        let directories = split(&augmented);
 
         for extra in package_manager_dirs() {
             assert!(
@@ -625,16 +724,6 @@ mod tests {
                 "{extra} missing from {augmented:?}"
             );
         }
-
-        // Order matters: an operator who sets PATH deliberately still wins.
-        if let Some(existing) = std::env::var_os("PATH") {
-            let head: Vec<PathBuf> = std::env::split_paths(&existing).collect();
-            assert_eq!(&directories[..head.len()], &head[..]);
-        }
-
-        let mut unique = directories.clone();
-        unique.dedup();
-        assert_eq!(unique.len(), directories.len(), "duplicated entry");
     }
 
     /// Mole asks `brew` whether an application is a cask. Under launchd's PATH
