@@ -4,7 +4,7 @@ Ordered by dependency, not by excitement. This file is the tracker — check box
 work lands, and keep the **Current step** line accurate.
 
 **Current step: 11 — Mole-powered macOS beta.** Phases 0–5 are complete. Phase 6 waits on a tag and
-on `Shishir435/homebrew-tap` existing; nothing else is outstanding. Releases are unsigned until there
+on `nirmoka/homebrew-tap` existing; nothing else is outstanding. Releases are unsigned until there
 is an Apple Developer account, which is why the install path is a Homebrew formula rather than a
 download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
 
@@ -320,11 +320,11 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
       tag fails unless someone set `ALLOW_UNSIGNED_RELEASE=true`, so an unsigned artifact cannot reach
       a release by accident — see `docs/releasing.md`
 - [x] A supported install that works without a certificate. `packaging/homebrew/nirmoka.rb` is a
-      source-built formula for a personal tap: `brew install shishir435/tap/nirmoka`. Homebrew removed
+      source-built formula for the org tap: `brew install nirmoka/tap/nirmoka`. Homebrew removed
       `--no-quarantine`, so a cask of an unsigned `.dmg` is refused by Gatekeeper, while a formula
       compiles locally and is never quarantined — see
       [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md)
-- [ ] `Shishir435/homebrew-tap` created, holding `Formula/nirmoka.rb`. A tap must be its own
+- [ ] `nirmoka/homebrew-tap` created, holding `Formula/nirmoka.rb`. A tap must be its own
       repository, and only the account holder can make one
 - [ ] Signing credentials in repository secrets. Needs a paid Apple Developer account and a
       Developer ID Application certificate, which only the account holder can produce. Until then

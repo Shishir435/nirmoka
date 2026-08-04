@@ -146,7 +146,7 @@ jobs:
           ## Install
 
           ```
-          brew install shishir435/tap/nirmoka
+          brew install nirmoka/tap/nirmoka
           ```
 
           Builds from source on your machine, which takes a few minutes and asks
