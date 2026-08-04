@@ -6,11 +6,17 @@ packaged — see [ADR 0023](adr/0023-the-first-release-is-macos-only.md).
 ## What produces a release
 
 `.github/workflows/release.yml`, on a `v*` tag. It builds a universal bundle for Apple silicon and
-Intel, signs and notarizes it if the credentials are present, verifies the result, and opens a
-**draft** release with the `.dmg` attached. Publishing is a person's click, always.
+Intel, signs and notarizes it, verifies the result, and only then opens a **draft** release with the
+`.dmg` attached. Publishing is a person's click, always.
 
-`workflow_dispatch` runs the same build without creating a release. Use it to check the pipeline
-without producing an artifact anyone can find.
+Two things about that order. A tag with any signing secret missing fails before the build, so an
+unsigned bundle never reaches a release. And the draft is created after `codesign` and `spctl` pass
+rather than before, so a notarization failure cannot leave a refused `.dmg` sitting in a draft
+waiting to be published.
+
+`workflow_dispatch` runs the same build without creating a release, and is the only path that
+tolerates an unsigned bundle. Use it to check the pipeline without producing an artifact anyone can
+find.
 
 ## Building one locally
 
@@ -33,10 +39,11 @@ everywhere else. It is the expected result of a local build, and an unacceptable
 
 ## Credentials
 
-Six repository secrets. Without them the build still succeeds and produces an **unsigned** bundle,
-which the workflow warns about and which must not be published: an unsigned app on a stranger's Mac
-reports itself as damaged, and the usual workaround is teaching people to strip quarantine
-attributes, which is a bad habit to teach for a tool that deletes files.
+Six repository secrets, all required to release. A tagged build refuses to start without them; a
+`workflow_dispatch` run without them produces an **unsigned** bundle, which the workflow warns about
+and which must not be published: an unsigned app on a stranger's Mac reports itself as damaged, and
+the usual workaround is teaching people to strip quarantine attributes, which is a bad habit to
+teach for a tool that deletes files.
 
 | Secret                       | What it is                                                      |
 | ---------------------------- | --------------------------------------------------------------- |
@@ -73,8 +80,9 @@ base64 -i certificate.p12 | pbcopy
    git push origin v0.1.0
    ```
 
-5. Wait for the workflow. Confirm the verification step ran rather than being skipped — a skipped
-   verification means the signing secrets were not set, and the artifact is unsigned.
+5. Wait for the workflow. A green run means the bundle was signed, notarized, and verified before the
+   draft was created; a red one means no draft exists, which is the intended outcome of any failure
+   here.
 6. Download the `.dmg` from the draft release, open it on a Mac that has never seen the app, and
    check that it launches without a Gatekeeper warning. Notarization can be verified without a
    second machine, but first-launch behaviour cannot.

@@ -5,8 +5,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # Runs the same build with no tag, which produces no release: `tagName` below
-  # is empty unless a tag triggered this.
+  # Runs the same build with no tag, which produces no release. This is the only
+  # path that tolerates an unsigned bundle.
   workflow_dispatch:
 
 concurrency:
@@ -27,6 +27,7 @@ jobs:
       # `if:` and the `secrets` context is not available in a step condition at
       # all. This says whether credentials exist, never what they are.
       SIGNED: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      RELEASING: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -34,13 +35,38 @@ jobs:
       # release whose name is not what it contains, and the mismatch is only
       # visible to whoever downloads it.
       - name: The tag and the bundled version agree
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.RELEASING == 'true'
         run: |
           tagged="${GITHUB_REF_NAME#v}"
           bundled=$(node -p "require('./crates/app/tauri.conf.json').version")
           echo "tag ${tagged}, bundle ${bundled}"
           if [ "$tagged" != "$bundled" ]; then
             echo "::error::tag ${GITHUB_REF_NAME} does not match tauri.conf.json ${bundled}"
+            exit 1
+          fi
+
+      # Before the build, not after it. An unsigned bundle is refused by every
+      # Mac but the one that built it, so a tag without credentials has nothing
+      # to produce and should cost a failed run rather than a bad draft.
+      - name: A tagged build has every signing credential
+        if: env.RELEASING == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=""
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            # Indirect expansion, so the loop names the secret without printing it.
+            [ -n "${!name}" ] || missing="${missing} ${name}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::a tag build must be signed and notarized; missing secrets:${missing}"
+            echo "::error::use workflow_dispatch for an unsigned dry run — see docs/releasing.md"
             exit 1
           fi
 
@@ -58,10 +84,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Signing and notarization are driven entirely by these variables. When
-      # the secrets are absent the build still succeeds and produces an
-      # *unsigned* bundle — useful for a dry run, and not something to publish.
-      # See docs/releasing.md.
+      # Signing and notarization are driven entirely by these variables. No
+      # `tagName`, so this step builds and never creates a release: publication
+      # happens below, after the bundle has been checked.
       - name: Build, sign, and notarize
         uses: tauri-apps/tauri-action@v0
         env:
@@ -75,20 +100,12 @@ jobs:
         with:
           projectPath: crates/app
           args: --target universal-apple-darwin
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: Nirmoka ${{ github.ref_name }}
-          releaseBody: |
-            Requires a supported backend to be installed — see the README.
-            macOS 12 or later, Apple silicon and Intel.
-          # Draft, always. The last look at a release belongs to a person.
-          releaseDraft: true
-          prerelease: true
           includeUpdaterJson: false
 
       # What the user's Mac will ask, asked here first. Without this the first
       # report of a broken signature is a user seeing "Nirmoka is damaged".
       - name: Verify the signature and the notarization ticket
-        if: env.SIGNED == 'true'
+        if: env.RELEASING == 'true' || env.SIGNED == 'true'
         run: |
           app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
           echo "verifying ${app}"
@@ -96,6 +113,32 @@ jobs:
           # Gatekeeper's own answer, which is the one that matters: a signed but
           # un-notarized build passes codesign and still fails here.
           spctl --assess --type execute --verbose=4 "$app"
+
+      # Only reached when the two checks above passed, which is the point: a
+      # draft release cannot exist holding a bundle Gatekeeper would refuse.
+      # Draft, always — the last look at a release belongs to a person.
+      - name: Open a draft release with the verified bundle
+        if: env.RELEASING == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # `|| true` so a missing bundle directory reports the count below
+          # rather than dying on find's own error, which reads as a CI glitch.
+          dmg=$(find target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' 2>/dev/null || true)
+          count=$(printf '%s\n' "$dmg" | grep -c . || true)
+          if [ "$count" != "1" ]; then
+            echo "::error::expected exactly one .dmg, found ${count}"
+            exit 1
+          fi
+          notes=$(cat <<'BODY'
+          Requires a supported backend to be installed — see the README.
+          macOS 12 or later, Apple silicon and Intel.
+          BODY
+          )
+          gh release create "$GITHUB_REF_NAME" "$dmg" \
+            --draft --prerelease \
+            --title "Nirmoka ${GITHUB_REF_NAME}" \
+            --notes "$notes"
 
       - name: Report what was produced
         run: |
