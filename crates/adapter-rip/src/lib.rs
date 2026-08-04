@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use directories::ProjectDirs;
-use nirmoka_adapter::process::{find_in_path, RunningProcess};
+use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::{
     Adapter, AdapterError, CancelToken, Capabilities, DeleteMode, DeletePlan, DeleteReceipt,
     Detection, ScanOptions, ScanSummary, WireSink,
@@ -84,7 +84,7 @@ impl Adapter for RipAdapter {
             return Ok(Detection::NotInstalled);
         };
 
-        let output = match Command::new(&program).arg("--version").output() {
+        let output = match process::command(&program).arg("--version").output() {
             Ok(output) => output,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Detection::NotInstalled)
@@ -230,7 +230,7 @@ impl Adapter for RipAdapter {
         if cancel.is_cancelled() {
             return Err(cancelled("undo deletion"));
         }
-        let mut command = Command::new(binary);
+        let mut command = process::command(binary);
         command
             .arg("--graveyard")
             // Keep the spelling recorded by rip. On macOS `/tmp` canonicalises

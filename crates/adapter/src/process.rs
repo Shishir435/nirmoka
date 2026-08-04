@@ -195,7 +195,90 @@ impl Drop for RunningProcess {
     }
 }
 
-/// Absolute path of `binary`, searched the way the shell would.
+/// Where a windowed process has to look because `PATH` will not tell it.
+///
+/// An application launched from Finder, Launchpad, or Spotlight inherits
+/// launchd's environment, and that `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` —
+/// read off the released 0.1.0 build, not assumed. Every backend Nirmoka drives
+/// is installed by a package manager into a directory that list does not
+/// contain, so trusting `PATH` alone means reporting "not installed" for an
+/// ncdu sitting in `/opt/homebrew/bin`. From a terminal the same code works,
+/// which is what makes this invisible in development.
+///
+/// Searched *after* `PATH`, so an explicitly set environment still decides.
+///
+/// Linuxbrew's prefix is deliberately absent: it lives under `/home`, which the
+/// invariant check forbids as a literal, and no Linux build is packaged
+/// (ADR 0023). A Linux user launching from a shell has the real `PATH` anyway.
+fn package_manager_dirs() -> &'static [&'static str] {
+    if cfg!(target_os = "macos") {
+        &[
+            "/opt/homebrew/bin",                 // Homebrew, Apple silicon
+            "/usr/local/bin",                    // Homebrew, Intel
+            "/opt/local/bin",                    // MacPorts
+            "/run/current-system/sw/bin",        // nix-darwin
+            "/nix/var/nix/profiles/default/bin", // Nix, single-user
+        ]
+    } else if cfg!(target_os = "linux") {
+        &["/usr/local/bin", "/var/lib/snapd/snap/bin"]
+    } else {
+        // Windows installers put themselves on the machine `PATH`, which a
+        // windowed process does inherit.
+        &[]
+    }
+}
+
+/// `PATH` with [`package_manager_dirs`] appended, for handing to a backend.
+///
+/// Detection resolves an absolute path, so finding the binary does not need
+/// this — but the binary's own lookups do. Mole asks `brew` whether an
+/// application is a cask, and under launchd's `PATH` it cannot, so it reports
+/// every cask as `"source": "App"`: wrong data, no error, nothing to notice.
+pub fn augmented_path() -> OsString {
+    augment(
+        std::env::var_os("PATH").unwrap_or_default().as_os_str(),
+        package_manager_dirs(),
+    )
+}
+
+/// The appending core of [`augmented_path`], with the environment passed in so
+/// it can be tested against a known `PATH` rather than the machine's.
+///
+/// `existing` is copied through in order, duplicates and all. What someone put
+/// in their `PATH` is their business; the only promise here is that every
+/// directory in `extras` ends up present, and no more often than it already was.
+///
+/// Empty entries are the exception, and are dropped. An empty `PATH` splits into
+/// one empty component, which POSIX reads as the current directory — so passing
+/// it through would hand a backend a `PATH` beginning with wherever the app
+/// happened to be launched from.
+fn augment(existing: &OsStr, extras: &[&str]) -> OsString {
+    let mut directories: Vec<PathBuf> = std::env::split_paths(existing)
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .collect();
+
+    for extra in extras {
+        let extra = PathBuf::from(extra);
+        if !directories.contains(&extra) {
+            directories.push(extra);
+        }
+    }
+
+    std::env::join_paths(directories).unwrap_or_else(|_| existing.to_os_string())
+}
+
+/// A [`Command`] for a backend: `program`, with a `PATH` it can work with.
+///
+/// Use this rather than `Command::new` for anything that runs a backend. See
+/// [`augmented_path`] for what goes wrong otherwise.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.env("PATH", augmented_path());
+    command
+}
+
+/// Absolute path of `binary`, searched the way the shell would — plus the
+/// package-manager directories a windowed process never inherits.
 ///
 /// Detection reporting `"ncdu"` instead of `/opt/homebrew/bin/ncdu` is not good
 /// enough: on a machine with several copies installed, the user needs to know
@@ -211,12 +294,33 @@ pub fn find_in_path(binary: &str) -> Option<PathBuf> {
 /// The searchable core of [`find_in_path`], with the environment passed in so
 /// it can be tested without mutating process-global state.
 fn search_path(binary: &str, path: Option<&OsStr>, pathext: Option<&OsStr>) -> Option<PathBuf> {
-    let path = path?;
+    search_dirs(binary, path, pathext, package_manager_dirs())
+}
 
-    for directory in std::env::split_paths(path) {
-        if directory.as_os_str().is_empty() {
+/// `search_path` with the fallback directories injected, so a test can point
+/// them at a temporary directory instead of the machine's real Homebrew.
+fn search_dirs(
+    binary: &str,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+    extras: &[&str],
+) -> Option<PathBuf> {
+    // An absent `PATH` is not a reason to skip the fallbacks. It is a reason to
+    // need them.
+    let from_path = path
+        .map(|path| std::env::split_paths(path).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    let searched = from_path
+        .into_iter()
+        .chain(extras.iter().map(PathBuf::from));
+
+    let mut seen: Vec<PathBuf> = Vec::new();
+    for directory in searched {
+        if directory.as_os_str().is_empty() || seen.contains(&directory) {
             continue;
         }
+        seen.push(directory.clone());
 
         for candidate in candidates(&directory.join(binary), pathext) {
             if is_executable_file(&candidate) {
@@ -465,8 +569,179 @@ mod tests {
     }
 
     #[test]
-    fn reports_nothing_when_path_is_unset() {
-        assert_eq!(search_path("tool", None, None), None);
+    fn reports_nothing_when_path_is_unset_and_no_fallback_has_it() {
+        assert_eq!(search_dirs("tool", None, None, &[]), None);
+    }
+
+    /// The bug this exists for: a windowed process gets launchd's
+    /// `/usr/bin:/bin:/usr/sbin:/sbin`, and every backend is installed
+    /// somewhere else.
+    #[test]
+    fn a_package_manager_directory_is_searched_when_path_misses_it() {
+        let brew = TempDir::new("path-brew");
+        let name = if cfg!(windows) { "tool.exe" } else { "tool" };
+        let expected = write_executable(&brew.0, name);
+
+        let launchd = std::env::join_paths(["/usr/bin", "/bin"]).unwrap();
+        let extras = [brew.0.to_str().unwrap()];
+
+        assert_eq!(
+            search_dirs("tool", Some(launchd.as_os_str()), None, &extras),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn path_still_decides_when_both_have_the_binary() {
+        let from_path = TempDir::new("path-first");
+        let fallback = TempDir::new("path-fallback");
+
+        let name = if cfg!(windows) { "tool.exe" } else { "tool" };
+        let expected = write_executable(&from_path.0, name);
+        write_executable(&fallback.0, name);
+
+        let path = std::env::join_paths([&from_path.0]).unwrap();
+        let extras = [fallback.0.to_str().unwrap()];
+
+        assert_eq!(
+            search_dirs("tool", Some(path.as_os_str()), None, &extras),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn an_absent_path_is_a_reason_to_use_the_fallbacks_rather_than_give_up() {
+        let fallback = TempDir::new("path-only-fallback");
+        let name = if cfg!(windows) { "tool.exe" } else { "tool" };
+        let expected = write_executable(&fallback.0, name);
+
+        let extras = [fallback.0.to_str().unwrap()];
+        assert_eq!(search_dirs("tool", None, None, &extras), Some(expected));
+    }
+
+    #[test]
+    fn a_directory_named_twice_is_searched_once() {
+        let dir = TempDir::new("path-dupe");
+        let listed = dir.0.to_str().unwrap();
+
+        let path = std::env::join_paths([&dir.0, &dir.0]).unwrap();
+        // Nothing to find, so this asserts only that duplication is tolerated
+        // and the fallback list agreeing with PATH is not an error.
+        assert_eq!(
+            search_dirs("tool", Some(path.as_os_str()), None, &[listed]),
+            None
+        );
+    }
+
+    fn split(path: &OsStr) -> Vec<PathBuf> {
+        std::env::split_paths(path).collect()
+    }
+
+    #[test]
+    fn augmenting_appends_what_is_missing_and_keeps_the_order() {
+        let augmented = augment(
+            &std::env::join_paths(["/usr/bin", "/bin"]).unwrap(),
+            &["/opt/homebrew/bin", "/opt/local/bin"],
+        );
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/opt/local/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_directory_already_in_path_is_not_appended_again() {
+        let augmented = augment(
+            &std::env::join_paths(["/opt/homebrew/bin", "/usr/bin"]).unwrap(),
+            &["/opt/homebrew/bin"],
+        );
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/bin")
+            ]
+        );
+    }
+
+    /// A `PATH` that lists something twice is the operator's business. Asserting
+    /// otherwise would fail on their machine rather than on a bug here — which
+    /// is what the first version of this test did.
+    #[test]
+    fn an_inherited_duplicate_is_left_alone() {
+        let inherited = std::env::join_paths(["/usr/bin", "/bin", "/usr/bin"]).unwrap();
+        let augmented = augment(&inherited, &["/opt/homebrew/bin"]);
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ]
+        );
+    }
+
+    /// An empty `PATH` splits into one empty component, and an empty component
+    /// means the current directory. Passing that on would let whatever directory
+    /// the app was launched from supply a backend.
+    #[test]
+    fn an_empty_path_becomes_the_fallbacks_alone() {
+        let augmented = augment(OsStr::new(""), &["/opt/homebrew/bin"]);
+        assert_eq!(split(&augmented), vec![PathBuf::from("/opt/homebrew/bin")]);
+    }
+
+    #[test]
+    fn an_empty_entry_anywhere_in_path_is_dropped() {
+        let augmented = augment(OsStr::new("/usr/bin::/bin"), &["/opt/homebrew/bin"]);
+
+        assert_eq!(
+            split(&augmented),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_fallback_reaches_the_real_augmented_path() {
+        let augmented = augmented_path();
+        let directories = split(&augmented);
+
+        for extra in package_manager_dirs() {
+            assert!(
+                directories.contains(&PathBuf::from(extra)),
+                "{extra} missing from {augmented:?}"
+            );
+        }
+    }
+
+    /// Mole asks `brew` whether an application is a cask. Under launchd's PATH
+    /// it cannot, and answers `"source": "App"` for every one of them — which is
+    /// why this is set on the command rather than left to the parent process.
+    #[test]
+    fn a_backend_command_carries_the_augmented_path() {
+        let built = command("does-not-need-to-exist");
+        let path = built
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .expect("PATH is set on the command");
+
+        let directories: Vec<PathBuf> = std::env::split_paths(path).collect();
+        for extra in package_manager_dirs() {
+            assert!(directories.contains(&PathBuf::from(extra)));
+        }
     }
 
     #[test]

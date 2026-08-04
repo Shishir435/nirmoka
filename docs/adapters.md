@@ -142,6 +142,26 @@ against this adapter's tested range. An adapter that has never seen the installe
 must report `Detection::UnsupportedVersion` and let the UI explain, rather than guessing
 that the output format is unchanged.
 
+### `PATH` is not what a windowed process thinks it is
+
+An application launched from Finder, Launchpad, or Spotlight inherits launchd's environment,
+whose `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` — no Homebrew, no MacPorts, no Nix. Every
+backend this project drives is installed somewhere else, so a detection that trusts `PATH`
+reports "not installed" for a binary sitting in `/opt/homebrew/bin`. Run the same code from
+a terminal and it works, which is what makes the bug invisible until someone double-clicks
+the app. It shipped in 0.1.0 exactly that way.
+
+Two consequences, both handled in `nirmoka_adapter::process`:
+
+- **Finding a binary** goes through `find_in_path`, which searches `PATH` and then the
+  platform's package-manager directories. `PATH` still wins where both have it.
+- **Running a binary** goes through `process::command` rather than `Command::new`, which
+  sets an augmented `PATH` on the child. Backends shell out too: Mole asks `brew` whether an
+  application is a cask, and without it reports every cask as `"source": "App"` — wrong
+  data, no error, nothing on screen to suggest anything went wrong.
+
+An adapter that calls `Command::new` directly for a backend reintroduces the second half.
+
 ### Validate before you spawn
 
 Path validation happens inside the adapter, before the path becomes a subprocess argument.

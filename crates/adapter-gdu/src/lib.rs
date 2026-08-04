@@ -14,9 +14,8 @@
 
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use nirmoka_adapter::process::{find_in_path, RunningProcess};
+use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::wire;
 use nirmoka_adapter::{
     validate_scan_root, Adapter, AdapterError, CancelToken, Capabilities, Detection, ScanOptions,
@@ -67,7 +66,7 @@ impl Adapter for GduAdapter {
         let resolved = find_in_path(BINARY);
         let program = resolved.clone().unwrap_or_else(|| PathBuf::from(BINARY));
 
-        let output = match Command::new(&program).arg("--version").output() {
+        let output = match process::command(&program).arg("--version").output() {
             Ok(output) => output,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Detection::NotInstalled)
@@ -139,7 +138,7 @@ impl Adapter for GduAdapter {
             return Err(cancelled());
         }
 
-        let mut command = Command::new(binary);
+        let mut command = process::command(binary);
         command
             // Do not let ~/.gdu.yaml change the meaning of a scan. The null
             // device is a valid empty config on each supported platform.
