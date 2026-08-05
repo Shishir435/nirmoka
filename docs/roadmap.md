@@ -3,10 +3,11 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 11 — Mole-powered macOS beta.** Phases 0–5 are complete. Phase 6 waits on a tag and
-on `nirmoka/homebrew-tap` existing; nothing else is outstanding. Releases are unsigned until there
-is an Apple Developer account, which is why the install path is a Homebrew formula rather than a
-download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
+**Current step: 12 — Move to Trash.** Step 11 shipped as 0.1.1: `brew install nirmoka/tap/nirmoka`
+installs a working macOS beta, and it is read-only. Step 12 adds the verb the product is missing —
+see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md). Releases are unsigned until
+there is an Apple Developer account, which is why the install path is a Homebrew formula rather
+than a download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
 
 ## Sequencing rules
 
@@ -324,7 +325,7 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
       `--no-quarantine`, so a cask of an unsigned `.dmg` is refused by Gatekeeper, while a formula
       compiles locally and is never quarantined — see
       [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md)
-- [ ] `nirmoka/homebrew-tap` created, holding `Formula/nirmoka.rb`. A tap must be its own
+- [x] `nirmoka/homebrew-tap` created, holding `Formula/nirmoka.rb`. A tap must be its own
       repository, and only the account holder can make one
 - [ ] Signing credentials in repository secrets. Needs a paid Apple Developer account and a
       Developer ID Application certificate, which only the account holder can produce. Until then
@@ -337,8 +338,69 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
       and tests the workspace, and the Linux and Windows matrix entries stay commented in place for
       the end of the beta rather than deleted
 - [x] Pin `rust-toolchain.toml` to Rust 1.97.1
-- [ ] First tagged release. The pipeline is ready and the version is set to 0.1.0; tagging is a
-      decision, and publishing the draft is a person's click
+- [x] First tagged release. v0.1.0 rehearsed the pipeline and found two failures only a tag could
+      reach — the pinned toolchain missing a darwin target, and Tauri signing on an *empty*
+      `APPLE_CERTIFICATE` — so it was superseded by **v0.1.1**, which is what the tap serves. A
+      third bug survived to a user: a windowed process inherits launchd's `PATH`, so every backend
+      read as missing until adapters searched the package-manager directories themselves
+
+## Step 12 — Move to Trash
+
+The beta is installable and read-only. A user finds the 21 GiB directory and leaves for Finder,
+which is the loop this step closes. Recoverable removal only — permanent selected-path deletion
+stays deferred under ADR 0017's gate, and nothing here weakens it. Reasoning, and the residual race
+it does *not* close, in [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
+
+Nothing here ships without tests.
+
+### Phase 1 — the decision
+
+- [x] [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md): Trash is a platform
+      integration under the ADR 0022 precedent, not an adapter capability. Every adapter keeps
+      `delete: false` and `trash: false`
+- [x] ADR 0018 marked partly superseded — recoverable removal only
+- [x] Roadmap caught up with what 0.1.1 actually shipped
+
+### Phase 2 — the operation
+
+- [ ] `crates/app/src/trash.rs`, beside `reveal.rs`. Validate through the shared
+      `validate_delete_target`, validate again immediately before the move, then move
+- [ ] The `trash` crate (5.2.6, MIT) rather than a subprocess: the platform's own Trash service,
+      no optional install, and Windows and freedesktop for free
+- [ ] `PlatformFeatures` gains the platform's own wording and whether the operation is offered
+- [ ] Tests for an empty path, a path that is gone, the scan root, a symlink escaping the root, a
+      system-critical location, and a real round trip into the Trash
+
+### Phase 3 — the boundary
+
+- [ ] A `Trashed` journal event with no recovery path. The crate cannot enumerate or restore the
+      macOS Trash, and guessing a name inside `~/.Trash` would be a receipt that does not resolve
+- [ ] A failed journal append reports the move beside the error rather than failing it — ADR 0020's
+      rule, because the Trash is its own record
+- [ ] Prepare and confirm commands through the existing one-time token; no raw path crosses back in
+- [ ] `pnpm types`, with the regenerated bindings committed
+
+### Phase 4 — Space
+
+- [ ] Trash the selected row, with the platform's wording and a confirmation naming the exact path
+      and size
+- [ ] Say that Put Back in Finder is the undo, rather than offering an Undo button that guesses
+- [ ] The removed row leaves the view; totals above it are not silently redrawn, because the scan
+      measured them before the removal
+- [ ] Gating and confirmation state as pure modules, driven by the existing `node --test` runner
+
+### Phase 5 — Applications
+
+- [ ] Trash a selected application bundle
+- [ ] State plainly that leftovers stay: a full uninstall needs Mole, which cannot be driven past
+      its own prompt — [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md)
+
+### Phase 6 — ship it
+
+- [ ] `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`, `pnpm typecheck && pnpm build`
+- [ ] `pnpm tauri dev` and trash something from the window. A command that compiles and a window
+      that moves a file are different claims
+- [ ] 0.2.0, tagged, with the tap updated
 
 ---
 

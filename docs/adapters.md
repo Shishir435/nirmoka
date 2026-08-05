@@ -48,6 +48,11 @@ before deletion was withdrawn. See
 deferred beyond v0.1 by
 [ADR 0018](adr/0018-selected-path-deletion-is-deferred-for-v0-1.md).
 
+Moving a selected path to the Trash is not a counter-example. It is a platform integration living
+with the window, like Reveal in Finder, so `delete` and `trash` stay `false` on every adapter and
+the trait gains nothing — see
+[ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
+
 ```rust
 pub trait Adapter: Send + Sync {
     /// Stable machine identifier: "ncdu", "mole", "gdu", "rip".

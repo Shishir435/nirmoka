@@ -1,6 +1,8 @@
 # ADR 0018: selected-path deletion is deferred for v0.1
 
-- Status: accepted
+- Status: partly superseded by
+  [ADR 0025](0025-move-to-trash-is-a-platform-integration.md) — recoverable removal ships as a
+  platform integration; permanent selected-path deletion remains deferred under ADR 0017's gate
 - Date: 2026-08-01
 
 ## Context
