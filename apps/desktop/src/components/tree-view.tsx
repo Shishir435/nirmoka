@@ -26,14 +26,8 @@ import type { PlatformFeatures, Row, ScanSummary, Sort, Transport } from "@nirmo
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { activeDescendantId, rowElementId, rowIntent, rowLabel } from "@/components/row-keyboard";
+import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useDirectory, type DirectoryHeader } from "@/hooks/use-directory";
 import {
   canTrash,
@@ -471,46 +465,12 @@ export function TreeView({
         </div>
       )}
 
-      <Dialog
-        open={pendingTrash !== null}
-        onOpenChange={(open) => !open && dispatchTrash({ type: "dismissed" })}
-      >
-        <DialogContent>
-          {pendingTrash && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  {features?.trashLabel ?? "Move to Trash"}
-                  {pendingTrash.isDirectory ? " this folder?" : " this item?"}
-                </DialogTitle>
-                <DialogDescription>{pendingTrash.warning}</DialogDescription>
-              </DialogHeader>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground shrink-0">Path</dt>
-                  {/* The resolved path from Rust, not the row's name. What the
-                      confirmation names has to be what was checked. */}
-                  <dd className="truncate text-right font-mono text-xs">
-                    {pendingTrash.targetPath}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground shrink-0">Size</dt>
-                  <dd className="text-right font-mono">{formatBytes(pendingTrash.totalBytes)}</dd>
-                </div>
-              </dl>
-              <div className="mt-6 flex justify-end gap-2">
-                <Button variant="outline" onClick={() => dispatchTrash({ type: "dismissed" })}>
-                  Cancel
-                </Button>
-                <Button onClick={() => doTrash(pendingTrash.confirmationToken)}>
-                  {features?.trashLabel ?? "Move to Trash"}
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <TrashConfirmation
+        preparation={pendingTrash}
+        label={features?.trashLabel ?? "Move to Trash"}
+        onCancel={() => dispatchTrash({ type: "dismissed" })}
+        onConfirm={doTrash}
+      />
     </div>
   );
 }

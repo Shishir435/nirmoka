@@ -396,9 +396,17 @@ Nothing here ships without tests.
 
 ### Phase 5 — Applications
 
-- [ ] Trash a selected application bundle
-- [ ] State plainly that leftovers stay: a full uninstall needs Mole, which cannot be driven past
-      its own prompt — [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md)
+- [x] Trash an application bundle from the scan-derived list
+- [x] **Only the scan-derived list.** Mole's inventory reports a path; the scan reports a node, and
+      a node is the only thing Rust can resolve from its own tree. Accepting a path back from the
+      window would undo the property that makes every other destructive call checkable, for one
+      screen. When Mole's list is showing, the page says to scan `/Applications` instead of hiding
+      an action with no explanation
+- [x] State plainly that leftovers stay: this moves the bundle and nothing else. A full uninstall
+      needs Mole, which cannot be driven past its own prompt —
+      [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md)
+- [x] One confirmation dialog, shared with the browser. Two copies of a destructive confirmation
+      drift, and the copy that drifts is the one nobody was looking at
 
 ### Phase 6 — ship it
 
