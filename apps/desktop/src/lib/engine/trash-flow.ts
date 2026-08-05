@@ -31,13 +31,20 @@ export interface TrashState {
 
 export type TrashEvent =
   | { type: "prepareStarted"; nodeId: number }
-  | { type: "prepared"; preparation: TrashPreparation }
+  /**
+   * Carries the row it was asked for. A preparation is a network round trip,
+   * and the answer can arrive after the user has moved on — see the reducer.
+   */
+  | { type: "prepared"; nodeId: number; preparation: TrashPreparation }
   | { type: "prepareFailed"; message: string }
   | { type: "dismissed" }
   | { type: "runStarted" }
   | { type: "trashed"; operation: TrashOperation }
   | { type: "runFailed"; message: string }
-  /** Moved to another directory: the error is stale, the removals are not. */
+  /**
+   * Moved to another directory, or reordered. The error is stale, any request
+   * in flight is abandoned, and the removals are neither.
+   */
   | { type: "moved" }
   /** A rescan renumbers the tree, so ids from the old one name other things. */
   | { type: "rescanned" };
@@ -57,19 +64,35 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
     case "prepareStarted":
       return { ...state, preparing: true, pendingNodeId: event.nodeId, error: null, last: null };
 
+    // A preparation that nobody is waiting for any more is dropped rather than
+    // shown. Rust answers asynchronously, so the reply can land after the user
+    // has changed directory or reordered the list — and the token it carries
+    // is still executable, because navigating within a scan does not change
+    // the scan id that `confirm_trash` checks. Left ungated, leaving a
+    // directory mid-request pops a confirmation for a row that is no longer
+    // there. The row is matched too, so an answer to a superseded request
+    // cannot install itself over a newer one.
     case "prepared":
-      return { ...state, preparing: false, preparation: event.preparation };
+      return state.preparing && state.pendingNodeId === event.nodeId
+        ? { ...state, preparing: false, preparation: event.preparation }
+        : state;
 
     case "prepareFailed":
       // Rust refused before anything moved — a stale scan, a path that is gone,
       // a location the validator protects. There is nothing to confirm.
-      return {
-        ...state,
-        preparing: false,
-        preparation: null,
-        pendingNodeId: null,
-        error: event.message,
-      };
+      //
+      // Gated like `prepared`: a refusal for an abandoned request is not news,
+      // and reporting it would put an error under a directory the user has
+      // already left.
+      return state.preparing
+        ? {
+            ...state,
+            preparing: false,
+            preparation: null,
+            pendingNodeId: null,
+            error: event.message,
+          }
+        : state;
 
     case "dismissed":
       return { ...state, preparation: null, pendingNodeId: null };
@@ -98,8 +121,23 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
       // the setting that grants it, from Rust.
       return { ...state, running: false, pendingNodeId: null, error: event.message };
 
+    // Everything about the old location goes, including a confirmation the
+    // user has effectively walked away from. What survives is what is already
+    // in the Trash — those rows are still in the Trash from anywhere.
+    //
+    // A move already running is not cancelled. It cannot be: the item is
+    // between here and the Trash, and its result still belongs in the journal.
     case "moved":
-      return { ...state, error: null, last: null };
+      return state.running
+        ? { ...state, preparation: null, preparing: false, error: null }
+        : {
+            ...state,
+            preparation: null,
+            pendingNodeId: null,
+            preparing: false,
+            error: null,
+            last: null,
+          };
 
     case "rescanned":
       return INITIAL_TRASH;

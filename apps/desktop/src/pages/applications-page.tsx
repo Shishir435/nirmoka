@@ -142,7 +142,7 @@ export function ApplicationsPage() {
     if (!summary) return;
     dispatchTrash({ type: "prepareStarted", nodeId });
     transport.prepareTrash(summary.scanId, nodeId).then(
-      (preparation) => dispatchTrash({ type: "prepared", preparation }),
+      (preparation) => dispatchTrash({ type: "prepared", nodeId, preparation }),
       (reason: unknown) => dispatchTrash({ type: "prepareFailed", message: String(reason) }),
     );
   };

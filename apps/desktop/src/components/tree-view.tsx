@@ -255,10 +255,11 @@ export function TreeView({
 
   const askToTrash = useCallback(
     (row: Row) => {
+      const nodeId = row.id;
       setActionError(null);
-      dispatchTrash({ type: "prepareStarted", nodeId: row.id });
-      transport.prepareTrash(summary.scanId, row.id).then(
-        (preparation) => dispatchTrash({ type: "prepared", preparation }),
+      dispatchTrash({ type: "prepareStarted", nodeId });
+      transport.prepareTrash(summary.scanId, nodeId).then(
+        (preparation) => dispatchTrash({ type: "prepared", nodeId, preparation }),
         (reason: unknown) => dispatchTrash({ type: "prepareFailed", message: String(reason) }),
       );
     },
