@@ -26,9 +26,12 @@ No such backend has appeared, and **the macOS Trash does not meet that gate eith
 after Nirmoka's check, so the race ADR 0017 identified survives unchanged. Anyone reading this
 looking for the moment the race was closed will not find it.
 
-What changes is the consequence rather than the race. macOS records an item's original location
+What changes is the consequence rather than the race. macOS can record an item's original location
 when it moves it to the Trash, so **Put Back** restores it exactly, from the Finder, with no
 involvement from Nirmoka. A lost race puts the *wrong item* in the Trash. It does not destroy it.
+
+"Can" is doing work in that sentence, and the Decision below is where it is paid for: the two macOS
+routes to the Trash differ on exactly this property.
 
 That is a weaker guarantee than ADR 0017 asked for and a different kind of guarantee: bounded and
 reversible rather than atomic and bound. It is enough for a recoverable move and it is not enough
@@ -54,8 +57,9 @@ for permanent removal, which is the line this ADR draws.
 - **The one-time confirmation token boundary is reused unchanged.** A raw path never crosses back
   from the window into an execute command.
 - **The operation is journalled as `Trashed`, with no recovery path.** The `trash` crate cannot
-  enumerate or restore the macOS Trash — its `os_limited` module is compiled out on macOS — and
-  Nirmoka must not guess a path inside `~/.Trash`, where macOS renames on collision. Recovery is
+  enumerate or restore the macOS Trash — its `os_limited` module is compiled out on macOS — and the
+  Finder route reports nothing back about where the item landed. Nirmoka must not guess a path
+  inside `~/.Trash`, where the system renames on collision. Recovery is
   Finder's Put Back, and the window says so rather than offering an Undo button that shells out to
   a guess.
 - **A failed journal append reports the move beside the error rather than failing it.** This
@@ -67,11 +71,35 @@ for permanent removal, which is the line this ADR draws.
 - **The move happens first, then the journal write.** The reverse order records removals that did
   not happen, which is the worse of the two failures.
 
-Implementation is the `trash` crate (5.2.6, MIT), not a subprocess. It calls the same platform
-Trash service Finder uses; the alternative — `osascript` telling Finder to delete, or a
-`brew install trash` dependency — either drives another app's UI scripting layer or makes the
-product's central verb depend on an optional install. The crate covers Windows and the freedesktop
-specification too, so the code stays platform-neutral under invariant 3 even though
+### Which macOS route, and what it costs
+
+macOS offers two, and they are not interchangeable:
+
+| Route                                | Put Back | Permission needed          |
+| ------------------------------------ | -------- | -------------------------- |
+| `NSFileManager -trashItemAtURL:`     | not reliably | none                   |
+| An Apple event asking the Finder     | yes      | Automation, for the Finder |
+
+`trashItemAtURL:` is the obvious-looking choice and it is the wrong one here. It does not reliably
+write the entry that makes Put Back appear — a long-standing system bug, documented by the crate
+and by every other tool that has hit it. An item recovered by dragging it out of the Trash is
+recovered to wherever the user drops it, not to where it came from.
+
+**Nirmoka asks the Finder.** Put Back is the property the whole decision rests on, so the route
+that keeps it wins, and the Automation permission it needs is stated rather than avoided. A refused
+Apple event is reported with the setting that grants it. Taking the quieter route instead would
+keep the button working while removing the reason the button was allowed to exist — which is the
+kind of trade that looks free in a diff and is not.
+
+There is an irony worth naming, because it contradicts an earlier draft of this ADR: the Finder
+route *is* `osascript`, driving another application's scripting interface. That was listed as the
+thing to avoid. It turns out to be the only route that produces a recoverable-to-its-original-place
+item, so it is what recoverability costs, and the cost is a permission prompt rather than a hidden
+weakening.
+
+Implementation is the `trash` crate (5.2.6, MIT), which wraps both routes and lets the choice be
+explicit. It covers Windows and the freedesktop specification too, so the code stays
+platform-neutral under invariant 3 even though
 [ADR 0023](0023-the-first-release-is-macos-only.md) packages macOS only.
 
 ## Consequences

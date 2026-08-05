@@ -31,4 +31,5 @@ serde = { workspace = true }
 # stored as JSON, so reading it is production code rather than test scaffolding.
 serde_json = { workspace = true }
 tauri = { workspace = true }
+trash = { workspace = true }
 ts-rs = { workspace = true }

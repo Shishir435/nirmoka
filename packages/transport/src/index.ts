@@ -782,7 +782,11 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     // Outside the shell there is no desktop to hand a path to, so the mock says
     // what it can do rather than pretending the buttons work.
     async platformFeatures() {
-      return { revealLabel: "Reveal in Finder", quickLook: false };
+      return {
+        revealLabel: "Reveal in Finder",
+        quickLook: false,
+        trashLabel: "Move to Trash",
+      };
     },
 
     async revealInFileManager() {

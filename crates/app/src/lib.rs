@@ -20,6 +20,7 @@ pub mod reveal;
 pub mod scan;
 pub mod settings;
 pub mod state;
+pub mod trash;
 pub mod volume;
 
 use state::AppState;

@@ -107,9 +107,10 @@ pub struct Crumb {
 
 /// What the desktop this is running on can do with a selected path.
 ///
-/// Reveal and Quick Look are shell integrations rather than backend abilities,
-/// so they are not `Capabilities` flags — see ADR 0022. The label travels with
-/// the flag because every platform has its own word for the same action.
+/// Reveal, Quick Look, and moving to the Trash are shell integrations rather
+/// than backend abilities, so they are not `Capabilities` flags — see ADR 0022
+/// and ADR 0025. The label travels with the flag because every platform has its
+/// own word for the same action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(
@@ -119,6 +120,10 @@ pub struct Crumb {
 pub struct PlatformFeatures {
     pub reveal_label: String,
     pub quick_look: bool,
+    /// There is no flag beside this one. Every desktop Nirmoka builds for has a
+    /// trash, so a constant `true` would be structure with nothing to decide; a
+    /// volume that cannot accept the move reports it when the move is tried.
+    pub trash_label: String,
 }
 
 /// Capacity of the filesystem containing a path. This is deliberately separate

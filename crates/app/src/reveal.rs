@@ -39,6 +39,7 @@ fn features_for(os: &str) -> PlatformFeatures {
         // Quick Look is a macOS feature. Naming a Linux or Windows equivalent
         // would mean picking one that may not be installed.
         quick_look: os == "macos",
+        trash_label: crate::trash::label_for(os).to_string(),
     }
 }
 
