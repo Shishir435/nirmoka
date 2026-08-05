@@ -167,6 +167,7 @@ export function TreeView({
   const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
+  const nextTrashRequest = useRef(0);
 
   const total = directory.status === "ready" ? directory.header.total : 0;
 
@@ -256,12 +257,17 @@ export function TreeView({
   const askToTrash = useCallback(
     (row: Row) => {
       const nodeId = row.id;
+      // One number per attempt, captured by both callbacks. The row's id will
+      // not do: navigate away and back, ask about the same row again, and a
+      // late reply from the abandoned request is indistinguishable from the
+      // live one's.
+      const requestId = ++nextTrashRequest.current;
       setActionError(null);
-      dispatchTrash({ type: "prepareStarted", nodeId });
+      dispatchTrash({ type: "prepareStarted", requestId, nodeId });
       transport.prepareTrash(summary.scanId, nodeId).then(
-        (preparation) => dispatchTrash({ type: "prepared", nodeId, preparation }),
+        (preparation) => dispatchTrash({ type: "prepared", requestId, preparation }),
         (reason: unknown) =>
-          dispatchTrash({ type: "prepareFailed", nodeId, message: String(reason) }),
+          dispatchTrash({ type: "prepareFailed", requestId, message: String(reason) }),
       );
     },
     [summary.scanId, transport],

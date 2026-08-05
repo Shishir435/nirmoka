@@ -36,8 +36,8 @@ const run = (events: TrashEvent[], from: TrashState = INITIAL_TRASH) =>
 
 test("a confirmed move marks the row it was prepared for", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "trashed", operation: operation() },
   ]);
@@ -50,8 +50,8 @@ test("a confirmed move marks the row it was prepared for", () => {
 
 test("the token is dropped when the run starts, not when it finishes", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
   ]);
 
@@ -63,8 +63,8 @@ test("the token is dropped when the run starts, not when it finishes", () => {
 
 test("a failed move leaves the row unmarked", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "runFailed", message: "macOS did not let Nirmoka ask the Finder" },
   ]);
@@ -75,8 +75,8 @@ test("a failed move leaves the row unmarked", () => {
 
 test("a refused preparation opens no dialog", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepareFailed", nodeId: 42, message: "cannot delete the scan root" },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepareFailed", requestId: 1, message: "cannot delete the scan root" },
   ]);
 
   assert.equal(state.preparation, null);
@@ -86,8 +86,8 @@ test("a refused preparation opens no dialog", () => {
 
 test("a row already in the Trash cannot be sent there twice", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "trashed", operation: operation() },
   ]);
@@ -99,8 +99,8 @@ test("a row already in the Trash cannot be sent there twice", () => {
 
 test("nothing is offered while a confirmation is open or a move is running", () => {
   const open = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
   ]);
   assert.equal(canTrash(open, row(9)), false);
 
@@ -112,12 +112,12 @@ test("nothing is offered while a confirmation is open or a move is running", () 
 
 test("changing directory clears the error but keeps what was moved", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "trashed", operation: operation() },
-    { type: "prepareStarted", nodeId: 43 },
-    { type: "prepareFailed", nodeId: 43, message: "cannot be resolved" },
+    { type: "prepareStarted", requestId: 2, nodeId: 43 },
+    { type: "prepareFailed", requestId: 2, message: "cannot be resolved" },
     { type: "moved" },
   ]);
 
@@ -130,9 +130,9 @@ test("a preparation that arrives after the user left opens nothing", () => {
   // is somewhere else — but navigating within a scan does not change the scan
   // id `confirm_trash` checks, so the token would still have executed.
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "moved" },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepared", requestId: 1, preparation: preparation() },
   ]);
 
   assert.equal(state.preparation, null, "no dialog for a row that is not on screen");
@@ -142,9 +142,9 @@ test("a preparation that arrives after the user left opens nothing", () => {
 
 test("a refusal that arrives after the user left says nothing", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "moved" },
-    { type: "prepareFailed", nodeId: 42, message: "cannot be resolved" },
+    { type: "prepareFailed", requestId: 1, message: "cannot be resolved" },
   ]);
 
   assert.equal(state.error, null, "an error under a directory nobody is looking at");
@@ -156,11 +156,11 @@ test("a stale refusal does not cancel the request that replaced it", () => {
   // and the replacement's own answer is then dropped as unexpected, leaving no
   // dialog and someone else's error.
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "moved" },
-    { type: "prepareStarted", nodeId: 43 },
-    { type: "prepareFailed", nodeId: 42, message: "cannot be resolved" },
-    { type: "prepared", nodeId: 43, preparation: preparation(5) },
+    { type: "prepareStarted", requestId: 2, nodeId: 43 },
+    { type: "prepareFailed", requestId: 1, message: "cannot be resolved" },
+    { type: "prepared", requestId: 2, preparation: preparation(5) },
   ]);
 
   assert.equal(state.error, null, "the abandoned request's refusal is not shown");
@@ -169,12 +169,12 @@ test("a stale refusal does not cancel the request that replaced it", () => {
 
 test("an answer to a superseded request cannot replace a newer one", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "moved" },
-    { type: "prepareStarted", nodeId: 43 },
+    { type: "prepareStarted", requestId: 2, nodeId: 43 },
     // The first request finally lands, after a second one was started.
-    { type: "prepared", nodeId: 42, preparation: preparation(1) },
-    { type: "prepared", nodeId: 43, preparation: preparation(2) },
+    { type: "prepared", requestId: 1, preparation: preparation(1) },
+    { type: "prepared", requestId: 2, preparation: preparation(2) },
   ]);
 
   assert.equal(state.preparation?.confirmationToken, 2, "the row that was actually asked about");
@@ -185,8 +185,8 @@ test("leaving a directory does not abandon a move already underway", () => {
   // The item is between here and the Trash. The result still has to mark its
   // row and reach the journal.
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "moved" },
     { type: "trashed", operation: operation() },
@@ -196,10 +196,49 @@ test("leaving a directory does not abandon a move already underway", () => {
   assert.equal(state.running, false);
 });
 
+test("asking about the same row twice does not confuse the two requests", () => {
+  // Navigate away and back, click the same row again, and the second request
+  // wears the first one's node id. Whichever way the two replies interleave,
+  // only the live one may answer.
+  const failThenSucceed = run([
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "moved" },
+    { type: "prepareStarted", requestId: 2, nodeId: 42 },
+    { type: "prepareFailed", requestId: 1, message: "cannot be resolved" },
+    { type: "prepared", requestId: 2, preparation: preparation(9) },
+  ]);
+
+  assert.equal(failThenSucceed.error, null, "the abandoned request's refusal is not shown");
+  assert.equal(failThenSucceed.preparation?.confirmationToken, 9);
+  assert.equal(failThenSucceed.pendingNodeId, 42);
+
+  const succeedTwice = run([
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "moved" },
+    { type: "prepareStarted", requestId: 2, nodeId: 42 },
+    // The abandoned request's token was already superseded inside Rust, so
+    // this dialog would have failed on confirm.
+    { type: "prepared", requestId: 1, preparation: preparation(1) },
+    { type: "prepared", requestId: 2, preparation: preparation(2) },
+  ]);
+
+  assert.equal(succeedTwice.preparation?.confirmationToken, 2, "the live token, not the stale one");
+});
+
+test("a reply that outlives a rescan is not answered", () => {
+  const state = run([
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "rescanned" },
+    { type: "prepared", requestId: 1, preparation: preparation() },
+  ]);
+
+  assert.deepEqual(state, INITIAL_TRASH, "a new tree owes the old one nothing");
+});
+
 test("a rescan forgets every id, because the tree renumbers from zero", () => {
   const state = run([
-    { type: "prepareStarted", nodeId: 42 },
-    { type: "prepared", nodeId: 42, preparation: preparation() },
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
     { type: "runStarted" },
     { type: "trashed", operation: operation() },
     { type: "rescanned" },

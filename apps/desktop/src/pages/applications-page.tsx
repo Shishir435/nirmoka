@@ -1,5 +1,5 @@
 import { ArrowUpDown, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type {
   ApplicationInventory,
   InstalledApplicationInventory,
@@ -35,6 +35,7 @@ export function ApplicationsPage() {
   const [largestFirst, setLargestFirst] = useState(true);
   const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
+  const nextTrashRequest = useRef(0);
 
   useEffect(() => {
     let live = true;
@@ -140,11 +141,13 @@ export function ApplicationsPage() {
 
   const askToTrash = (nodeId: number) => {
     if (!summary) return;
-    dispatchTrash({ type: "prepareStarted", nodeId });
+    // One number per attempt — see the same counter in `tree-view.tsx`.
+    const requestId = ++nextTrashRequest.current;
+    dispatchTrash({ type: "prepareStarted", requestId, nodeId });
     transport.prepareTrash(summary.scanId, nodeId).then(
-      (preparation) => dispatchTrash({ type: "prepared", nodeId, preparation }),
+      (preparation) => dispatchTrash({ type: "prepared", requestId, preparation }),
       (reason: unknown) =>
-        dispatchTrash({ type: "prepareFailed", nodeId, message: String(reason) }),
+        dispatchTrash({ type: "prepareFailed", requestId, message: String(reason) }),
     );
   };
 

@@ -18,6 +18,17 @@ import type { Row, TrashOperation, TrashPreparation } from "@nirmoka/transport";
 export interface TrashState {
   /** A live confirmation, which the dialog is open for. */
   preparation: TrashPreparation | null;
+  /**
+   * Which request the reducer is waiting on, or `null` for none.
+   *
+   * A request needs an identity of its own, and the row's id is not one: node
+   * ids are reused. Navigate away and back, or reorder, and asking about the
+   * same row again produces a second request wearing the first one's name — at
+   * which point a late reply from the abandoned one is indistinguishable from
+   * the live one's. Counting requests makes them distinguishable by
+   * construction.
+   */
+  pendingRequestId: number | null;
   /** The row that confirmation is about, so the right one can be marked. */
   pendingNodeId: number | null;
   preparing: boolean;
@@ -30,14 +41,18 @@ export interface TrashState {
 }
 
 export type TrashEvent =
-  | { type: "prepareStarted"; nodeId: number }
   /**
-   * Carries the row it was asked for. A preparation is a network round trip,
-   * and the answer can arrive after the user has moved on — see the reducer.
+   * `requestId` comes from the caller, which is the only place that can hand
+   * the same number to a request and to its two possible answers.
    */
-  | { type: "prepared"; nodeId: number; preparation: TrashPreparation }
-  /** Carries the row for the same reason `prepared` does. */
-  | { type: "prepareFailed"; nodeId: number; message: string }
+  | { type: "prepareStarted"; requestId: number; nodeId: number }
+  /**
+   * A preparation is a round trip, and the answer can arrive after the user
+   * has moved on — see the reducer.
+   */
+  | { type: "prepared"; requestId: number; preparation: TrashPreparation }
+  /** Identified for the same reason `prepared` is. */
+  | { type: "prepareFailed"; requestId: number; message: string }
   | { type: "dismissed" }
   | { type: "runStarted" }
   | { type: "trashed"; operation: TrashOperation }
@@ -52,6 +67,7 @@ export type TrashEvent =
 
 export const INITIAL_TRASH: TrashState = {
   preparation: null,
+  pendingRequestId: null,
   pendingNodeId: null,
   preparing: false,
   running: false,
@@ -63,18 +79,29 @@ export const INITIAL_TRASH: TrashState = {
 export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
   switch (event.type) {
     case "prepareStarted":
-      return { ...state, preparing: true, pendingNodeId: event.nodeId, error: null, last: null };
+      return {
+        ...state,
+        preparing: true,
+        pendingRequestId: event.requestId,
+        pendingNodeId: event.nodeId,
+        error: null,
+        last: null,
+      };
 
-    // A preparation that nobody is waiting for any more is dropped rather than
-    // shown. Rust answers asynchronously, so the reply can land after the user
-    // has changed directory or reordered the list — and the token it carries
-    // is still executable, because navigating within a scan does not change
-    // the scan id that `confirm_trash` checks. Left ungated, leaving a
-    // directory mid-request pops a confirmation for a row that is no longer
-    // there. The row is matched too, so an answer to a superseded request
-    // cannot install itself over a newer one.
+    // Both answers are matched to the request that asked, and only the request
+    // still being waited on is answered.
+    //
+    // Rust replies asynchronously, so a reply can land after the user has
+    // changed directory, reordered, or rescanned — and the token it carries
+    // would still have executed, because navigating within a scan does not
+    // change the scan id `confirm_trash` checks. Ungated, that pops a
+    // confirmation for a row nobody can see.
+    //
+    // Matching on the row is not enough, which is what two rounds of review
+    // established: node ids are reused, so a second request about the same row
+    // wears the first one's name. `requestId` is unique per attempt.
     case "prepared":
-      return state.preparing && state.pendingNodeId === event.nodeId
+      return answering(state, event.requestId)
         ? { ...state, preparing: false, preparation: event.preparation }
         : state;
 
@@ -82,16 +109,15 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
       // Rust refused before anything moved — a stale scan, a path that is gone,
       // a location the validator protects. There is nothing to confirm.
       //
-      // Gated exactly like `prepared`, and on the row rather than on
-      // `preparing` alone. `preparing` is true again as soon as a replacement
-      // request starts, so an abandoned request rejecting at that moment would
-      // clear the replacement's pending row — and the replacement's own answer
-      // would then be dropped by the guard above, leaving no dialog and a stale
-      // error. The row is what tells the two apart.
-      return state.preparing && state.pendingNodeId === event.nodeId
+      // Gated exactly like `prepared`. An abandoned request rejecting while a
+      // replacement is in flight would otherwise clear the replacement's
+      // pending state, and the replacement's own answer would then be dropped
+      // by the guard above — no dialog, and someone else's error under it.
+      return answering(state, event.requestId)
         ? {
             ...state,
             preparing: false,
+            pendingRequestId: null,
             preparation: null,
             pendingNodeId: null,
             error: event.message,
@@ -99,7 +125,7 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
         : state;
 
     case "dismissed":
-      return { ...state, preparation: null, pendingNodeId: null };
+      return { ...state, preparation: null, pendingRequestId: null, pendingNodeId: null };
 
     case "runStarted":
       // The token is spent the moment it is sent. Keeping the dialog's copy
@@ -133,10 +159,11 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
     // between here and the Trash, and its result still belongs in the journal.
     case "moved":
       return state.running
-        ? { ...state, preparation: null, preparing: false, error: null }
+        ? { ...state, preparation: null, preparing: false, pendingRequestId: null, error: null }
         : {
             ...state,
             preparation: null,
+            pendingRequestId: null,
             pendingNodeId: null,
             preparing: false,
             error: null,
@@ -146,6 +173,17 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
     case "rescanned":
       return INITIAL_TRASH;
   }
+}
+
+/**
+ * Whether this answer belongs to the request still being waited on.
+ *
+ * `preparing` alone is not the question: it is true again the moment a
+ * replacement starts. Neither is the row, because rows are asked about more
+ * than once.
+ */
+function answering(state: TrashState, requestId: number) {
+  return state.preparing && state.pendingRequestId === requestId;
 }
 
 /** Whether this row can be moved to the Trash right now. */
