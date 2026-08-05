@@ -339,7 +339,7 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
       the end of the beta rather than deleted
 - [x] Pin `rust-toolchain.toml` to Rust 1.97.1
 - [x] First tagged release. v0.1.0 rehearsed the pipeline and found two failures only a tag could
-      reach — the pinned toolchain missing a darwin target, and Tauri signing on an *empty*
+      reach — the pinned toolchain missing a darwin target, and Tauri signing on an _empty_
       `APPLE_CERTIFICATE` — so it was superseded by **v0.1.1**, which is what the tap serves. A
       third bug survived to a user: a windowed process inherits launchd's `PATH`, so every backend
       read as missing until adapters searched the package-manager directories themselves
@@ -349,7 +349,7 @@ behind the prompt, so previewing and executing are the same unreachable call. Se
 The beta is installable and read-only. A user finds the 21 GiB directory and leaves for Finder,
 which is the loop this step closes. Recoverable removal only — permanent selected-path deletion
 stays deferred under ADR 0017's gate, and nothing here weakens it. Reasoning, and the residual race
-it does *not* close, in [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
+it does _not_ close, in [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
 
 Nothing here ships without tests.
 
@@ -382,12 +382,17 @@ Nothing here ships without tests.
 
 ### Phase 4 — Space
 
-- [ ] Trash the selected row, with the platform's wording and a confirmation naming the exact path
-      and size
-- [ ] Say that Put Back in Finder is the undo, rather than offering an Undo button that guesses
-- [ ] The removed row leaves the view; totals above it are not silently redrawn, because the scan
-      measured them before the removal
-- [ ] Gating and confirmation state as pure modules, driven by the existing `node --test` runner
+- [x] Trash the selected row, with the platform's wording and a confirmation naming the resolved
+      path and size — the path Rust checked, not the name that was clicked
+- [x] ⌘⌫, handled ahead of the "modified keys belong to the platform" guard because it is exactly
+      a platform gesture. It opens the same confirmation the button does
+- [x] Say that Put Back in Finder is the undo, rather than offering an Undo button that guesses
+- [x] ~~The removed row leaves the view~~ — **it stays, struck through and labelled.** Removing it
+      would renumber the list under the virtualizer while Rust's `total` still counts it, and the
+      size beside it was measured before the move. A marked row says both things; a missing row
+      says neither. A line under the list states that totals predate the removals
+- [x] Gating and confirmation state as pure modules, driven by the existing `node --test` runner —
+      `trash-flow.ts`, 9 tests
 
 ### Phase 5 — Applications
 

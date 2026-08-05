@@ -28,7 +28,7 @@ looking for the moment the race was closed will not find it.
 
 What changes is the consequence rather than the race. macOS can record an item's original location
 when it moves it to the Trash, so **Put Back** restores it exactly, from the Finder, with no
-involvement from Nirmoka. A lost race puts the *wrong item* in the Trash. It does not destroy it.
+involvement from Nirmoka. A lost race puts the _wrong item_ in the Trash. It does not destroy it.
 
 "Can" is doing work in that sentence, and the Decision below is where it is paid for: the two macOS
 routes to the Trash differ on exactly this property.
@@ -53,7 +53,7 @@ for permanent removal, which is the line this ADR draws.
 - **The shared validator runs, and runs again immediately before the move.** `validate_delete_target`
   is unchanged: absolute, canonical, strictly below the scan root, and outside the protected OS
   roots. Re-validating does not close the race; it closes the stale-confirmation and
-  symlink-retarget cases, which are the ones a check *can* close.
+  symlink-retarget cases, which are the ones a check _can_ close.
 - **The one-time confirmation token boundary is reused unchanged.** A raw path never crosses back
   from the window into an execute command.
 - **The operation is journalled as `Trashed`, with no recovery path.** The `trash` crate cannot
@@ -75,10 +75,10 @@ for permanent removal, which is the line this ADR draws.
 
 macOS offers two, and they are not interchangeable:
 
-| Route                                | Put Back | Permission needed          |
-| ------------------------------------ | -------- | -------------------------- |
-| `NSFileManager -trashItemAtURL:`     | not reliably | none                   |
-| An Apple event asking the Finder     | yes      | Automation, for the Finder |
+| Route                            | Put Back     | Permission needed          |
+| -------------------------------- | ------------ | -------------------------- |
+| `NSFileManager -trashItemAtURL:` | not reliably | none                       |
+| An Apple event asking the Finder | yes          | Automation, for the Finder |
 
 `trashItemAtURL:` is the obvious-looking choice and it is the wrong one here. It does not reliably
 write the entry that makes Put Back appear — a long-standing system bug, documented by the crate
@@ -92,7 +92,7 @@ keep the button working while removing the reason the button was allowed to exis
 kind of trade that looks free in a diff and is not.
 
 There is an irony worth naming, because it contradicts an earlier draft of this ADR: the Finder
-route *is* `osascript`, driving another application's scripting interface. That was listed as the
+route _is_ `osascript`, driving another application's scripting interface. That was listed as the
 thing to avoid. It turns out to be the only route that produces a recoverable-to-its-original-place
 item, so it is what recoverability costs, and the cost is a permission prompt rather than a hidden
 weakening.

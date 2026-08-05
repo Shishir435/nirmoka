@@ -273,8 +273,7 @@ export function tauriTransport(): Transport {
       invoke<DeleteOperation>("confirm_delete", { confirmationToken }),
     undoDelete: (operationId) => invoke<DeleteOperation>("undo_delete", { operationId }),
     operationLog: () => invoke<DeleteOperation[]>("operation_log"),
-    prepareTrash: (scanId, nodeId) =>
-      invoke<TrashPreparation>("prepare_trash", { scanId, nodeId }),
+    prepareTrash: (scanId, nodeId) => invoke<TrashPreparation>("prepare_trash", { scanId, nodeId }),
     confirmTrash: (confirmationToken) =>
       invoke<TrashOperation>("confirm_trash", { confirmationToken }),
     trashLog: () => invoke<TrashOperation[]>("trash_log"),

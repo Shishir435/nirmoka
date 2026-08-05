@@ -37,9 +37,7 @@ tauri-build = "2"
 # depend on `brew install trash`. Default features off: they only add `chrono`,
 # for listing trash contents, which macOS does not support and Nirmoka does not
 # do.
-trash = { version = "5", default-features = false, features = [
-  "coinit_apartmentthreaded",
-] }
+trash = { version = "5", default-features = false, features = ["coinit_apartmentthreaded"] }
 
 # Generates the TypeScript mirrors of the boundary types. A hand-maintained
 # mirror of a Rust struct drifts silently; that is the whole problem here.

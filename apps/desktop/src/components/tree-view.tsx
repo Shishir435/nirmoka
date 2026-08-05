@@ -19,15 +19,29 @@
  * directory, a page jump past the end — are covered by tests.
  */
 
-import { Eye, FolderOpen } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Eye, FolderOpen, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import type { Row, ScanSummary, Sort, Transport } from "@nirmoka/transport";
+import type { PlatformFeatures, Row, ScanSummary, Sort, Transport } from "@nirmoka/transport";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { activeDescendantId, rowElementId, rowIntent, rowLabel } from "@/components/row-keyboard";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useDirectory, type DirectoryHeader } from "@/hooks/use-directory";
+import {
+  canTrash,
+  INITIAL_TRASH,
+  isTrashed,
+  outcomeMessage,
+  reduceTrash,
+} from "@/lib/engine/trash-flow";
 import { formatBytes, formatCount, plural } from "@/lib/format";
 
 /** Row height in pixels. The virtualizer needs this before it measures. */
@@ -156,10 +170,9 @@ export function TreeView({
   const directory = useDirectory(transport, { scanId: summary.scanId, parentId, sort });
   const scroller = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [features, setFeatures] = useState<{ revealLabel: string; quickLook: boolean } | null>(
-    null,
-  );
+  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
 
   const total = directory.status === "ready" ? directory.header.total : 0;
 
@@ -189,7 +202,14 @@ export function TreeView({
     if (scroller.current) scroller.current.scrollTop = 0;
     setSelected(null);
     setActionError(null);
+    dispatchTrash({ type: "moved" });
   }, [parentId, sort]);
+
+  // A rescan renumbers the tree from zero, so an id remembered as "already in
+  // the Trash" would mark whichever row now happens to hold that index.
+  useEffect(() => {
+    dispatchTrash({ type: "rescanned" });
+  }, [summary.scanId]);
 
   // What this desktop can do with a path, asked once. A button labelled
   // "Reveal in Finder" on another platform would be a macOS habit leaking out.
@@ -204,6 +224,10 @@ export function TreeView({
     };
   }, [transport]);
 
+  // Held as a local so the dialog's callbacks narrow it: a reducer field cannot
+  // be narrowed across a closure, and the alternative is a `!` on a token that
+  // decides whether a file moves.
+  const pendingTrash = trash.preparation;
   const rowAt = directory.status === "ready" ? directory.rowAt : null;
   const selectedRow = selected === null ? undefined : rowAt?.(selected);
   const parent = directory.status === "ready" ? directory.header.ancestors.at(-1) : undefined;
@@ -235,8 +259,44 @@ export function TreeView({
     [summary.scanId, transport],
   );
 
+  const askToTrash = useCallback(
+    (row: Row) => {
+      setActionError(null);
+      dispatchTrash({ type: "prepareStarted", nodeId: row.id });
+      transport.prepareTrash(summary.scanId, row.id).then(
+        (preparation) => dispatchTrash({ type: "prepared", preparation }),
+        (reason: unknown) => dispatchTrash({ type: "prepareFailed", message: String(reason) }),
+      );
+    },
+    [summary.scanId, transport],
+  );
+
+  const doTrash = useCallback(
+    (confirmationToken: number) => {
+      dispatchTrash({ type: "runStarted" });
+      transport.confirmTrash(confirmationToken).then(
+        (operation) => dispatchTrash({ type: "trashed", operation }),
+        (reason: unknown) => dispatchTrash({ type: "runFailed", message: String(reason) }),
+      );
+    },
+    [transport],
+  );
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    // A modified key belongs to the platform: ⌘↓ and friends are not ours.
+    // ⌘⌫ is the desktop's own gesture for this, and it opens the same
+    // confirmation the button does rather than acting on the keypress. It is
+    // handled before the guard below because it is precisely a platform
+    // shortcut, not a shortcut of ours that a modifier happens to reach.
+    if ((event.metaKey || event.ctrlKey) && event.key === "Backspace") {
+      if (canTrash(trash, selectedRow)) {
+        event.preventDefault();
+        askToTrash(selectedRow);
+      }
+      return;
+    }
+
+    // Any other modified key belongs to the platform: ⌘↓ and friends are not
+    // ours.
     if (event.metaKey || event.ctrlKey || event.altKey) return;
 
     const intent = rowIntent(event.key, { selected, total });
@@ -329,6 +389,16 @@ export function TreeView({
                 Quick Look
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => canTrash(trash, selectedRow) && askToTrash(selectedRow)}
+              disabled={!canTrash(trash, selectedRow)}
+            >
+              <Trash2 />
+              {trash.running ? "Moving…" : features.trashLabel}
+            </Button>
           </>
         )}
       </div>
@@ -339,6 +409,15 @@ export function TreeView({
       </div>
 
       {actionError && <p className="text-destructive text-xs">{actionError}</p>}
+      {trash.error && <p className="text-destructive text-xs">{trash.error}</p>}
+      {trash.last && <p className="text-muted-foreground text-xs">{outcomeMessage(trash.last)}</p>}
+      {trash.trashedIds.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          Sizes on this page were measured before{" "}
+          {plural(trash.trashedIds.length, "item was", "items were")} moved. Rescan for current
+          totals.
+        </p>
+      )}
 
       {header.total === 0 ? (
         <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-8 text-center text-sm">
@@ -378,6 +457,7 @@ export function TreeView({
                       row={row}
                       index={item.index}
                       selected={item.index === selected}
+                      trashed={isTrashed(trash, row)}
                       onSelect={() => setSelected(item.index)}
                       onOpen={() => onNavigate(row.id)}
                     />
@@ -390,6 +470,47 @@ export function TreeView({
           </div>
         </div>
       )}
+
+      <Dialog
+        open={pendingTrash !== null}
+        onOpenChange={(open) => !open && dispatchTrash({ type: "dismissed" })}
+      >
+        <DialogContent>
+          {pendingTrash && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {features?.trashLabel ?? "Move to Trash"}
+                  {pendingTrash.isDirectory ? " this folder?" : " this item?"}
+                </DialogTitle>
+                <DialogDescription>{pendingTrash.warning}</DialogDescription>
+              </DialogHeader>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground shrink-0">Path</dt>
+                  {/* The resolved path from Rust, not the row's name. What the
+                      confirmation names has to be what was checked. */}
+                  <dd className="truncate text-right font-mono text-xs">
+                    {pendingTrash.targetPath}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground shrink-0">Size</dt>
+                  <dd className="text-right font-mono">{formatBytes(pendingTrash.totalBytes)}</dd>
+                </div>
+              </dl>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => dispatchTrash({ type: "dismissed" })}>
+                  Cancel
+                </Button>
+                <Button onClick={() => doTrash(pendingTrash.confirmationToken)}>
+                  {features?.trashLabel ?? "Move to Trash"}
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -398,12 +519,15 @@ function RowLine({
   row,
   index,
   selected,
+  trashed,
   onSelect,
   onOpen,
 }: {
   row: Row;
   index: number;
   selected: boolean;
+  /** Already moved to the Trash by this session, and still listed. */
+  trashed: boolean;
   onSelect: () => void;
   onOpen: () => void;
 }) {
@@ -417,10 +541,18 @@ function RowLine({
 
   const content = (
     <>
-      <span className="flex-1 truncate text-left font-mono text-sm">
+      <span
+        className={`flex-1 truncate text-left font-mono text-sm ${
+          trashed ? "text-muted-foreground line-through" : ""
+        }`}
+      >
         {row.name}
         {row.kind === "directory" ? "/" : ""}
       </span>
+      {/* The row stays. Removing it would renumber the list under the
+          virtualizer, and the size beside it was measured before the move —
+          striking it through says both things at once. */}
+      {trashed && <span className="text-muted-foreground shrink-0 text-xs">in the Trash</span>}
       <Flags row={row} />
       {row.childCount > 0 && (
         <span className="text-muted-foreground shrink-0 text-xs">
@@ -441,7 +573,7 @@ function RowLine({
   // virtualizer unmounting rows as they scroll away. Keyboard handling lives on
   // that container for the same reason, which is why the click handlers here
   // have no keyboard twin — the listbox already has one.
-  const label = rowLabel({
+  const label = `${rowLabel({
     name: row.name,
     kind: row.kind,
     size,
@@ -449,7 +581,7 @@ function RowLine({
     readError: row.readError,
     excluded: row.excluded,
     hardlink: row.hardlink,
-  });
+  })}${trashed ? ", in the Trash" : ""}`;
 
   return openable ? (
     // oxlint-disable-next-line jsx-a11y/click-events-have-key-events -- the listbox owns the keys
