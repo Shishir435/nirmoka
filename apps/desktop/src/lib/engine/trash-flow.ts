@@ -36,7 +36,8 @@ export type TrashEvent =
    * and the answer can arrive after the user has moved on — see the reducer.
    */
   | { type: "prepared"; nodeId: number; preparation: TrashPreparation }
-  | { type: "prepareFailed"; message: string }
+  /** Carries the row for the same reason `prepared` does. */
+  | { type: "prepareFailed"; nodeId: number; message: string }
   | { type: "dismissed" }
   | { type: "runStarted" }
   | { type: "trashed"; operation: TrashOperation }
@@ -81,10 +82,13 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
       // Rust refused before anything moved — a stale scan, a path that is gone,
       // a location the validator protects. There is nothing to confirm.
       //
-      // Gated like `prepared`: a refusal for an abandoned request is not news,
-      // and reporting it would put an error under a directory the user has
-      // already left.
-      return state.preparing
+      // Gated exactly like `prepared`, and on the row rather than on
+      // `preparing` alone. `preparing` is true again as soon as a replacement
+      // request starts, so an abandoned request rejecting at that moment would
+      // clear the replacement's pending row — and the replacement's own answer
+      // would then be dropped by the guard above, leaving no dialog and a stale
+      // error. The row is what tells the two apart.
+      return state.preparing && state.pendingNodeId === event.nodeId
         ? {
             ...state,
             preparing: false,

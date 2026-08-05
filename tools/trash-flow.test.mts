@@ -76,7 +76,7 @@ test("a failed move leaves the row unmarked", () => {
 test("a refused preparation opens no dialog", () => {
   const state = run([
     { type: "prepareStarted", nodeId: 42 },
-    { type: "prepareFailed", message: "cannot delete the scan root" },
+    { type: "prepareFailed", nodeId: 42, message: "cannot delete the scan root" },
   ]);
 
   assert.equal(state.preparation, null);
@@ -117,7 +117,7 @@ test("changing directory clears the error but keeps what was moved", () => {
     { type: "runStarted" },
     { type: "trashed", operation: operation() },
     { type: "prepareStarted", nodeId: 43 },
-    { type: "prepareFailed", message: "cannot be resolved" },
+    { type: "prepareFailed", nodeId: 43, message: "cannot be resolved" },
     { type: "moved" },
   ]);
 
@@ -144,10 +144,27 @@ test("a refusal that arrives after the user left says nothing", () => {
   const state = run([
     { type: "prepareStarted", nodeId: 42 },
     { type: "moved" },
-    { type: "prepareFailed", message: "cannot be resolved" },
+    { type: "prepareFailed", nodeId: 42, message: "cannot be resolved" },
   ]);
 
   assert.equal(state.error, null, "an error under a directory nobody is looking at");
+});
+
+test("a stale refusal does not cancel the request that replaced it", () => {
+  // `preparing` is true again the moment a replacement starts, so gating on it
+  // alone lets an abandoned request's rejection clear the replacement's row —
+  // and the replacement's own answer is then dropped as unexpected, leaving no
+  // dialog and someone else's error.
+  const state = run([
+    { type: "prepareStarted", nodeId: 42 },
+    { type: "moved" },
+    { type: "prepareStarted", nodeId: 43 },
+    { type: "prepareFailed", nodeId: 42, message: "cannot be resolved" },
+    { type: "prepared", nodeId: 43, preparation: preparation(5) },
+  ]);
+
+  assert.equal(state.error, null, "the abandoned request's refusal is not shown");
+  assert.equal(state.preparation?.confirmationToken, 5, "the live request still opens its dialog");
 });
 
 test("an answer to a superseded request cannot replace a newer one", () => {
