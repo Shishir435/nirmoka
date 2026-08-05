@@ -107,6 +107,11 @@ fails closed and retains only exact undo for existing receipts. New selected-pat
 deferred beyond v0.1 by
 [ADR 0018](adr/0018-selected-path-deletion-is-deferred-for-v0-1.md).
 
+Moving a selected path to the **Trash** reuses that same two-call boundary and the same
+validator while involving no adapter at all, because it is a platform integration rather
+than a backend ability. Permanent removal stays deferred; recoverable removal ships. See
+[ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
+
 **5. Adapters version-pin their backend and fail closed.**
 
 Each adapter declares which backend versions it has been tested against, probes the
