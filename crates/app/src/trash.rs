@@ -66,6 +66,12 @@ pub fn move_to_trash(scan_root: &Path, target: &Path) -> Result<PathBuf, String>
 /// reports the permission it needs when it is refused. Choosing the quieter
 /// route would keep the button working and quietly remove the property that
 /// justified adding the button.
+///
+/// One consequence worth knowing: the crate spawns `osascript` by name, so it
+/// depends on the inherited `PATH`. That is safe here — launchd gives a
+/// windowed process `/usr/bin:/bin:/usr/sbin:/sbin`, and `osascript` is in the
+/// first of those — but it is the same class of assumption that made every
+/// backend read as missing in 0.1.0. See `nirmoka_adapter::process`.
 #[cfg(target_os = "macos")]
 fn context() -> trash::TrashContext {
     use trash::macos::{DeleteMethod, TrashContextExtMacos};

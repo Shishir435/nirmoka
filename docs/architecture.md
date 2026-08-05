@@ -80,11 +80,17 @@ pub struct Capabilities {
 }
 ```
 
-Shell integrations — Reveal in Finder, Quick Look — are deliberately _not_ capability
-flags. They involve no disk tool, they work with no backend installed, and every
-adapter would implement them identically. They live in `crates/app` and report what
-the desktop offers as data. See
+Shell integrations — Reveal in Finder, Quick Look, moving to the Trash — are deliberately
+_not_ capability flags. They involve no disk tool, they work with no backend installed,
+and every adapter would implement them identically. They live in `crates/app` and report
+what the desktop offers as data. See
 [ADR 0022](adr/0022-shell-integrations-are-not-adapter-abilities.md).
+
+Trash is the one destructive member of that list, so it keeps the destructive machinery
+rather than the capability flag: the shared validator, the one-time confirmation token,
+and a journal entry. `delete` and `trash` stay `false` on every adapter, because they
+describe what a _backend_ can do and no backend does this. See
+[ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
 
 **4. Adapters own path validation. The UI never builds a delete command.**
 
