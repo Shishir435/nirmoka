@@ -20,7 +20,7 @@ use tauri::{AppHandle, Manager, State};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
-use crate::deletion::PendingDelete;
+use crate::deletion::{Pending, PendingDelete, PendingTrash};
 use crate::dto;
 use crate::inventory;
 use crate::scan;
@@ -360,11 +360,11 @@ pub fn prepare_delete_in(
         .map_err(backend_failure)?;
     let target_path = plan.target().display().to_string();
     let backend = plan.backend().to_string();
-    let token = state.deletion().prepare(PendingDelete {
+    let token = state.deletion().prepare(Pending::Delete(PendingDelete {
         scan_id,
         plan,
         total_bytes,
-    });
+    }));
 
     Ok(dto::DeletePreparation {
         confirmation_token: token,
@@ -386,15 +386,18 @@ pub fn confirm_delete_in(
     state: &AppState,
     confirmation_token: u64,
 ) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
-    let pending = state
-        .deletion()
-        .take_pending(confirmation_token)
-        .ok_or_else(|| {
-            dto::DeleteFailure::new(
+    let pending = match state.deletion().take_pending(confirmation_token) {
+        Some(Pending::Delete(pending)) => pending,
+        // A token names one operation. Confirming a prepared move to the Trash
+        // through the deletion command would execute a different thing than the
+        // dialog described.
+        Some(Pending::Trash(_)) | None => {
+            return Err(dto::DeleteFailure::new(
                 dto::DeleteFailureCode::ConfirmationExpired,
                 "this deletion confirmation is invalid, expired, or was already used",
-            )
-        })?;
+            ))
+        }
+    };
 
     let current_scan = state.scan().result.as_ref().map(|result| result.id);
     if current_scan != Some(pending.scan_id) {
@@ -465,6 +468,129 @@ pub fn operation_log_of(state: &AppState) -> Vec<dto::DeleteOperation> {
         .operations()
         .iter()
         .map(dto::DeleteOperation::from_operation)
+        .collect()
+}
+
+/// Validate a selected row for the Trash and issue a one-time confirmation.
+///
+/// No backend is consulted, and none reports this ability: moving to the Trash
+/// is a platform integration, like Reveal in Finder — see ADR 0025. What the
+/// caller gets back is the *resolved* path, so the dialog names the thing that
+/// was checked rather than the thing that was clicked.
+pub fn prepare_trash_in(
+    state: &AppState,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<dto::TrashPreparation, dto::DeleteFailure> {
+    let (scan_root, target, total_bytes, is_directory) = {
+        let scan = state.scan();
+        let result = scan.result.as_ref().ok_or_else(|| {
+            dto::DeleteFailure::new(
+                dto::DeleteFailureCode::NoCompletedScan,
+                "no scan has completed yet",
+            )
+        })?;
+        if result.id != scan_id {
+            return Err(dto::DeleteFailure::new(
+                dto::DeleteFailureCode::StaleScan,
+                format!("scan {scan_id} has been replaced by scan {}", result.id),
+            ));
+        }
+        let node = result.tree.node_id(node_id).map_err(|error| {
+            dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+        })?;
+        let target = result.tree.path_of(node).map_err(|error| {
+            dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+        })?;
+        let entry = result.tree.get(node).map_err(|error| {
+            dto::DeleteFailure::new(dto::DeleteFailureCode::UnknownNode, error.to_string())
+        })?;
+        (
+            result.tree.root_path().to_path_buf(),
+            target,
+            entry.total_bytes,
+            entry.kind == nirmoka_core::NodeKind::Directory,
+        )
+    };
+
+    let resolved = crate::trash::plan(&scan_root, &target)
+        .map_err(|message| dto::DeleteFailure::new(dto::DeleteFailureCode::Platform, message))?;
+
+    let target_path = resolved.display().to_string();
+    let token = state.deletion().prepare(Pending::Trash(PendingTrash {
+        scan_id,
+        scan_root,
+        target: resolved,
+        total_bytes,
+    }));
+
+    Ok(dto::TrashPreparation {
+        confirmation_token: token,
+        target_path,
+        total_bytes,
+        is_directory,
+        warning: if is_directory {
+            "This folder and everything inside it moves to the Trash. Recover it from there with \
+             Put Back."
+        } else {
+            "This item moves to the Trash. Recover it from there with Put Back."
+        }
+        .to_string(),
+    })
+}
+
+/// Consume a one-time confirmation and move the exact path it names.
+///
+/// The target is validated again inside [`crate::trash::move_to_trash`]. That
+/// does not close the race ADR 0017 named — the platform resolves the path
+/// itself, after any check — and it does close the cases a check can close: a
+/// dialog left open while the filesystem moved on, and a symlink retargeted
+/// since the row was selected.
+pub fn confirm_trash_in(
+    state: &AppState,
+    confirmation_token: u64,
+) -> Result<dto::TrashOperation, dto::DeleteFailure> {
+    let pending = match state.deletion().take_pending(confirmation_token) {
+        Some(Pending::Trash(pending)) => pending,
+        Some(Pending::Delete(_)) | None => {
+            return Err(dto::DeleteFailure::new(
+                dto::DeleteFailureCode::ConfirmationExpired,
+                "this confirmation is invalid, expired, or was already used",
+            ))
+        }
+    };
+
+    let current_scan = state.scan().result.as_ref().map(|result| result.id);
+    if current_scan != Some(pending.scan_id) {
+        return Err(dto::DeleteFailure::new(
+            dto::DeleteFailureCode::StaleScan,
+            "the scan changed after confirmation was prepared; select the item again",
+        ));
+    }
+
+    crate::trash::move_to_trash(&pending.scan_root, &pending.target)
+        .map_err(|message| dto::DeleteFailure::new(dto::DeleteFailureCode::Platform, message))?;
+
+    // Journalled after the move, and a write failure does not fail the call.
+    // The item is already in the Trash; the record is how the window can say so.
+    let operation = state
+        .deletion()
+        .record_trash(pending.target, pending.total_bytes);
+
+    // The scan is deliberately kept. One removal does not invalidate the other
+    // two million rows, and re-walking a home directory after every item would
+    // make the operation unusable. What it does invalidate is the totals above
+    // the row, which the window states rather than silently redraws — the
+    // resolved path is checked again on the next confirmation either way.
+    Ok(dto::TrashOperation::from_operation(&operation))
+}
+
+pub fn trash_log_of(state: &AppState) -> Vec<dto::TrashOperation> {
+    state
+        .deletion()
+        .trashed()
+        .iter()
+        .map(dto::TrashOperation::from_operation)
         .collect()
 }
 
@@ -606,6 +732,28 @@ pub fn undo_delete(
 #[tauri::command]
 pub fn operation_log(state: State<'_, AppState>) -> Vec<dto::DeleteOperation> {
     operation_log_of(&state)
+}
+
+#[tauri::command]
+pub fn prepare_trash(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<dto::TrashPreparation, dto::DeleteFailure> {
+    prepare_trash_in(&state, scan_id, node_id)
+}
+
+#[tauri::command]
+pub fn confirm_trash(
+    state: State<'_, AppState>,
+    confirmation_token: u64,
+) -> Result<dto::TrashOperation, dto::DeleteFailure> {
+    confirm_trash_in(&state, confirmation_token)
+}
+
+#[tauri::command]
+pub fn trash_log(state: State<'_, AppState>) -> Vec<dto::TrashOperation> {
+    trash_log_of(&state)
 }
 
 #[tauri::command]

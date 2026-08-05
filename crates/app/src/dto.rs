@@ -864,6 +864,10 @@ pub enum DeleteFailureCode {
     ConfirmationExpired,
     AlreadyUndone,
     Backend,
+    /// The desktop refused. A volume with no trash, a permission never granted,
+    /// or a path the validator would not pass. Distinct from `Backend` because
+    /// no backend was involved — see ADR 0025.
+    Platform,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -917,6 +921,63 @@ pub struct DeletePreparation {
     pub dry_run: bool,
     pub requires_confirmation: bool,
     pub warning: String,
+}
+
+/// A validated move to the platform Trash, waiting for explicit confirmation.
+///
+/// Deliberately not `DeletePreparation`. That type carries a backend, the
+/// backend it was chosen instead of, and whether a dry run happened — three
+/// questions with no answer here, because no backend is involved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct TrashPreparation {
+    #[ts(type = "number")]
+    pub confirmation_token: u64,
+    /// The resolved path, not the one that was clicked. What the dialog names
+    /// must be what was checked.
+    pub target_path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// A directory takes everything under it, which is the part of a confirmation
+    /// people misread.
+    pub is_directory: bool,
+    pub warning: String,
+}
+
+/// One item this session moved to the Trash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct TrashOperation {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub target_path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    #[ts(type = "number")]
+    pub trashed_at_ms: u64,
+    /// Recovery is the platform's Put Back, not a button here. There is no
+    /// `undone` field to set, because Nirmoka never learns that it happened.
+    pub log_error: Option<String>,
+}
+
+impl TrashOperation {
+    pub fn from_operation(operation: &crate::deletion::TrashOperation) -> Self {
+        Self {
+            id: operation.id,
+            target_path: operation.target.display().to_string(),
+            total_bytes: operation.total_bytes,
+            trashed_at_ms: operation.trashed_at_ms,
+            log_error: operation.log_error.clone(),
+        }
+    }
 }
 
 /// One durable deletion journal entry.

@@ -131,7 +131,7 @@ export type DeleteFailure = { code: DeleteFailureCode, message: string, };
 /**
  * Stable failure classes for destructive commands.
  */
-export type DeleteFailureCode = "noCompletedScan" | "staleScan" | "unknownNode" | "noBackend" | "confirmationExpired" | "alreadyUndone" | "backend";
+export type DeleteFailureCode = "noCompletedScan" | "staleScan" | "unknownNode" | "noBackend" | "confirmationExpired" | "alreadyUndone" | "backend" | "platform";
 
 /**
  * One durable deletion journal entry.
@@ -332,6 +332,35 @@ export type Sort = "largestFirst" | "smallestFirst" | "nameAscending" | "nameDes
 export type SystemStatus = { backend: string, backendInsteadOf: string | null, collectedAt: string, host: string, platform: string, uptime: string, healthScore: number, healthScoreMessage: string, hardware: HardwareStatus, cpu: CpuStatus, memory: MemoryStatus, disks: Array<DiskStatus>, batteries: Array<BatteryStatus>, thermal: ThermalStatus, };
 
 export type ThermalStatus = { cpuTemp: number | null, gpuTemp: number | null, batteryTemp: number | null, fanSpeed: number | null, fanCount: number | null, };
+
+/**
+ * One item this session moved to the Trash.
+ */
+export type TrashOperation = { id: number, targetPath: string, totalBytes: number, trashedAtMs: number, 
+/**
+ * Recovery is the platform's Put Back, not a button here. There is no
+ * `undone` field to set, because Nirmoka never learns that it happened.
+ */
+logError: string | null, };
+
+/**
+ * A validated move to the platform Trash, waiting for explicit confirmation.
+ *
+ * Deliberately not `DeletePreparation`. That type carries a backend, the
+ * backend it was chosen instead of, and whether a dry run happened — three
+ * questions with no answer here, because no backend is involved.
+ */
+export type TrashPreparation = { confirmationToken: number, 
+/**
+ * The resolved path, not the one that was clicked. What the dialog names
+ * must be what was checked.
+ */
+targetPath: string, totalBytes: number, 
+/**
+ * A directory takes everything under it, which is the part of a confirmation
+ * people misread.
+ */
+isDirectory: boolean, warning: string, };
 
 /**
  * Capacity of the filesystem containing a path. This is deliberately separate

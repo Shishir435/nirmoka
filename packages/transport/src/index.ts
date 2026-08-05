@@ -38,6 +38,8 @@ import type {
   ScanSummary,
   Sort,
   SystemStatus,
+  TrashOperation,
+  TrashPreparation,
   VolumeInfo,
 } from "./types.js";
 
@@ -145,6 +147,29 @@ export interface Transport {
   /** Newest-first durable deletion journal. */
   operationLog(): Promise<DeleteOperation[]>;
 
+  /**
+   * Validate a scanned row for the platform Trash and receive a one-time
+   * confirmation token.
+   *
+   * Separate from `prepareDelete` because no backend is involved — moving to
+   * the Trash is a shell integration, like revealing a file (ADR 0025). The
+   * returned path is the resolved one, which is what the confirmation must
+   * name.
+   */
+  prepareTrash(scanId: number, nodeId: number): Promise<TrashPreparation>;
+
+  /**
+   * Move the exact path held behind a one-time token to the Trash.
+   *
+   * There is no matching undo. Recovery is the platform's own Put Back, and a
+   * button here would have to guess a path inside the Trash that the system
+   * may have renamed.
+   */
+  confirmTrash(confirmationToken: number): Promise<TrashOperation>;
+
+  /** Newest-first journal of items moved to the Trash. */
+  trashLog(): Promise<TrashOperation[]>;
+
   /** Real filesystem capacity for the volume containing `path` (macOS beta). */
   volumeInfo(path: string): Promise<VolumeInfo>;
 
@@ -248,6 +273,11 @@ export function tauriTransport(): Transport {
       invoke<DeleteOperation>("confirm_delete", { confirmationToken }),
     undoDelete: (operationId) => invoke<DeleteOperation>("undo_delete", { operationId }),
     operationLog: () => invoke<DeleteOperation[]>("operation_log"),
+    prepareTrash: (scanId, nodeId) =>
+      invoke<TrashPreparation>("prepare_trash", { scanId, nodeId }),
+    confirmTrash: (confirmationToken) =>
+      invoke<TrashOperation>("confirm_trash", { confirmationToken }),
+    trashLog: () => invoke<TrashOperation[]>("trash_log"),
     volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
@@ -603,6 +633,18 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     },
 
     async operationLog() {
+      return [];
+    },
+
+    async prepareTrash() {
+      throw new Error("mock transport never performs destructive filesystem operations");
+    },
+
+    async confirmTrash() {
+      throw new Error("mock transport never performs destructive filesystem operations");
+    },
+
+    async trashLog() {
       return [];
     },
 
