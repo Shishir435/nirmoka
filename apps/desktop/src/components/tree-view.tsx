@@ -275,10 +275,15 @@ export function TreeView({
 
   const doTrash = useCallback(
     (confirmationToken: number) => {
-      dispatchTrash({ type: "runStarted" });
+      // The move gets its own number, from the same counter. On macOS it asks
+      // the Finder, which can sit on a permission prompt indefinitely — long
+      // enough for a rescan and another move to start underneath it.
+      const requestId = ++nextTrashRequest.current;
+      dispatchTrash({ type: "runStarted", requestId });
       transport.confirmTrash(confirmationToken).then(
-        (operation) => dispatchTrash({ type: "trashed", operation }),
-        (reason: unknown) => dispatchTrash({ type: "runFailed", message: String(reason) }),
+        (operation) => dispatchTrash({ type: "trashed", requestId, operation }),
+        (reason: unknown) =>
+          dispatchTrash({ type: "runFailed", requestId, message: String(reason) }),
       );
     },
     [transport],

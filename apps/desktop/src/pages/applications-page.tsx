@@ -152,10 +152,12 @@ export function ApplicationsPage() {
   };
 
   const doTrash = (confirmationToken: number) => {
-    dispatchTrash({ type: "runStarted" });
+    // Its own number, from the same counter — see `tree-view.tsx`.
+    const requestId = ++nextTrashRequest.current;
+    dispatchTrash({ type: "runStarted", requestId });
     transport.confirmTrash(confirmationToken).then(
-      (operation) => dispatchTrash({ type: "trashed", operation }),
-      (reason: unknown) => dispatchTrash({ type: "runFailed", message: String(reason) }),
+      (operation) => dispatchTrash({ type: "trashed", requestId, operation }),
+      (reason: unknown) => dispatchTrash({ type: "runFailed", requestId, message: String(reason) }),
     );
   };
 

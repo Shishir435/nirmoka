@@ -38,8 +38,8 @@ test("a confirmed move marks the row it was prepared for", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
-    { type: "trashed", operation: operation() },
+    { type: "runStarted", requestId: 3 },
+    { type: "trashed", requestId: 3, operation: operation() },
   ]);
 
   assert.deepEqual(state.trashedIds, [42]);
@@ -52,7 +52,7 @@ test("the token is dropped when the run starts, not when it finishes", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
+    { type: "runStarted", requestId: 3 },
   ]);
 
   // Rust consumes the token on receipt. A dialog still holding it would let a
@@ -65,8 +65,8 @@ test("a failed move leaves the row unmarked", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
-    { type: "runFailed", message: "macOS did not let Nirmoka ask the Finder" },
+    { type: "runStarted", requestId: 3 },
+    { type: "runFailed", requestId: 3, message: "macOS did not let Nirmoka ask the Finder" },
   ]);
 
   assert.deepEqual(state.trashedIds, [], "nothing moved, so nothing is marked");
@@ -88,8 +88,8 @@ test("a row already in the Trash cannot be sent there twice", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
-    { type: "trashed", operation: operation() },
+    { type: "runStarted", requestId: 3 },
+    { type: "trashed", requestId: 3, operation: operation() },
   ]);
 
   assert.equal(canTrash(state, row(42)), false);
@@ -104,7 +104,7 @@ test("nothing is offered while a confirmation is open or a move is running", () 
   ]);
   assert.equal(canTrash(open, row(9)), false);
 
-  const running = reduceTrash(open, { type: "runStarted" });
+  const running = reduceTrash(open, { type: "runStarted", requestId: 3 });
   assert.equal(canTrash(running, row(9)), false);
 
   assert.equal(canTrash(INITIAL_TRASH, undefined), false, "no selection, no action");
@@ -114,8 +114,8 @@ test("changing directory clears the error but keeps what was moved", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
-    { type: "trashed", operation: operation() },
+    { type: "runStarted", requestId: 3 },
+    { type: "trashed", requestId: 3, operation: operation() },
     { type: "prepareStarted", requestId: 2, nodeId: 43 },
     { type: "prepareFailed", requestId: 2, message: "cannot be resolved" },
     { type: "moved" },
@@ -187,9 +187,9 @@ test("leaving a directory does not abandon a move already underway", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
+    { type: "runStarted", requestId: 3 },
     { type: "moved" },
-    { type: "trashed", operation: operation() },
+    { type: "trashed", requestId: 3, operation: operation() },
   ]);
 
   assert.deepEqual(state.trashedIds, [42]);
@@ -225,6 +225,45 @@ test("asking about the same row twice does not confuse the two requests", () => 
   assert.equal(succeedTwice.preparation?.confirmationToken, 2, "the live token, not the stale one");
 });
 
+test("a move that outlives a rescan does not mark whatever came next", () => {
+  // The largest window in the whole flow: on macOS the move asks the Finder,
+  // which can sit on a permission prompt for as long as the user ignores it.
+  // A rescan and a second move fit inside that comfortably.
+  const state = run([
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
+    { type: "runStarted", requestId: 2 },
+    { type: "rescanned" },
+    // A different tree, a different row that happens to reuse the id.
+    { type: "prepareStarted", requestId: 3, nodeId: 42 },
+    { type: "prepared", requestId: 3, preparation: preparation(8) },
+    { type: "runStarted", requestId: 4 },
+    // The first move finally reports.
+    { type: "trashed", requestId: 2, operation: operation() },
+  ]);
+
+  assert.deepEqual(state.trashedIds, [], "the new row is not in the Trash");
+  assert.equal(state.running, true, "the move that is actually running still is");
+  assert.equal(state.last, null);
+});
+
+test("a stale failure does not re-enable the buttons mid-move", () => {
+  const state = run([
+    { type: "prepareStarted", requestId: 1, nodeId: 42 },
+    { type: "prepared", requestId: 1, preparation: preparation() },
+    { type: "runStarted", requestId: 2 },
+    { type: "rescanned" },
+    { type: "prepareStarted", requestId: 3, nodeId: 7 },
+    { type: "prepared", requestId: 3, preparation: preparation(8) },
+    { type: "runStarted", requestId: 4 },
+    { type: "runFailed", requestId: 2, message: "the Finder said no" },
+  ]);
+
+  assert.equal(state.running, true, "a real move is still in flight");
+  assert.equal(state.error, null, "and nobody is told otherwise");
+  assert.equal(canTrash(state, row(9)), false, "so nothing else can be started");
+});
+
 test("a reply that outlives a rescan is not answered", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
@@ -239,8 +278,8 @@ test("a rescan forgets every id, because the tree renumbers from zero", () => {
   const state = run([
     { type: "prepareStarted", requestId: 1, nodeId: 42 },
     { type: "prepared", requestId: 1, preparation: preparation() },
-    { type: "runStarted" },
-    { type: "trashed", operation: operation() },
+    { type: "runStarted", requestId: 3 },
+    { type: "trashed", requestId: 3, operation: operation() },
     { type: "rescanned" },
   ]);
 

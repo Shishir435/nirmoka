@@ -33,6 +33,14 @@ export interface TrashState {
   pendingNodeId: number | null;
   preparing: boolean;
   running: boolean;
+  /**
+   * Which move is underway, or `null` for none. Identified for the same reason
+   * a preparation is, and the exposure is larger: on macOS the move asks the
+   * Finder, which can sit on a permission prompt for as long as the user
+   * ignores it. A rescan in that window resets this state, and an unidentified
+   * reply landing afterwards would mark whichever row is pending *now*.
+   */
+  runningRequestId: number | null;
   /** Node ids already in the Trash, for as long as this scan lasts. */
   trashedIds: number[];
   /** The last completed move, for the line that says what happened. */
@@ -54,9 +62,10 @@ export type TrashEvent =
   /** Identified for the same reason `prepared` is. */
   | { type: "prepareFailed"; requestId: number; message: string }
   | { type: "dismissed" }
-  | { type: "runStarted" }
-  | { type: "trashed"; operation: TrashOperation }
-  | { type: "runFailed"; message: string }
+  /** Its own attempt, with its own number: the move outlives the dialog. */
+  | { type: "runStarted"; requestId: number }
+  | { type: "trashed"; requestId: number; operation: TrashOperation }
+  | { type: "runFailed"; requestId: number; message: string }
   /**
    * Moved to another directory, or reordered. The error is stale, any request
    * in flight is abandoned, and the removals are neither.
@@ -71,6 +80,7 @@ export const INITIAL_TRASH: TrashState = {
   pendingNodeId: null,
   preparing: false,
   running: false,
+  runningRequestId: null,
   trashedIds: [],
   last: null,
   error: null,
@@ -131,12 +141,24 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
       // The token is spent the moment it is sent. Keeping the dialog's copy
       // would leave a second click able to submit a confirmation Rust has
       // already consumed.
-      return { ...state, preparation: null, running: true, error: null };
+      return {
+        ...state,
+        preparation: null,
+        running: true,
+        runningRequestId: event.requestId,
+        error: null,
+      };
 
+    // Gated like the preparation replies, and for a sharper reason: this one
+    // marks a row as being in the Trash. An unidentified reply landing after a
+    // rescan would put that label on whichever row happens to be pending now —
+    // the window claiming something is in the Trash that is not.
     case "trashed":
+      if (!completing(state, event.requestId)) return state;
       return {
         ...state,
         running: false,
+        runningRequestId: null,
         last: event.operation,
         pendingNodeId: null,
         trashedIds:
@@ -149,7 +171,18 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
       // Nothing moved, so the row is not marked. The one failure worth naming
       // separately — the desktop refusing an Apple event — arrives here with
       // the setting that grants it, from Rust.
-      return { ...state, running: false, pendingNodeId: null, error: event.message };
+      //
+      // Gated too: a stale failure clearing `running` would re-enable the
+      // buttons while a real move is still in flight.
+      return completing(state, event.requestId)
+        ? {
+            ...state,
+            running: false,
+            runningRequestId: null,
+            pendingNodeId: null,
+            error: event.message,
+          }
+        : state;
 
     // Everything about the old location goes, including a confirmation the
     // user has effectively walked away from. What survives is what is already
@@ -184,6 +217,11 @@ export function reduceTrash(state: TrashState, event: TrashEvent): TrashState {
  */
 function answering(state: TrashState, requestId: number) {
   return state.preparing && state.pendingRequestId === requestId;
+}
+
+/** The same question for the move itself. */
+function completing(state: TrashState, requestId: number) {
+  return state.running && state.runningRequestId === requestId;
 }
 
 /** Whether this row can be moved to the Trash right now. */
