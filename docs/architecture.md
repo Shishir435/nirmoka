@@ -80,11 +80,17 @@ pub struct Capabilities {
 }
 ```
 
-Shell integrations — Reveal in Finder, Quick Look — are deliberately _not_ capability
-flags. They involve no disk tool, they work with no backend installed, and every
-adapter would implement them identically. They live in `crates/app` and report what
-the desktop offers as data. See
+Shell integrations — Reveal in Finder, Quick Look, moving to the Trash — are deliberately
+_not_ capability flags. They involve no disk tool, they work with no backend installed,
+and every adapter would implement them identically. They live in `crates/app` and report
+what the desktop offers as data. See
 [ADR 0022](adr/0022-shell-integrations-are-not-adapter-abilities.md).
+
+Trash is the one destructive member of that list, so it keeps the destructive machinery
+rather than the capability flag: the shared validator, the one-time confirmation token,
+and a journal entry. `delete` and `trash` stay `false` on every adapter, because they
+describe what a _backend_ can do and no backend does this. See
+[ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
 
 **4. Adapters own path validation. The UI never builds a delete command.**
 
@@ -100,6 +106,11 @@ offers this capability: rip's later pathname resolution cannot be bound to valid
 fails closed and retains only exact undo for existing receipts. New selected-path deletion is
 deferred beyond v0.1 by
 [ADR 0018](adr/0018-selected-path-deletion-is-deferred-for-v0-1.md).
+
+Moving a selected path to the **Trash** reuses that same two-call boundary and the same
+validator while involving no adapter at all, because it is a platform integration rather
+than a backend ability. Permanent removal stays deferred; recoverable removal ships. See
+[ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md).
 
 **5. Adapters version-pin their backend and fail closed.**
 

@@ -1,0 +1,120 @@
+# ADR 0025: move to Trash is a platform integration
+
+- Status: accepted
+- Date: 2026-08-05
+- Supersedes: [ADR 0018](0018-selected-path-deletion-is-deferred-for-v0-1.md), for recoverable
+  removal only
+
+## Context
+
+v0.1.1 ships a disk analyzer that cannot remove anything a user selects. Scanning works on a real
+home directory — 2.5M entries — and the loop it opens closes somewhere else: the user finds the
+21 GiB directory, presses Reveal in Finder, and deletes it there. Every screen has this shape.
+Space browses. Applications lists apps it cannot uninstall. Clean runs Mole's own curated
+selection and nothing the user picked.
+
+[ADR 0017](0017-rip-deletion-is-not-execution-bound.md) withdrew rip because its pathname-only
+interface cannot be bound to the object Nirmoka validated: another process can replace an ancestor
+between the containment check and rip's own resolution.
+[ADR 0018](0018-selected-path-deletion-is-deferred-for-v0-1.md) then deferred the whole capability
+rather than ship a safety claim no backend could honor, and set the gate for reopening it — a
+backend that binds execution to the validated filesystem object, or an equivalent atomic
+containment guarantee.
+
+No such backend has appeared, and **the macOS Trash does not meet that gate either.**
+`-[NSFileManager trashItemAtURL:resultingItemURL:error:]` takes a URL. It resolves that URL itself,
+after Nirmoka's check, so the race ADR 0017 identified survives unchanged. Anyone reading this
+looking for the moment the race was closed will not find it.
+
+What changes is the consequence rather than the race. macOS can record an item's original location
+when it moves it to the Trash, so **Put Back** restores it exactly, from the Finder, with no
+involvement from Nirmoka. A lost race puts the _wrong item_ in the Trash. It does not destroy it.
+
+"Can" is doing work in that sentence, and the Decision below is where it is paid for: the two macOS
+routes to the Trash differ on exactly this property.
+
+That is a weaker guarantee than ADR 0017 asked for and a different kind of guarantee: bounded and
+reversible rather than atomic and bound. It is enough for a recoverable move and it is not enough
+for permanent removal, which is the line this ADR draws.
+
+## Decision
+
+- **Move to Trash is a platform integration, not an adapter ability.** It lives in `crates/app`
+  beside Reveal in Finder and Quick Look, for the reason
+  [ADR 0022](0022-shell-integrations-are-not-adapter-abilities.md) already gives: no disk tool is
+  involved and the answer depends on the desktop rather than on which scanner is installed.
+  "Which backend trashes a file" is a question with no meaningful answer.
+- **Every adapter continues to report `delete: false` and `trash: false`.** `Capabilities`
+  describes what backends can do. Widening it here would claim an ability whose implementation is
+  not in an adapter at all.
+- **Trash only. No permanent removal.** `DeleteMode::Permanent` stays unreachable from the window.
+  The recoverability argument above is the whole basis for proceeding, so an operation that
+  discards it is a different decision needing a different ADR.
+- **The shared validator runs, and runs again immediately before the move.** `validate_delete_target`
+  is unchanged: absolute, canonical, strictly below the scan root, and outside the protected OS
+  roots. Re-validating does not close the race; it closes the stale-confirmation and
+  symlink-retarget cases, which are the ones a check _can_ close.
+- **The one-time confirmation token boundary is reused unchanged.** A raw path never crosses back
+  from the window into an execute command.
+- **The operation is journalled as `Trashed`, with no recovery path.** The `trash` crate cannot
+  enumerate or restore the macOS Trash — its `os_limited` module is compiled out on macOS — and the
+  Finder route reports nothing back about where the item landed. Nirmoka must not guess a path
+  inside `~/.Trash`, where the system renames on collision. Recovery is
+  Finder's Put Back, and the window says so rather than offering an Undo button that shells out to
+  a guess.
+- **A failed journal append reports the move beside the error rather than failing it.** This
+  follows [ADR 0020](0020-cleanup-runs-are-journalled-without-a-receipt.md), not ADR 0017's receipt
+  rule. Those two rules differ on one question: does recovery depend on our record? For rip it did —
+  the receipt was the only route back, so an unwritable journal meant the deletion was not safely
+  performed. For the Trash it does not; the Trash is its own record. Hiding a move that already
+  happened would lose the only account the user has of it.
+- **The move happens first, then the journal write.** The reverse order records removals that did
+  not happen, which is the worse of the two failures.
+
+### Which macOS route, and what it costs
+
+macOS offers two, and they are not interchangeable:
+
+| Route                            | Put Back     | Permission needed          |
+| -------------------------------- | ------------ | -------------------------- |
+| `NSFileManager -trashItemAtURL:` | not reliably | none                       |
+| An Apple event asking the Finder | yes          | Automation, for the Finder |
+
+`trashItemAtURL:` is the obvious-looking choice and it is the wrong one here. It does not reliably
+write the entry that makes Put Back appear — a long-standing system bug, documented by the crate
+and by every other tool that has hit it. An item recovered by dragging it out of the Trash is
+recovered to wherever the user drops it, not to where it came from.
+
+**Nirmoka asks the Finder.** Put Back is the property the whole decision rests on, so the route
+that keeps it wins, and the Automation permission it needs is stated rather than avoided. A refused
+Apple event is reported with the setting that grants it. Taking the quieter route instead would
+keep the button working while removing the reason the button was allowed to exist — which is the
+kind of trade that looks free in a diff and is not.
+
+There is an irony worth naming, because it contradicts an earlier draft of this ADR: the Finder
+route _is_ `osascript`, driving another application's scripting interface. That was listed as the
+thing to avoid. It turns out to be the only route that produces a recoverable-to-its-original-place
+item, so it is what recoverability costs, and the cost is a permission prompt rather than a hidden
+weakening.
+
+Implementation is the `trash` crate (5.2.6, MIT), which wraps both routes and lets the choice be
+explicit. It covers Windows and the freedesktop specification too, so the code stays
+platform-neutral under invariant 3 even though
+[ADR 0023](0023-the-first-release-is-macos-only.md) packages macOS only.
+
+## Consequences
+
+Nirmoka becomes a tool rather than a viewer. The loop closes in one window: scan, find, review the
+exact path and size, confirm once, and the item is in the Trash where it can be put back.
+
+The residual risk is stated rather than resolved. A process that swaps an ancestor at the right
+moment can cause the wrong item to be trashed, and no check in Nirmoka prevents that. What bounds
+it is that the item is in the Trash.
+
+Permanent selected-path deletion remains deferred under ADR 0017's original gate. Nothing here
+weakens it, and a future backend that binds execution to a validated object is still what reopens
+it.
+
+A trashed row leaves the scan stale. Sizes above it were computed when the scan ran and are not
+recomputed — a rescan is the accurate number, and the window must not quietly redraw a total it
+did not measure.

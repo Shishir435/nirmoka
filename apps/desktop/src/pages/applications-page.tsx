@@ -1,6 +1,10 @@
-import { ArrowUpDown, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
+import { ArrowUpDown, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type {
+  ApplicationInventory,
+  InstalledApplicationInventory,
+  PlatformFeatures,
+} from "@nirmoka/transport";
 
 import {
   EmptyState,
@@ -9,11 +13,13 @@ import {
   SafetyBanner,
   SectionTitle,
 } from "@/components/shared";
+import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
 import { uninstallOffer } from "@/lib/engine/backend-gating";
+import { INITIAL_TRASH, outcomeMessage, reduceTrash } from "@/lib/engine/trash-flow";
 import { formatBytes, formatCount } from "@/lib/format";
 
 export function ApplicationsPage() {
@@ -27,6 +33,24 @@ export function ApplicationsPage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [largestFirst, setLargestFirst] = useState(true);
+  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
+  const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
+  const nextTrashRequest = useRef(0);
+
+  useEffect(() => {
+    let live = true;
+    transport.platformFeatures().then(
+      (value) => live && setFeatures(value),
+      () => live && setFeatures(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [transport]);
+
+  useEffect(() => {
+    dispatchTrash({ type: "rescanned" });
+  }, [summary?.scanId]);
 
   useEffect(() => {
     let live = true;
@@ -80,6 +104,10 @@ export function ApplicationsPage() {
             // is not a command: "Google Chrome" is listed, "google-chrome" is
             // what the backend takes.
             uninstallName: app.uninstallName,
+            // Mole reports a path; the scan reports a node. Only a node can be
+            // trashed, because only a node is something Rust can resolve
+            // itself — see the banner below.
+            nodeId: null,
           }))
         : (inventory?.rows.map((app) => ({
             key: `${app.id}-${app.path}`,
@@ -90,6 +118,7 @@ export function ApplicationsPage() {
             detail: null,
             // A scanned bundle is a directory, not a backend identifier.
             uninstallName: null,
+            nodeId: app.id,
           })) ?? []),
     [installed, inventory],
   );
@@ -108,6 +137,29 @@ export function ApplicationsPage() {
     : (inventory?.rows.reduce((sum, app) => sum + app.totalBytes, 0) ?? 0);
   const total = installed?.total ?? inventory?.total ?? 0;
   const sourceHint = installed ? `Reported by ${installed.backend}` : `Within ${summary?.rootPath}`;
+  const trashLabel = features?.trashLabel ?? "Move to Trash";
+
+  const askToTrash = (nodeId: number) => {
+    if (!summary) return;
+    // One number per attempt — see the same counter in `tree-view.tsx`.
+    const requestId = ++nextTrashRequest.current;
+    dispatchTrash({ type: "prepareStarted", requestId, nodeId });
+    transport.prepareTrash(summary.scanId, nodeId).then(
+      (preparation) => dispatchTrash({ type: "prepared", requestId, preparation }),
+      (reason: unknown) =>
+        dispatchTrash({ type: "prepareFailed", requestId, message: String(reason) }),
+    );
+  };
+
+  const doTrash = (confirmationToken: number) => {
+    // Its own number, from the same counter — see `tree-view.tsx`.
+    const requestId = ++nextTrashRequest.current;
+    dispatchTrash({ type: "runStarted", requestId });
+    transport.confirmTrash(confirmationToken).then(
+      (operation) => dispatchTrash({ type: "trashed", requestId, operation }),
+      (reason: unknown) => dispatchTrash({ type: "runFailed", requestId, message: String(reason) }),
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -186,9 +238,20 @@ export function ApplicationsPage() {
               ) : (
                 <div className="divide-y">
                   {rows.map((app) => (
-                    <ApplicationRow key={app.key} app={app} />
+                    <ApplicationRow
+                      key={app.key}
+                      app={app}
+                      trashLabel={trashLabel}
+                      trashed={app.nodeId !== null && trash.trashedIds.includes(app.nodeId)}
+                      busy={trash.preparing || trash.running || trash.preparation !== null}
+                      onTrash={askToTrash}
+                    />
                   ))}
                 </div>
+              )}
+              {trash.error && <p className="mt-3 text-xs text-destructive">{trash.error}</p>}
+              {trash.last && (
+                <p className="mt-3 text-xs text-muted-foreground">{outcomeMessage(trash.last)}</p>
               )}
             </CardContent>
           </Card>
@@ -196,6 +259,29 @@ export function ApplicationsPage() {
             <p className="text-xs text-muted-foreground">
               Showing {allRows.length} of {total} applications.
             </p>
+          )}
+
+          {installed ? (
+            <SafetyBanner compact>
+              <p className="text-xs text-muted-foreground">
+                {`This list comes from ${installed.backend}, which reports a path rather than a
+                position in a scan — and Nirmoka only moves things it can resolve itself, from its
+                own tree. Scan `}
+                <code className="font-mono">/Applications</code>
+                {` to get the same bundles with a ${trashLabel} button on each one.`}
+              </p>
+            </SafetyBanner>
+          ) : (
+            <SafetyBanner compact>
+              <p className="text-xs text-muted-foreground">
+                {`${trashLabel} moves the application bundle and nothing else. Preferences, caches,
+                and support files stay where they are — finding an application's leftovers is
+                Mole's job, and `}
+                <code className="font-mono">mo uninstall</code>
+                {` cannot be driven past its own confirmation prompt. This is a smaller operation
+                than an uninstall, and it does not pretend otherwise.`}
+              </p>
+            </SafetyBanner>
           )}
 
           {installed && offer === "terminal" && (
@@ -212,6 +298,13 @@ export function ApplicationsPage() {
               </p>
             </SafetyBanner>
           )}
+
+          <TrashConfirmation
+            preparation={trash.preparation}
+            label={trashLabel}
+            onCancel={() => dispatchTrash({ type: "dismissed" })}
+            onConfirm={doTrash}
+          />
         </>
       )}
     </div>
@@ -226,16 +319,39 @@ interface ApplicationRowModel {
   sizeIsPartial: boolean;
   detail: string | null;
   uninstallName: string | null;
+  /** Set only for scan-derived rows, which are the ones Rust can resolve. */
+  nodeId: number | null;
 }
 
-function ApplicationRow({ app }: { app: ApplicationRowModel }) {
+function ApplicationRow({
+  app,
+  trashLabel,
+  trashed,
+  busy,
+  onTrash,
+}: {
+  app: ApplicationRowModel;
+  trashLabel: string;
+  trashed: boolean;
+  busy: boolean;
+  onTrash: (nodeId: number) => void;
+}) {
+  // A local, so the button's callback keeps the narrowing: a property read
+  // inside a closure does not, and the alternative is a `!` on the id that
+  // decides which bundle moves.
+  const nodeId = app.nodeId;
+
   return (
     <div className="flex items-center gap-3 py-3 text-sm">
       <span className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
         {app.name.slice(0, 1).toUpperCase()}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block font-medium">{app.name}</span>
+        <span
+          className={`block font-medium ${trashed ? "text-muted-foreground line-through" : ""}`}
+        >
+          {app.name}
+        </span>
         <span className="block truncate font-mono text-xs text-muted-foreground">{app.path}</span>
         {app.detail && (
           <span className="block truncate text-xs text-muted-foreground">{app.detail}</span>
@@ -248,6 +364,21 @@ function ApplicationRow({ app }: { app: ApplicationRowModel }) {
       </span>
       {app.sizeIsPartial && <span className="text-xs text-warning-foreground">Partial</span>}
       <span className="tabular-nums">{app.size}</span>
+      {nodeId !== null &&
+        (trashed ? (
+          <span className="shrink-0 text-xs text-muted-foreground">in the Trash</span>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-destructive hover:text-destructive"
+            disabled={busy}
+            onClick={() => onTrash(nodeId)}
+            aria-label={`${trashLabel}: ${app.name}`}
+          >
+            <Trash2 />
+          </Button>
+        ))}
     </div>
   );
 }

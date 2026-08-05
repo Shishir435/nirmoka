@@ -29,6 +29,16 @@ clap = { version = "4", features = ["derive"] }
 tauri = "2"
 tauri-build = "2"
 
+# The platform's own Trash service — the one Finder uses on macOS, the Recycle
+# Bin on Windows, the freedesktop specification elsewhere. Shell-only, like
+# tauri, because moving a selected path to the Trash is a platform integration
+# rather than a backend ability (ADR 0025). The alternative was `osascript`
+# driving Finder's UI scripting layer, or making the product's central verb
+# depend on `brew install trash`. Default features off: they only add `chrono`,
+# for listing trash contents, which macOS does not support and Nirmoka does not
+# do.
+trash = { version = "5", default-features = false, features = ["coinit_apartmentthreaded"] }
+
 # Generates the TypeScript mirrors of the boundary types. A hand-maintained
 # mirror of a Rust struct drifts silently; that is the whole problem here.
 ts-rs = "12"

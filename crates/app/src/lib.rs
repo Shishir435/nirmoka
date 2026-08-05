@@ -20,6 +20,7 @@ pub mod reveal;
 pub mod scan;
 pub mod settings;
 pub mod state;
+pub mod trash;
 pub mod volume;
 
 use state::AppState;
@@ -42,6 +43,9 @@ pub fn run() {
             commands::confirm_delete,
             commands::undo_delete,
             commands::operation_log,
+            commands::prepare_trash,
+            commands::confirm_trash,
+            commands::trash_log,
             commands::volume_info,
             commands::platform_features,
             commands::reveal_in_file_manager,

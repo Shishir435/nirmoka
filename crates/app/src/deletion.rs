@@ -28,12 +28,52 @@ pub struct PendingDelete {
     pub total_bytes: u64,
 }
 
+/// A validated move to the platform Trash, waiting for its confirmation.
+///
+/// The resolved target is kept so the dialog names the path that was checked
+/// rather than the one that was clicked, and the scan root is kept because the
+/// validator runs again before the move and needs both.
+#[derive(Debug, Clone)]
+pub struct PendingTrash {
+    pub scan_id: ScanId,
+    pub scan_root: PathBuf,
+    pub target: PathBuf,
+    pub total_bytes: u64,
+}
+
+/// The one destructive operation currently awaiting confirmation.
+///
+/// One slot, not one per kind. Two prepared operations would mean two open
+/// dialogs, and the second confirmation would execute whichever the map
+/// happened to still hold.
+#[derive(Debug, Clone)]
+pub enum Pending {
+    Delete(PendingDelete),
+    Trash(PendingTrash),
+}
+
 #[derive(Debug, Clone)]
 pub struct Operation {
     pub id: u64,
     pub receipt: DeleteReceipt,
     pub deleted_at_ms: u64,
     pub undone_at_ms: Option<u64>,
+    pub log_error: Option<String>,
+}
+
+/// One item moved to the platform Trash.
+///
+/// There is no receipt and no undo here, for the reason ADR 0025 gives: macOS
+/// exposes no supported way to name where the item landed, and a receipt that
+/// does not resolve is worse than none. Recovery is Put Back, in the Finder. The
+/// original path is recorded because it is what the user needs to recognise the
+/// item — and, if Put Back is ever unavailable, where to put it back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashOperation {
+    pub id: u64,
+    pub target: PathBuf,
+    pub total_bytes: u64,
+    pub trashed_at_ms: u64,
     pub log_error: Option<String>,
 }
 
@@ -84,6 +124,14 @@ enum LogEvent {
         id: u64,
         at_ms: u64,
     },
+    /// Recoverable, but not by Nirmoka: the item is in the platform Trash and
+    /// the platform owns putting it back. Nothing supersedes this event.
+    Trashed {
+        id: u64,
+        target: PathBuf,
+        total_bytes: u64,
+        at_ms: u64,
+    },
     /// A cleanup run is terminal: the backend removed what it found, and there
     /// is no receipt to undo. Nothing ever supersedes this event.
     Cleaned {
@@ -103,21 +151,28 @@ enum LogEvent {
 pub struct DeletionState {
     next_confirmation: u64,
     next_operation: u64,
-    pending: HashMap<u64, PendingDelete>,
+    pending: HashMap<u64, Pending>,
     operations: Vec<Operation>,
     cleanups: Vec<CleanupOperation>,
+    trashed: Vec<TrashOperation>,
     log_path: Option<PathBuf>,
 }
 
 impl DeletionState {
     pub fn new(log_path: Option<PathBuf>) -> Self {
-        let (operations, cleanups) = log_path.as_deref().map(load_journal).unwrap_or_default();
-        // One id space across both kinds, so "operation 4" in the journal names
-        // one event rather than two.
+        let journal = log_path.as_deref().map(load_journal).unwrap_or_default();
+        let Journal {
+            operations,
+            cleanups,
+            trashed,
+        } = journal;
+        // One id space across every kind, so "operation 4" in the journal names
+        // one event rather than three.
         let next_operation = operations
             .iter()
             .map(|op| op.id)
             .chain(cleanups.iter().map(|op| op.id))
+            .chain(trashed.iter().map(|op| op.id))
             .max()
             .unwrap_or(0);
 
@@ -127,11 +182,12 @@ impl DeletionState {
             pending: HashMap::new(),
             operations,
             cleanups,
+            trashed,
             log_path,
         }
     }
 
-    pub fn prepare(&mut self, pending: PendingDelete) -> u64 {
+    pub fn prepare(&mut self, pending: Pending) -> u64 {
         self.next_confirmation = self.next_confirmation.saturating_add(1);
         let token = self.next_confirmation;
         // A newly prepared operation supersedes any dialog left open. This
@@ -142,7 +198,7 @@ impl DeletionState {
         token
     }
 
-    pub fn take_pending(&mut self, token: u64) -> Option<PendingDelete> {
+    pub fn take_pending(&mut self, token: u64) -> Option<Pending> {
         self.pending.remove(&token)
     }
 
@@ -241,8 +297,46 @@ impl DeletionState {
         operation
     }
 
+    /// Record one item moved to the Trash.
+    ///
+    /// This follows [`record_cleanup`](Self::record_cleanup) rather than
+    /// [`record_delete`](Self::record_delete), and the difference is not
+    /// stylistic. Those two rules disagree on one question: does recovery
+    /// depend on our record? For rip it did — the receipt was the only route
+    /// back, so an unwritable journal meant the deletion was not safely
+    /// performed. For the Trash it does not; the Trash is its own record.
+    /// Failing here would hide a move that already happened.
+    pub fn record_trash(&mut self, target: PathBuf, total_bytes: u64) -> TrashOperation {
+        self.next_operation = self.next_operation.saturating_add(1);
+        let id = self.next_operation;
+        let at_ms = now_ms();
+        let log_error = self
+            .append(&LogEvent::Trashed {
+                id,
+                target: target.clone(),
+                total_bytes,
+                at_ms,
+            })
+            .err()
+            .map(|error| error.to_string());
+
+        let operation = TrashOperation {
+            id,
+            target,
+            total_bytes,
+            trashed_at_ms: at_ms,
+            log_error,
+        };
+        self.trashed.push(operation.clone());
+        operation
+    }
+
     pub fn operations(&self) -> Vec<Operation> {
         self.operations.iter().rev().cloned().collect()
+    }
+
+    pub fn trashed(&self) -> Vec<TrashOperation> {
+        self.trashed.iter().rev().cloned().collect()
     }
 
     pub fn cleanups(&self) -> Vec<CleanupOperation> {
@@ -264,13 +358,22 @@ impl DeletionState {
     }
 }
 
-fn load_journal(path: &Path) -> (Vec<Operation>, Vec<CleanupOperation>) {
+/// Everything one journal file holds, reloaded.
+#[derive(Debug, Default)]
+struct Journal {
+    operations: Vec<Operation>,
+    cleanups: Vec<CleanupOperation>,
+    trashed: Vec<TrashOperation>,
+}
+
+fn load_journal(path: &Path) -> Journal {
     let Ok(text) = fs::read_to_string(path) else {
-        return (Vec::new(), Vec::new());
+        return Journal::default();
     };
 
     let mut operations = Vec::<Operation>::new();
     let mut cleanups = Vec::<CleanupOperation>::new();
+    let mut trashed = Vec::<TrashOperation>::new();
     for event in text
         .lines()
         .filter_map(|line| serde_json::from_str::<LogEvent>(line).ok())
@@ -322,9 +425,25 @@ fn load_journal(path: &Path) -> (Vec<Operation>, Vec<CleanupOperation>) {
                 // off disk.
                 log_error: None,
             }),
+            LogEvent::Trashed {
+                id,
+                target,
+                total_bytes,
+                at_ms,
+            } => trashed.push(TrashOperation {
+                id,
+                target,
+                total_bytes,
+                trashed_at_ms: at_ms,
+                log_error: None,
+            }),
         }
     }
-    (operations, cleanups)
+    Journal {
+        operations,
+        cleanups,
+        trashed,
+    }
 }
 
 fn now_ms() -> u64 {
@@ -343,15 +462,17 @@ mod tests {
     #[test]
     fn confirmation_tokens_are_one_time_and_superseded() {
         let mut state = DeletionState::new(None);
-        let pending = |target: &str| PendingDelete {
-            scan_id: 1,
-            plan: DeletePlan::new(
-                "rip",
-                PathBuf::from("/scan"),
-                PathBuf::from(target),
-                nirmoka_adapter::DeleteMode::Trash,
-            ),
-            total_bytes: 1,
+        let pending = |target: &str| {
+            Pending::Delete(PendingDelete {
+                scan_id: 1,
+                plan: DeletePlan::new(
+                    "rip",
+                    PathBuf::from("/scan"),
+                    PathBuf::from(target),
+                    nirmoka_adapter::DeleteMode::Trash,
+                ),
+                total_bytes: 1,
+            })
         };
 
         let old = state.prepare(pending("/scan/old"));
@@ -456,6 +577,76 @@ mod tests {
         assert!(operation.log_error.is_some(), "the write failure is stated");
         assert_eq!(operation.completion, CleanupCompletion::Partial);
         assert_eq!(state.cleanups().len(), 1, "and the run is still known");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    /// One slot for the pending operation, whichever kind it is. Preparing a
+    /// move to the Trash must retire a deletion dialog the user left open, and
+    /// the reverse, or a stale confirmation stays live behind the new one.
+    #[test]
+    fn preparing_either_kind_supersedes_the_other() {
+        let mut state = DeletionState::new(None);
+
+        let delete = state.prepare(Pending::Delete(PendingDelete {
+            scan_id: 1,
+            plan: DeletePlan::new(
+                "rip",
+                PathBuf::from("/scan"),
+                PathBuf::from("/scan/old"),
+                nirmoka_adapter::DeleteMode::Trash,
+            ),
+            total_bytes: 1,
+        }));
+        let trash = state.prepare(Pending::Trash(PendingTrash {
+            scan_id: 1,
+            scan_root: PathBuf::from("/scan"),
+            target: PathBuf::from("/scan/current"),
+            total_bytes: 2,
+        }));
+
+        assert!(state.take_pending(delete).is_none());
+        assert!(matches!(state.take_pending(trash), Some(Pending::Trash(_))));
+    }
+
+    #[test]
+    fn a_trashed_item_survives_reload_and_shares_the_id_space() {
+        let path = std::env::temp_dir().join(format!(
+            "nirmoka-trash-journal-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut state = DeletionState::new(Some(path.clone()));
+        let cleaned = state.record_cleanup(cleanup_record());
+        let trashed = state.record_trash(PathBuf::from("/scan/big"), 4096);
+
+        assert_eq!(trashed.id, cleaned.id + 1, "one id space, not three");
+        assert!(trashed.log_error.is_none());
+
+        let reloaded = DeletionState::new(Some(path.clone())).trashed();
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded[0], trashed);
+        let _ = fs::remove_file(path);
+    }
+
+    /// The mirror of the cleanup rule, and the opposite of the rip receipt
+    /// rule. The item is already in the Trash; refusing to report it because
+    /// the journal could not be written would lose the only account of it the
+    /// window can show.
+    #[test]
+    fn a_failed_trash_journal_write_still_reports_the_move() {
+        let directory = std::env::temp_dir().join(format!(
+            "nirmoka-trash-journal-directory-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+
+        let mut state = DeletionState::new(Some(directory.clone()));
+        let operation = state.record_trash(PathBuf::from("/scan/big"), 4096);
+
+        assert!(operation.log_error.is_some(), "the write failure is stated");
+        assert_eq!(state.trashed().len(), 1, "and the move is still known");
         let _ = fs::remove_dir_all(directory);
     }
 
