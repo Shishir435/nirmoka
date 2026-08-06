@@ -16,7 +16,10 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source_svg="$root/assets/nirmoka-mark.svg"
+# The icon, not the mark. They differ on purpose: the mark is full-bleed for the
+# sidebar, where 10% of transparent margin would only make it small, and the icon
+# sits on Apple's grid because the Dock puts it beside other icons.
+source_svg="$root/assets/nirmoka-icon.svg"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -49,10 +52,12 @@ fi
 # margin, no background, so the rasterized square is the artwork alone. Inlined
 # rather than an <img src>, because a referenced file can lose the race with the
 # screenshot and produce a blank white square that looks like a working icon.
+# `background:none` on the body as well as the flag: the transparent margin is
+# the whole point of the icon grid, and a white one would square the corners off
+# exactly the way filling the canvas did.
 {
-  printf '<body style="margin:0;width:1024px;height:1024px">'
-  # The viewBox carries the geometry, so overriding width/height scales it.
-  sed -e 's/width="512"/width="1024"/' -e 's/height="512"/height="1024"/' "$source_svg"
+  printf '<body style="margin:0;width:1024px;height:1024px;background:none">'
+  cat "$source_svg"
   printf '</body>'
 } >"$work/icon.html"
 
