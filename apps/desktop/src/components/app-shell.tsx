@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Brush, CircleHelp, HardDrive, History, Settings, ShieldCheck } from "lucide-react";
 
-import { ScanControls } from "@/components/scan-controls";
+import { NirmokaMark } from "@/components/mark";
+import { ScanBar, ScanStatusStrip } from "@/components/scan-controls";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Route } from "@/lib/engine/route";
@@ -31,14 +32,15 @@ export function AppShell({
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-screen min-h-160 overflow-hidden bg-background">
-        <aside className="flex w-51 shrink-0 flex-col border-r bg-sidebar px-3 py-5 max-[960px]:w-17 max-[960px]:items-center max-[960px]:px-2">
-          <div className="mb-7 flex h-9 items-center gap-2 px-2">
-            <div className="grid size-7 place-items-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-              N
-            </div>
+        <aside className="flex w-51 shrink-0 flex-col border-r bg-sidebar max-[960px]:w-17 max-[960px]:items-center">
+          {/* Same height as the header row, with the same rule under it, so one
+              line crosses the whole window and the brand sits level with the
+              scan bar rather than 8px below it. */}
+          <div className="flex h-15 shrink-0 items-center gap-2 border-b px-5 max-[960px]:justify-center max-[960px]:px-2">
+            <NirmokaMark className="size-7 shrink-0 rounded-lg" />
             <span className="text-sm font-semibold max-[960px]:hidden">Nirmoka</span>
           </div>
-          <nav className="w-full space-y-1" aria-label="Main navigation">
+          <nav className="w-full space-y-1 px-3 pt-4 max-[960px]:px-2" aria-label="Main navigation">
             {primary.map(([id, label, Icon]) => (
               <NavItem
                 key={id}
@@ -49,7 +51,7 @@ export function AppShell({
               />
             ))}
           </nav>
-          <div className="mt-auto w-full">
+          <div className="mt-auto w-full px-3 pb-5 max-[960px]:px-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground max-[960px]:justify-center max-[960px]:px-0">
@@ -65,11 +67,12 @@ export function AppShell({
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex shrink-0 items-start gap-3 border-b bg-card/40 px-8 py-3 max-[960px]:px-5">
-            <div className="min-w-0 flex-1">
-              <ScanControls compact />
-            </div>
-            <div className="flex shrink-0 items-center gap-1 pt-0.5">
+          <header className="flex h-15 shrink-0 items-center gap-3 border-b bg-card/40 px-8 max-[960px]:px-5">
+            <ScanBar />
+            {/* Pulled out by the icon buttons' own padding, so the glyphs line
+                up with the right edge of the content below rather than sitting
+                a button's worth of padding inside it. */}
+            <div className="-mr-2 flex shrink-0 items-center gap-0.5">
               <IconButton
                 label="Help"
                 Icon={CircleHelp}
@@ -79,6 +82,7 @@ export function AppShell({
               <IconButton label="Settings" Icon={Settings} onClick={onSettings} />
             </div>
           </header>
+          <ScanStatusStrip />
           <main className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto min-h-full max-w-330 px-8 py-7 max-[960px]:px-5">
               {children}

@@ -70,19 +70,24 @@ export function StoragePage({
 
       {summary && <SummarySection summary={summary} />}
 
-      <div className="flex flex-wrap items-center gap-1 border-b pb-2" role="tablist">
-        {STORAGE_VIEWS.map((candidate) => (
-          <Button
-            key={candidate}
-            role="tab"
-            aria-selected={view === candidate}
-            variant={view === candidate ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => onView(candidate)}
-          >
-            {viewLabels[candidate]}
-          </Button>
-        ))}
+      {/* The rule spans the content width; the row inside it is pulled left by
+          the buttons' own padding, so "Folders" starts under "Storage" rather
+          than a button's worth of padding inside it. */}
+      <div className="border-b pb-2">
+        <div className="-ml-3 flex flex-wrap items-center gap-1" role="tablist">
+          {STORAGE_VIEWS.map((candidate) => (
+            <Button
+              key={candidate}
+              role="tab"
+              aria-selected={view === candidate}
+              variant={view === candidate ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => onView(candidate)}
+            >
+              {viewLabels[candidate]}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Applications is the one view with a source other than the scan: Mole

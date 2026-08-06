@@ -3,7 +3,6 @@ import {
   CheckCircle2,
   Clipboard,
   LockKeyhole,
-  MonitorCog,
   ShieldCheck,
   Terminal,
   TriangleAlert,
@@ -12,6 +11,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { OnboardingLayout } from "@/components/app-shell";
+import { NirmokaMark } from "@/components/mark";
 import { OnboardingFeature, PrivacyNote } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/lib/app-context";
@@ -33,9 +33,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
     return (
       <OnboardingLayout step={1}>
         <div className="text-center">
-          <HeroIcon>
-            <MonitorCog />
-          </HeroIcon>
+          <NirmokaMark className="mx-auto size-16 rounded-[18px] shadow-sm" />
           <h1 className="mt-7 text-2xl font-semibold">Welcome to Nirmoka</h1>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
             A safe and powerful way to understand and clean your Mac storage.

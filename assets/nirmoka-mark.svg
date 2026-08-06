@@ -1,0 +1,32 @@
+<!--
+  The Nirmoka mark, and the source every icon is generated from.
+
+  निर्मोक is the skin a snake sheds. The N's diagonal is broken once and the
+  upper piece has slid clear: what a living system leaves behind, beside what
+  carries on. Purple is the app's own `--primary`.
+
+  Regenerate the bundled icon set after editing this file:
+
+    ./scripts/generate-icons.sh
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="nirmoka-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8B5CF6" />
+      <stop offset="1" stop-color="#6D28D9" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="114" fill="url(#nirmoka-bg)" />
+  <rect x="150" y="142" width="46" height="228" rx="23" fill="#FFFFFF" />
+  <rect x="316" y="142" width="46" height="228" rx="23" fill="#FFFFFF" />
+  <path d="M240 240 L338 338" fill="none" stroke="#FFFFFF" stroke-width="46" stroke-linecap="round" />
+  <path
+    d="M196 196 L226 226"
+    fill="none"
+    stroke="#EDE9FE"
+    stroke-opacity="0.6"
+    stroke-width="46"
+    stroke-linecap="round"
+    transform="translate(34 -34)"
+  />
+</svg>
