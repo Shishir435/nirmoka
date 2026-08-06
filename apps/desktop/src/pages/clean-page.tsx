@@ -1,12 +1,4 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  History,
-  Play,
-  RefreshCw,
-  ShieldAlert,
-  Square,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, RefreshCw, ShieldAlert, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import type { CleanupOperation, CleanupPreview } from "@nirmoka/transport";
@@ -49,7 +41,9 @@ export function CleanPage() {
   const [flow, dispatch] = useReducer(reduceCleanup, INITIAL_CLEANUP);
   const { preview, preparation, running, result } = flow;
   const [page, setPage] = useState(0);
-  const [history, setHistory] = useState<CleanupOperation[]>([]);
+  // Only how many, not the runs themselves. One history lives on Activity, which
+  // holds all three journals — see ADR 0026.
+  const [runCount, setRunCount] = useState(0);
 
   const rows = useMemo(
     () =>
@@ -62,7 +56,10 @@ export function CleanPage() {
   const pageRows = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const loadHistory = useCallback(() => {
-    transport.cleanupLog().then(setHistory, () => setHistory([]));
+    transport.cleanupLog().then(
+      (runs) => setRunCount(runs.length),
+      () => setRunCount(0),
+    );
   }, [transport]);
 
   useEffect(loadHistory, [loadHistory]);
@@ -341,47 +338,21 @@ export function CleanPage() {
         </DialogContent>
       </Dialog>
 
-      {history.length > 0 && (
-        <Card className="shadow-none">
-          <CardContent className="p-5">
-            <SectionTitle
-              title="Cleanup history"
-              action={
-                <Button variant="outline" size="sm" onClick={loadHistory}>
-                  <History />
-                  Reload
-                </Button>
-              }
-            />
-            <div className="divide-y">
-              {history.map((operation) => (
-                <div
-                  key={operation.id}
-                  className="flex items-center justify-between gap-4 py-3 text-sm"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate">
-                      {new Date(operation.executedAtMs).toLocaleString()} ·{" "}
-                      {`${operation.backend} ${operation.backendVersion}`}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Reviewed {operation.reviewedItems.toLocaleString()} items ·{" "}
-                      {scopeLabel(operation.systemScope)} scope
-                      {operation.warnings.length > 0
-                        ? ` · ${operation.warnings.length} backend warning${
-                            operation.warnings.length === 1 ? "" : "s"
-                          }`
-                        : ""}
-                    </p>
-                  </div>
-                  <StatusBadge tone={outcomeTone(operation.completion)}>
-                    {outcomeLabel(operation.completion)}
-                  </StatusBadge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {runCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {`${runCount === 1 ? "One earlier run is" : `${runCount} earlier runs are`} recorded in `}
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              window.location.hash = "/activity";
+            }}
+          >
+            Activity
+          </Button>
+          , beside everything else this Mac's journal holds.
+        </p>
       )}
 
       <SafetyBanner>

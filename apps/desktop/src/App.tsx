@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "sonner";
 
-import { AppShell, type Route } from "@/components/app-shell";
+import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,50 +12,41 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
+import {
+  DEFAULT_LOCATION,
+  hashForLocation,
+  locationFromHash,
+  type Location,
+  type Route,
+  type StorageView,
+} from "@/lib/engine/route";
 
 const Onboarding = lazy(() =>
   import("@/pages/onboarding").then((module) => ({ default: module.Onboarding })),
 );
 
-const pages: Record<Route, React.LazyExoticComponent<React.ComponentType>> = {
-  overview: lazy(() =>
-    import("@/pages/overview-page").then((module) => ({ default: module.OverviewPage })),
-  ),
+const StoragePage = lazy(() =>
+  import("@/pages/storage-page").then((module) => ({ default: module.StoragePage })),
+);
+const pages: Record<Exclude<Route, "storage">, React.LazyExoticComponent<React.ComponentType>> = {
   clean: lazy(() => import("@/pages/clean-page").then((module) => ({ default: module.CleanPage }))),
-  space: lazy(() => import("@/pages/space-page").then((module) => ({ default: module.SpacePage }))),
-  developer: lazy(() =>
-    import("@/pages/developer-page").then((module) => ({ default: module.DeveloperPage })),
-  ),
-  applications: lazy(() =>
-    import("@/pages/applications-page").then((module) => ({ default: module.ApplicationsPage })),
-  ),
-  status: lazy(() =>
-    import("@/pages/status-page").then((module) => ({ default: module.StatusPage })),
-  ),
   activity: lazy(() =>
     import("@/pages/activity-page").then((module) => ({ default: module.ActivityPage })),
   ),
   help: lazy(() => import("@/pages/help-page").then((module) => ({ default: module.HelpPage }))),
 };
 
-function fromHash(): Route | "onboarding" {
-  const value = window.location.hash.replace("#/", "");
-  return value.startsWith("onboarding")
-    ? "onboarding"
-    : value in pages
-      ? (value as Route)
-      : "overview";
-}
-
 export function App() {
   const { isShell, backends, selection, chooseBackend } = useApp();
-  const [route, setRoute] = useState<Route | "onboarding">(fromHash);
+  const [location, setLocation] = useState<Location | "onboarding">(() =>
+    locationFromHash(window.location.hash),
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     window.localStorage.getItem("nirmoka-theme") === "dark" ? "dark" : "light",
   );
   useEffect(() => {
-    const sync = () => setRoute(fromHash());
+    const sync = () => setLocation(locationFromHash(window.location.hash));
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
@@ -63,17 +54,21 @@ export function App() {
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(theme);
   }, [theme]);
-  const navigate = (next: Route) => {
-    window.location.hash = `/${next}`;
-    setRoute(next);
+  // The view the user was last looking at, kept while they are on another
+  // destination so returning to Storage does not silently reset it.
+  const view: StorageView = location === "onboarding" ? DEFAULT_LOCATION.view : location.view;
+  const go = (next: Location) => {
+    window.location.hash = hashForLocation(next);
+    setLocation(next);
   };
+  const navigate = (route: Route) => go({ route, view });
   const chooseTheme = (next: "light" | "dark") => {
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(next);
     window.localStorage.setItem("nirmoka-theme", next);
     setTheme(next);
   };
-  if (route === "onboarding")
+  if (location === "onboarding")
     return (
       <>
         <Suspense
@@ -83,14 +78,14 @@ export function App() {
             </div>
           }
         >
-          <Onboarding onComplete={() => navigate("overview")} />
+          <Onboarding onComplete={() => go(DEFAULT_LOCATION)} />
         </Suspense>
         <Toaster richColors position="bottom-right" />
       </>
     );
-  const Page = pages[route];
+  const Page = location.route === "storage" ? null : pages[location.route];
   return (
-    <AppShell route={route} onRoute={navigate} onSettings={() => setSettingsOpen(true)}>
+    <AppShell route={location.route} onRoute={navigate} onSettings={() => setSettingsOpen(true)}>
       {!isShell && (
         <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning-foreground">
           Browser development mode: fixture transport is active. Packaged Tauri builds always use
@@ -98,7 +93,11 @@ export function App() {
         </div>
       )}
       <Suspense fallback={<PageLoading />}>
-        <Page />
+        {Page ? (
+          <Page />
+        ) : (
+          <StoragePage view={view} onView={(next) => go({ route: "storage", view: next })} />
+        )}
       </Suspense>
       <Toaster richColors position="bottom-right" />
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -128,10 +127,12 @@ export function App() {
               </div>
             </div>
             <div className="rounded-xl border bg-muted/40 p-4">
-              <p className="text-sm font-medium">Read Only Mode</p>
+              <p className="text-sm font-medium">What this build can remove</p>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Active. Selected-path deletion is unavailable in this beta because no current
-                backend can bind execution to the validated filesystem object.
+                Anything you select can be moved to the Trash, after a confirmation naming the path
+                Nirmoka resolved, and the Finder's Put Back is the undo. Mole cleanup runs Mole's
+                own command. Permanent deletion of a path you pick stays unavailable, because no
+                current backend can bind execution to the filesystem object that was validated.
               </p>
             </div>
             <div>

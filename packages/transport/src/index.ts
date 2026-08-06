@@ -827,6 +827,10 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
         revealLabel: "Reveal in Finder",
         quickLook: false,
         trashLabel: "Move to Trash",
+        // A browser tab has no window controls over the content, so the sidebar
+        // reserves nothing. Reporting 72 here would put a macOS-shaped gap in
+        // `pnpm dev`.
+        windowControlsInset: 0,
       };
     },
 

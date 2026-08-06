@@ -124,6 +124,15 @@ pub struct PlatformFeatures {
     /// trash, so a constant `true` would be structure with nothing to decide; a
     /// volume that cannot accept the move reports it when the move is tried.
     pub trash_label: String,
+    /// Pixels the window's own controls occupy at the top-left of the webview,
+    /// and which the window must therefore leave empty.
+    ///
+    /// macOS draws its close, minimise, and zoom buttons over the content when
+    /// the title bar is an overlay, which is how the app name stops being drawn
+    /// twice — once by the frame and once by the sidebar. Where the frame keeps
+    /// its own title bar, nothing overlaps and this is zero. A hardcoded 72 in
+    /// the frontend would be a macOS measurement compiled into every platform.
+    pub window_controls_inset: u32,
 }
 
 /// Capacity of the filesystem containing a path. This is deliberately separate

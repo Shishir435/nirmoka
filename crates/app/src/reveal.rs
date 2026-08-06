@@ -40,6 +40,12 @@ fn features_for(os: &str) -> PlatformFeatures {
         // would mean picking one that may not be installed.
         quick_look: os == "macos",
         trash_label: crate::trash::label_for(os).to_string(),
+        // Only macOS is configured with an overlay title bar — see
+        // `tauri.conf.json` — so only macOS has buttons sitting over the
+        // webview. 72 clears the three of them at their standard size with a
+        // little air; the frame draws them, so this reserves room rather than
+        // positioning anything.
+        window_controls_inset: if os == "macos" { 72 } else { 0 },
     }
 }
 
@@ -141,6 +147,17 @@ mod tests {
             "Show in File Explorer"
         );
         assert_eq!(features_for("linux").reveal_label, "Show in file manager");
+    }
+
+    /// The inset exists because macOS is configured with an overlay title bar,
+    /// which is what stops the app name being drawn twice. Reserving the same
+    /// room on a platform whose frame keeps its own title bar would be a gap in
+    /// the sidebar with nothing in it.
+    #[test]
+    fn only_the_platform_with_an_overlay_title_bar_reserves_room_for_its_buttons() {
+        assert_eq!(features_for("macos").window_controls_inset, 72);
+        assert_eq!(features_for("windows").window_controls_inset, 0);
+        assert_eq!(features_for("linux").window_controls_inset, 0);
     }
 
     /// Offering Quick Look elsewhere would mean naming an equivalent that may

@@ -72,6 +72,62 @@ export function reduceScan(state: ScanState, event: ScanEvent): ScanState {
 }
 
 /**
+ * The one line the shell shows about the current scan.
+ *
+ * Exactly one, and split into a fixed part and a part that may be cut. The strip
+ * sits above the page, so anything that changes its height moves the whole
+ * window: a second line, or a path allowed to wrap, shifts the content every
+ * time the scanner walks into a deeper directory. `label` is short enough to
+ * always fit and `detail` is what gets truncated — which is why a problem
+ * arrives as a `detail` rather than as another line.
+ */
+export interface ScanStatusLine {
+  label: string;
+  detail: string | null;
+  tone: "muted" | "error";
+}
+
+export function scanStatusLine(options: {
+  state: ScanState;
+  scanner: string | undefined;
+  backendError: string | null;
+  /** Injected so this module stays free of the app's formatting helpers. */
+  formatCount: (value: number) => string;
+}): ScanStatusLine | null {
+  const { state, scanner, backendError, formatCount } = options;
+  // Ordered by what the user needs to know first. A backend error while a scan
+  // is running is still secondary to the scan's own progress.
+  switch (state.status) {
+    case "scanning":
+      return {
+        label: `Scanning ${formatCount(state.progress.scanned)} entries…`,
+        detail: state.progress.currentPath,
+        tone: "muted",
+      };
+    case "failed":
+      return { label: "Scan failed.", detail: state.message, tone: "error" };
+    case "cancelled":
+      return { label: "Scan cancelled.", detail: backendError, tone: "muted" };
+    case "done":
+      return {
+        label: `${formatCount(state.summary.entries)} entries · ${state.summary.backendId}`,
+        detail: backendError ?? state.summary.rootPath,
+        tone: backendError ? "error" : "muted",
+      };
+    case "idle":
+      if (backendError)
+        return { label: "Backend detection failed.", detail: backendError, tone: "error" };
+      if (!scanner)
+        return {
+          label: "No scanner installed.",
+          detail: "Install ncdu 2.x, then reopen Nirmoka to detect it.",
+          tone: "muted",
+        };
+      return null;
+  }
+}
+
+/**
  * Whether the Scan button can do anything.
  *
  * Both conditions are real failures seen in this app: with no usable scanner
