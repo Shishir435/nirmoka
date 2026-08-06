@@ -1,10 +1,6 @@
 import { ArrowUpDown, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type {
-  ApplicationInventory,
-  InstalledApplicationInventory,
-  PlatformFeatures,
-} from "@nirmoka/transport";
+import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
 
 import { EmptyState, MetricCard, SafetyBanner, SectionTitle } from "@/components/shared";
 import { TrashConfirmation } from "@/components/trash-confirmation";
@@ -21,7 +17,7 @@ import { formatBytes, formatCount } from "@/lib/format";
  * scan cannot supply one. A view of the scan rather than a tab — see ADR 0026.
  */
 export function ApplicationsSection() {
-  const { transport, scan, backends } = useApp();
+  const { transport, scan, backends, features } = useApp();
   const offer = uninstallOffer(backends);
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
@@ -31,20 +27,8 @@ export function ApplicationsSection() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [largestFirst, setLargestFirst] = useState(true);
-  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
   const nextTrashRequest = useRef(0);
-
-  useEffect(() => {
-    let live = true;
-    transport.platformFeatures().then(
-      (value) => live && setFeatures(value),
-      () => live && setFeatures(null),
-    );
-    return () => {
-      live = false;
-    };
-  }, [transport]);
 
   useEffect(() => {
     dispatchTrash({ type: "rescanned" });
