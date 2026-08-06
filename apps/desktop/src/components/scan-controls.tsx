@@ -3,8 +3,8 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/lib/app-context";
-import { canStartScan } from "@/lib/engine/scan-machine";
-import { formatCount, plural } from "@/lib/format";
+import { canStartScan, scanStatusLine } from "@/lib/engine/scan-machine";
+import { formatCount } from "@/lib/format";
 
 /**
  * The scan bar, in the shell header. Rust holds exactly one scan at a time, so a
@@ -50,62 +50,46 @@ export function ScanBar() {
 }
 
 /**
- * Whatever the current scan has to say, on its own line under the header rule.
- * Renders nothing when there is nothing to report, so the header does not carry
- * an empty strip.
+ * Whatever the current scan has to say, on one line under the header rule.
+ *
+ * Fixed height, one line, and the path truncated rather than wrapped. A scanner
+ * walking a deep tree reports paths of wildly different lengths several times a
+ * second; letting one of them wrap moved every pixel of the page below it. The
+ * count is tabular and given a floor width for the same reason horizontally, so
+ * 6,25,001 growing to 11,00,001 does not drag the path along with it.
  */
 export function ScanStatusStrip() {
   const { scan, selection, backendError } = useApp();
-  const lines = statusLines({ scan, scanner: selection?.scanner ?? undefined, backendError });
-  if (lines.length === 0) return null;
+  const line = scanStatusLine({
+    state: scan,
+    scanner: selection?.scanner ?? undefined,
+    backendError,
+    formatCount,
+  });
+  if (!line) return null;
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b bg-card/40 px-8 py-1.5 text-xs max-[960px]:px-5">
-      {lines.map((line) => (
+    <div className="flex h-8 shrink-0 items-center gap-3 overflow-hidden border-b bg-card/40 px-8 text-xs max-[960px]:px-5">
+      <span
+        className={`shrink-0 tabular-nums ${
+          line.tone === "error" ? "text-destructive" : "text-muted-foreground"
+        } ${scan.status === "scanning" ? "min-w-52" : ""}`}
+      >
+        {line.label}
+      </span>
+      {line.detail && (
         <span
-          key={line.text}
-          className={
-            line.tone === "error"
-              ? "min-w-0 truncate text-destructive"
-              : "min-w-0 truncate text-muted-foreground"
-          }
+          className={`min-w-0 truncate font-mono ${
+            line.tone === "error" ? "text-destructive" : "text-muted-foreground"
+          }`}
+          // The end of a path identifies it; the start is shared by everything
+          // under the scan root. Keeping direction explicit means the ellipsis
+          // does not move to the other end under a right-to-left system locale.
+          dir="ltr"
         >
-          {line.text}
+          {line.detail}
         </span>
-      ))}
+      )}
     </div>
   );
-}
-
-type StatusLine = { text: string; tone: "muted" | "error" };
-
-function statusLines({
-  scan,
-  scanner,
-  backendError,
-}: {
-  scan: ReturnType<typeof useApp>["scan"];
-  scanner: string | undefined;
-  backendError: string | null;
-}): StatusLine[] {
-  const lines: StatusLine[] = [];
-  if (scan.status === "scanning")
-    lines.push(
-      { text: `Scanning ${plural(scan.progress.scanned, "entry", "entries")}…`, tone: "muted" },
-      { text: scan.progress.currentPath, tone: "muted" },
-    );
-  if (scan.status === "cancelled") lines.push({ text: "Scan cancelled.", tone: "muted" });
-  if (scan.status === "failed") lines.push({ text: scan.message, tone: "error" });
-  if (scan.status === "done")
-    lines.push({
-      text: `${scan.summary.rootPath} · ${formatCount(scan.summary.entries)} entries · ${scan.summary.backendId}`,
-      tone: "muted",
-    });
-  if (!scanner)
-    lines.push({
-      text: "No supported scanner is installed. Install ncdu 2.x, then refresh backend detection.",
-      tone: "muted",
-    });
-  if (backendError) lines.push({ text: backendError, tone: "error" });
-  return lines;
 }
