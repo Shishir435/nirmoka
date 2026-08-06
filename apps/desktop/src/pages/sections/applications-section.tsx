@@ -6,13 +6,7 @@ import type {
   PlatformFeatures,
 } from "@nirmoka/transport";
 
-import {
-  EmptyState,
-  MetricCard,
-  PageHeader,
-  SafetyBanner,
-  SectionTitle,
-} from "@/components/shared";
+import { EmptyState, MetricCard, SafetyBanner, SectionTitle } from "@/components/shared";
 import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +16,11 @@ import { uninstallOffer } from "@/lib/engine/backend-gating";
 import { INITIAL_TRASH, outcomeMessage, reduceTrash } from "@/lib/engine/trash-flow";
 import { formatBytes, formatCount } from "@/lib/format";
 
-export function ApplicationsPage() {
+/**
+ * The scan tree filtered to `.app` bundles, beside Mole's own inventory when a
+ * scan cannot supply one. A view of the scan rather than a tab — see ADR 0026.
+ */
+export function ApplicationsSection() {
   const { transport, scan, backends } = useApp();
   const offer = uninstallOffer(backends);
   const summary = scan.status === "done" ? scan.summary : null;
@@ -163,14 +161,11 @@ export function ApplicationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Applications"
-        subtitle={
-          installed
-            ? "Applications Mole can address for uninstall"
-            : "Application bundles found in the current scan"
-        }
-      />
+      <p className="text-sm text-muted-foreground">
+        {installed
+          ? "Applications Mole can address for uninstall. Scan /Applications for bundles this window can move itself."
+          : "Application bundles found in the current scan."}
+      </p>
       {installedLoading && !inventory ? (
         <EmptyState title="Reading applications" text="Checking Mole and the current scan." />
       ) : !installed && !summary ? (

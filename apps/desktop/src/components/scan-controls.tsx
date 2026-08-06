@@ -6,14 +6,21 @@ import { useApp } from "@/lib/app-context";
 import { canStartScan } from "@/lib/engine/scan-machine";
 import { formatCount, plural } from "@/lib/format";
 
+/**
+ * One scan bar, in the shell header. Rust holds exactly one scan at a time, so a
+ * second copy of these controls implied a second scan — see ADR 0026.
+ *
+ * `compact` is the header layout: one row, with status beside the button rather
+ * than stacked under it.
+ */
 export function ScanControls({ compact = false }: { compact?: boolean }) {
   const { selection, listenersReady, scan, startScan, cancelScan, backendError } = useApp();
   const [path, setPath] = useState("~");
   const canScan = canStartScan({ scanner: selection?.scanner, listenersReady, state: scan });
 
   return (
-    <div className={compact ? "space-y-2" : "space-y-3 rounded-xl border bg-card p-4"}>
-      <div className="flex gap-2">
+    <div className={compact ? "space-y-1" : "space-y-3 rounded-xl border bg-card p-4"}>
+      <div className="flex items-center gap-2">
         <input
           aria-label="Directory to scan"
           value={path}
@@ -34,29 +41,41 @@ export function ScanControls({ compact = false }: { compact?: boolean }) {
           </Button>
         ) : (
           <Button disabled={!canScan || !path.trim()} onClick={() => void startScan(path)}>
-            <ScanLine /> Scan
+            <ScanLine /> {scan.status === "done" ? "Rescan" : "Scan"}
           </Button>
         )}
       </div>
-      {scan.status === "scanning" && (
-        <div className="text-xs text-muted-foreground">
-          <p>Scanning {plural(scan.progress.scanned, "entry", "entries")}…</p>
-          <p className="truncate font-mono">{scan.progress.currentPath}</p>
-        </div>
-      )}
-      {scan.status === "cancelled" && <p className="text-xs">Scan cancelled.</p>}
-      {scan.status === "failed" && <p className="text-xs text-destructive">{scan.message}</p>}
+      <ScanStatus compact={compact} />
       {!selection?.scanner && (
         <p className="text-xs text-muted-foreground">
           No supported scanner is installed. Install ncdu 2.x, then refresh backend detection.
         </p>
       )}
       {backendError && <p className="text-xs text-destructive">{backendError}</p>}
-      {scan.status === "done" && !compact && (
-        <p className="text-xs text-muted-foreground">
-          Completed with {scan.summary.backendId} · {formatCount(scan.summary.entries)} entries
-        </p>
-      )}
     </div>
   );
+}
+
+function ScanStatus({ compact }: { compact: boolean }) {
+  const { scan } = useApp();
+  if (scan.status === "scanning")
+    return (
+      <div className="flex min-w-0 gap-2 text-xs text-muted-foreground">
+        <span className="shrink-0">
+          Scanning {plural(scan.progress.scanned, "entry", "entries")}…
+        </span>
+        <span className="min-w-0 truncate font-mono">{scan.progress.currentPath}</span>
+      </div>
+    );
+  if (scan.status === "cancelled") return <p className="text-xs">Scan cancelled.</p>;
+  if (scan.status === "failed") return <p className="text-xs text-destructive">{scan.message}</p>;
+  if (scan.status === "done")
+    return (
+      <p className="min-w-0 truncate text-xs text-muted-foreground">
+        <span className="font-mono">{scan.summary.rootPath}</span> ·{" "}
+        {formatCount(scan.summary.entries)} entries · {scan.summary.backendId}
+        {compact ? "" : ` ${scan.summary.backendVersion ?? ""}`}
+      </p>
+    );
+  return null;
 }

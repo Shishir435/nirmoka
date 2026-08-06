@@ -1,4 +1,14 @@
-import { Box, Code2, Database, Folder, Search, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Box,
+  Brush,
+  Code2,
+  Database,
+  Folder,
+  LayoutDashboard,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/shared";
@@ -7,13 +17,23 @@ import { Input } from "@/components/ui/input";
 const helpCards = [
   {
     title: "Getting Started",
-    text: "Install ncdu 2.x, choose a directory, and start a read-only scan.",
+    text: "Install ncdu 2.x, type a directory in the bar at the top, and press Scan. Scanning changes nothing.",
     Icon: Folder,
   },
   {
-    title: "Cleaning Safety",
-    text: "Cleanup stays disabled until an exact backend preview can be represented.",
+    title: "Three Places",
+    text: "Storage is the scan and every view of it. Clean is Mole's cleanup. Activity is everything that was removed.",
+    Icon: LayoutDashboard,
+  },
+  {
+    title: "Moving to the Trash",
+    text: "Select a row in Storage and press ⌘⌫ or the Trash button. The undo is Put Back in the Finder; permanent deletion is not offered.",
     Icon: Trash2,
+  },
+  {
+    title: "Cleaning Safety",
+    text: "Clean shows Mole's own preview, and running it calls Mole's command with no paths from this window. Mole re-discovers candidates as it runs.",
+    Icon: Brush,
   },
   {
     title: "Permissions",

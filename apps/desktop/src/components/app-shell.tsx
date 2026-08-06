@@ -1,36 +1,19 @@
 import type { ReactNode } from "react";
-import {
-  AppWindow,
-  Brush,
-  CircleHelp,
-  Code2,
-  HardDrive,
-  History,
-  LayoutDashboard,
-  Activity,
-  Settings,
-} from "lucide-react";
+import { Brush, CircleHelp, HardDrive, History, Settings, ShieldCheck } from "lucide-react";
 
+import { ScanControls } from "@/components/scan-controls";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { Route } from "@/lib/engine/route";
 import { cn } from "@/lib/utils";
 
-export type Route =
-  | "overview"
-  | "clean"
-  | "space"
-  | "developer"
-  | "applications"
-  | "status"
-  | "activity"
-  | "help";
-
+/**
+ * Three destinations, and the scan bar above all of them. Seven nav items
+ * described the command surface rather than the work — see ADR 0026.
+ */
 const primary = [
-  ["overview", "Overview", LayoutDashboard],
+  ["storage", "Storage", HardDrive],
   ["clean", "Clean", Brush],
-  ["space", "Space Explorer", HardDrive],
-  ["developer", "Developer", Code2],
-  ["applications", "Applications", AppWindow],
-  ["status", "System Status", Activity],
   ["activity", "Activity", History],
 ] as const;
 
@@ -66,27 +49,42 @@ export function AppShell({
               />
             ))}
           </nav>
-          <div className="my-5 w-full border-t" />
-          <p className="mb-2 w-full px-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground max-[960px]:sr-only">
-            Support
-          </p>
-          <NavItem
-            active={route === "help"}
-            label="Help"
-            Icon={CircleHelp}
-            onClick={() => onRoute("help")}
-          />
-          <div className="mt-auto w-full space-y-1">
-            <NavItem label="Settings" Icon={Settings} onClick={onSettings} />
-            <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground max-[960px]:justify-center max-[960px]:px-0">
-              <span className="size-2 rounded-full bg-success" />
-              <span className="max-[960px]:hidden">Read Only Mode</span>
-            </div>
+          <div className="mt-auto w-full">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground max-[960px]:justify-center max-[960px]:px-0">
+                  <ShieldCheck className="size-4 shrink-0 text-success" />
+                  <span className="max-[960px]:hidden">No permanent deletion</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-64">
+                Removal goes to the Trash, so the Finder can put it back. Permanent deletion of a
+                path you pick is not offered in this beta.
+              </TooltipContent>
+            </Tooltip>
           </div>
         </aside>
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto min-h-full max-w-330 px-8 py-7 max-[960px]:px-5">{children}</div>
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex shrink-0 items-start gap-3 border-b bg-card/40 px-8 py-3 max-[960px]:px-5">
+            <div className="min-w-0 flex-1">
+              <ScanControls compact />
+            </div>
+            <div className="flex shrink-0 items-center gap-1 pt-0.5">
+              <IconButton
+                label="Help"
+                Icon={CircleHelp}
+                active={route === "help"}
+                onClick={() => onRoute("help")}
+              />
+              <IconButton label="Settings" Icon={Settings} onClick={onSettings} />
+            </div>
+          </header>
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <div className="mx-auto min-h-full max-w-330 px-8 py-7 max-[960px]:px-5">
+              {children}
+            </div>
+          </main>
+        </div>
       </div>
     </TooltipProvider>
   );
@@ -100,27 +98,27 @@ function NavItem({
 }: {
   active?: boolean;
   label: string;
-  Icon: typeof LayoutDashboard;
+  Icon: typeof HardDrive;
   onClick: () => void;
 }) {
-  const button = (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-[13px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/20 max-[960px]:justify-center max-[960px]:px-0",
-        active &&
-          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground",
-      )}
-    >
-      <Icon className="size-4" />
-      <span className="max-[960px]:hidden">{label}</span>
-    </button>
-  );
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors max-[960px]:justify-center max-[960px]:px-0",
+            active
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          <Icon className="size-4.5 shrink-0" />
+          <span className="max-[960px]:hidden">{label}</span>
+        </button>
+      </TooltipTrigger>
       <TooltipContent side="right" className="min-[961px]:hidden">
         {label}
       </TooltipContent>
@@ -143,5 +141,33 @@ export function OnboardingLayout({ step, children }: { step: number; children: R
         </div>
       </section>
     </div>
+  );
+}
+
+function IconButton({
+  label,
+  Icon,
+  active = false,
+  onClick,
+}: {
+  label: string;
+  Icon: typeof HardDrive;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant={active ? "secondary" : "ghost"}
+          size="icon"
+          onClick={onClick}
+          aria-label={label}
+        >
+          <Icon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
