@@ -3,9 +3,11 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 12 — Move to Trash.** Step 11 shipped as 0.1.1: `brew install nirmoka/tap/nirmoka`
-installs a working macOS beta, and it is read-only. Step 12 adds the verb the product is missing —
-see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md). Releases are unsigned until
+**Current step: 12, phase 6 — releasing 0.2.0.** Step 11 shipped as 0.1.1: `brew install
+nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 adds the verb the
+product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md). Phases
+1–5 have landed; what is left is a window that really moves a file, the tag, and the tap.
+Releases are unsigned until
 there is an Apple Developer account, which is why the install path is a Homebrew formula rather
 than a download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
 
@@ -363,22 +365,34 @@ Nothing here ships without tests.
 
 ### Phase 2 — the operation
 
-- [ ] `crates/app/src/trash.rs`, beside `reveal.rs`. Validate through the shared
-      `validate_delete_target`, validate again immediately before the move, then move
-- [ ] The `trash` crate (5.2.6, MIT) rather than a subprocess: the platform's own Trash service,
-      no optional install, and Windows and freedesktop for free
-- [ ] `PlatformFeatures` gains the platform's own wording and whether the operation is offered
-- [ ] Tests for an empty path, a path that is gone, the scan root, a symlink escaping the root, a
-      system-critical location, and a real round trip into the Trash
+- [x] `crates/app/src/trash.rs`, beside `reveal.rs`. Validate through the shared
+      `validate_delete_target`, validate again immediately before the move, then move — a
+      confirmation dialog can sit open for as long as the user leaves it open
+- [x] The `trash` crate (5.2.6, MIT) rather than a subprocess: the platform's own Trash service,
+      no optional install, and Windows and freedesktop for free. Default features off; they add
+      `chrono` only to list Trash contents, which macOS does not support. On macOS the move goes
+      through the Finder rather than `trashItemAtURL:`, because Put Back is the property
+      [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) rests on and only the Finder
+      route records it — so a refused Apple event names the setting to grant
+- [x] `PlatformFeatures` gains the platform's own wording and whether the operation is offered
+- [x] Tests for an empty path, a path that is gone, the scan root, a symlink escaping the root, a
+      system-critical location, and a real round trip into the Trash. Eleven tests; the round trip
+      really moves a file, because a mock would prove only that the mock was called
 
 ### Phase 3 — the boundary
 
-- [ ] A `Trashed` journal event with no recovery path. The crate cannot enumerate or restore the
-      macOS Trash, and guessing a name inside `~/.Trash` would be a receipt that does not resolve
-- [ ] A failed journal append reports the move beside the error rather than failing it — ADR 0020's
+- [x] A `Trashed` journal event with no recovery path. The crate cannot enumerate or restore the
+      macOS Trash, and guessing a name inside `~/.Trash` would be a receipt that does not resolve.
+      It shares the deletion id space and survives reload
+- [x] A failed journal append reports the move beside the error rather than failing it — ADR 0020's
       rule, because the Trash is its own record
-- [ ] Prepare and confirm commands through the existing one-time token; no raw path crosses back in
-- [ ] `pnpm types`, with the regenerated bindings committed
+- [x] Prepare and confirm commands through the existing one-time token; no raw path crosses back in.
+      The confirmation carries the resolved path, not the clicked one, and the pending slot is an
+      enum rather than a second map, so a prepared cleanup and a prepared move cannot both be live
+- [x] `TrashPreparation` is deliberately not `DeletePreparation`: that type carries a backend, the
+      backend it displaced, and whether a dry run happened — three questions with no answer when no
+      backend is involved
+- [x] `pnpm types`, with the regenerated bindings committed
 
 ### Phase 4 — Space
 
@@ -410,7 +424,9 @@ Nothing here ships without tests.
 
 ### Phase 6 — ship it
 
-- [ ] `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`, `pnpm typecheck && pnpm build`
+- [x] `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`, `pnpm typecheck && pnpm build`,
+      `pnpm lint`, and `scripts/check-invariants.sh`. 315 Rust tests and 61 frontend tests pass,
+      and regenerating the bindings produces no diff
 - [ ] `pnpm tauri dev` and trash something from the window. A command that compiles and a window
       that moves a file are different claims
 - [ ] 0.2.0, tagged, with the tap updated
