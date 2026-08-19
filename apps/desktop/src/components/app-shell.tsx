@@ -90,9 +90,12 @@ export function AppShell({
           {/* Pulled out by the icon buttons' own padding, so the glyphs line up
               with the right edge of the content below rather than sitting a
               button's worth of padding inside it. */}
-          {/* Three outline controls of the same weight, as the design draws
-              them. Scan was a filled primary here, which made the loudest thing
-              in the window a button you press once per session. */}
+          {/* One button and two icons, not three boxes. Scan is the only thing
+              here a person came to press; giving Settings and Help the same
+              border made the title bar a row of equal-weight controls and drew
+              the eye to the two that are housekeeping. Scan is outline rather
+              than filled for the same reason — it was a purple primary, which
+              made a once-per-session button the loudest object on screen. */}
           <div className="flex items-center justify-end gap-1.5">
             <ScanControl />
             <IconButton label="Settings" Icon={Settings} onClick={onSettings} />
@@ -148,7 +151,7 @@ function IconButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          variant={active ? "secondary" : "outline"}
+          variant={active ? "secondary" : "ghost"}
           size="icon-sm"
           onClick={onClick}
           aria-label={label}

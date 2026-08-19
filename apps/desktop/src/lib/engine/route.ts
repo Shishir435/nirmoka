@@ -75,6 +75,28 @@ export function locationFromHash(hash: string): Location | "onboarding" {
 }
 
 /**
+ * Where the window opens.
+ *
+ * Onboarding existed and was unreachable: the page was written, the hash
+ * resolved to it, and nothing ever set that hash — so a first run went straight
+ * to a screen that assumes a backend has already been found. A link is honoured
+ * whatever this returns; the first-run case only applies when there is no link
+ * to honour.
+ *
+ * `onboarded` is a UI fact rather than a backend one — it records that a person
+ * has seen four screens — so it is stored beside the theme rather than in the
+ * settings file Rust owns.
+ */
+export function firstLocation(hash: string, onboarded: boolean): Location | "onboarding" {
+  const named = locationFromHash(hash);
+  if (named === "onboarding") return "onboarding";
+  // A hash means the user arrived somewhere deliberately, and interrupting that
+  // with a wizard would lose where they were going.
+  if (!onboarded && !hash) return "onboarding";
+  return named;
+}
+
+/**
  * `#/storage` is the dashboard and `#/storage/folders` is the browser, so the
  * view appears in the hash exactly when there is one. They are different places
  * now, which is why the suffix is no longer suppressed as a default.

@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
 import {
   DEFAULT_LOCATION,
+  firstLocation,
   hashForLocation,
   locationFromHash,
   type Location,
@@ -41,11 +42,27 @@ const pages: Record<Exclude<Route, "storage">, React.LazyExoticComponent<React.C
   help: lazy(() => import("@/pages/help-page").then((module) => ({ default: module.HelpPage }))),
 };
 
+/**
+ * That a person has been shown the four introduction screens. Beside the theme
+ * in `localStorage` rather than in the settings file, because it is a fact about
+ * this window rather than about how Nirmoka is configured.
+ */
+const ONBOARDED_KEY = "nirmoka-onboarded";
+
+const hasOnboarded = () => window.localStorage.getItem(ONBOARDED_KEY) === "true";
+
 export function App() {
   const { isShell, backends, selection, chooseBackend } = useApp();
-  const [location, setLocation] = useState<Location | "onboarding">(() =>
-    locationFromHash(window.location.hash),
-  );
+  const [location, setLocation] = useState<Location | "onboarding">(() => {
+    const opening = firstLocation(window.location.hash, hasOnboarded());
+    // Written into the hash as well, so the listener below and the window agree
+    // about where it is. Without this the first `hashchange` would navigate away
+    // from a wizard the user had not finished.
+    if (opening === "onboarding" && !window.location.hash) {
+      window.location.hash = "#/onboarding";
+    }
+    return opening;
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     window.localStorage.getItem("nirmoka-theme") === "dark" ? "dark" : "light",
@@ -85,7 +102,12 @@ export function App() {
             </div>
           }
         >
-          <Onboarding onComplete={() => go(DEFAULT_LOCATION)} />
+          <Onboarding
+            onComplete={() => {
+              window.localStorage.setItem(ONBOARDED_KEY, "true");
+              go(DEFAULT_LOCATION);
+            }}
+          />
         </Suspense>
         <Toaster richColors position="bottom-right" />
       </>

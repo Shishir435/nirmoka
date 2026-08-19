@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   DEFAULT_LOCATION,
+  firstLocation,
   hashForLocation,
   locationFromHash,
 } from "../apps/desktop/src/lib/engine/route.ts";
@@ -78,4 +79,24 @@ test("the dashboard and the browser are different links", () => {
   assert.equal(hashForLocation({ route: "storage", view: "developer" }), "#/storage/developer");
   // A view outside storage names nothing, so it stays out of the hash.
   assert.equal(hashForLocation({ route: "clean", view: "developer" }), "#/clean");
+});
+
+test("a first run opens on onboarding, which nothing used to reach", () => {
+  // The page was written and the hash resolved to it, and no code ever set that
+  // hash: a fresh install went straight to a screen assuming a backend exists.
+  assert.equal(firstLocation("", false), "onboarding");
+  assert.equal(firstLocation("", true), DEFAULT_LOCATION);
+});
+
+test("a link is honoured even on a first run", () => {
+  // Interrupting a deliberate arrival with a wizard loses where they were going.
+  assert.deepEqual(firstLocation("#/clean", false), { route: "clean", view: null });
+  assert.deepEqual(firstLocation("#/storage/developer", false), {
+    route: "storage",
+    view: "developer",
+  });
+});
+
+test("onboarding can always be reopened by naming it", () => {
+  assert.equal(firstLocation("#/onboarding", true), "onboarding");
 });
