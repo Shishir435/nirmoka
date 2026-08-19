@@ -22,6 +22,7 @@ pub mod process;
 pub mod registry;
 pub mod scan;
 pub mod status;
+pub mod uninstall;
 pub mod wire;
 
 use std::path::Path;
@@ -40,6 +41,10 @@ pub use process::CancelToken;
 pub use registry::{Choice, Registry};
 pub use scan::{validate_scan_root, ScanOptions, ScanSummary};
 pub use status::SystemStatus;
+pub use uninstall::{
+    UninstallApp, UninstallCompletion, UninstallExecution, UninstallItem, UninstallItemScope,
+    UninstallPreview,
+};
 pub use wire::{TreeSink, WireError, WireItem, WireSink};
 
 /// One external disk tool, wrapped.
@@ -121,6 +126,59 @@ pub trait Adapter: Send + Sync {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "cleanup execution",
+        })
+    }
+
+    /// Preview removing the named applications, without removing anything.
+    ///
+    /// `names` are the backend's own identifiers, as published by
+    /// [`Adapter::installed_applications`] — never display names. Implementors
+    /// must validate every one against the backend's current inventory before it
+    /// becomes a subprocess argument, so that only an identifier the backend
+    /// itself published can ever be passed to it.
+    ///
+    /// The returned plan is evidence, not an execution list. Implementors must
+    /// never turn its paths into delete arguments: the backend rediscovers what
+    /// to remove when [`Adapter::execute_uninstall`] runs, and applies its own
+    /// protections while doing so.
+    fn uninstall_preview(
+        &self,
+        _names: &[String],
+        _cancel: &CancelToken,
+    ) -> Result<UninstallPreview, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "uninstall preview",
+        })
+    }
+
+    /// Remove the named applications after the shell has consumed an explicit
+    /// confirmation token.
+    ///
+    /// `reviewed_version` is the exact version that produced the preview the
+    /// user approved; a different version must fail closed and require a new
+    /// review. `names` must be re-validated against the live inventory here, not
+    /// trusted from the preview.
+    ///
+    /// Implementors must not pass a flag that bypasses the backend's recoverable
+    /// default — for Mole, `--permanent`. The user approved an uninstall, not an
+    /// unrecoverable one.
+    ///
+    /// An `Err` here must mean **nothing was removed**: an unsupported version, a
+    /// missing binary, a refused review, an unknown identifier, a failed spawn.
+    /// Once the backend is running it may already have moved files, so
+    /// cancellation and backend failure return `Ok` with
+    /// [`UninstallCompletion::Cancelled`] or [`UninstallCompletion::Failed`] —
+    /// the shell has an irreversible run to record either way.
+    fn execute_uninstall(
+        &self,
+        _names: &[String],
+        _reviewed_version: &str,
+        _cancel: &CancelToken,
+    ) -> Result<UninstallExecution, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "uninstall execution",
         })
     }
 

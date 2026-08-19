@@ -7,9 +7,16 @@ import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { UninstallReview } from "@/components/uninstall-review";
 import { useApp } from "@/lib/app-context";
 import { uninstallOffer } from "@/lib/engine/backend-gating";
 import { INITIAL_TRASH, outcomeMessage, reduceTrash } from "@/lib/engine/trash-flow";
+import {
+  canUninstall,
+  INITIAL_UNINSTALL,
+  reduceUninstall,
+  uninstallOutcomeMessage,
+} from "@/lib/engine/uninstall-flow";
 import { formatBytes, formatCount } from "@/lib/format";
 
 /**
@@ -29,6 +36,8 @@ export function ApplicationsSection() {
   const [largestFirst, setLargestFirst] = useState(true);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
   const nextTrashRequest = useRef(0);
+  const [uninstall, dispatchUninstall] = useReducer(reduceUninstall, INITIAL_UNINSTALL);
+  const nextUninstallRequest = useRef(0);
 
   useEffect(() => {
     dispatchTrash({ type: "rescanned" });
@@ -133,6 +142,44 @@ export function ApplicationsSection() {
     );
   };
 
+  /**
+   * Ask the backend what removing this application would do.
+   *
+   * Removes nothing. The identifier is the backend's own `uninstallName`, and
+   * Rust checks it against the live inventory before it becomes an argument.
+   */
+  const askToUninstall = (name: string) => {
+    // Its own counter, for the same reason the Trash flow has one: a review takes
+    // seconds and the user can click another row while it runs.
+    const requestId = ++nextUninstallRequest.current;
+    dispatchUninstall({ type: "reviewStarted", requestId, name });
+    transport.uninstallPreview([name]).then(
+      (preview) => dispatchUninstall({ type: "reviewed", requestId, preview }),
+      (reason: unknown) =>
+        dispatchUninstall({ type: "reviewFailed", requestId, message: String(reason) }),
+    );
+  };
+
+  /** The plan was read. Bind it to a token, which is all that can start the run. */
+  const approveUninstall = () => {
+    const requestId = nextUninstallRequest.current;
+    transport.prepareUninstall().then(
+      (preparation) => dispatchUninstall({ type: "prepared", requestId, preparation }),
+      (reason: unknown) =>
+        dispatchUninstall({ type: "reviewFailed", requestId, message: String(reason) }),
+    );
+  };
+
+  const doUninstall = (confirmationToken: number) => {
+    const requestId = ++nextUninstallRequest.current;
+    dispatchUninstall({ type: "runStarted", requestId });
+    transport.confirmUninstall(confirmationToken).then(
+      (operation) => dispatchUninstall({ type: "removed", requestId, operation }),
+      (reason: unknown) =>
+        dispatchUninstall({ type: "runFailed", requestId, message: String(reason) }),
+    );
+  };
+
   const doTrash = (confirmationToken: number) => {
     // Its own number, from the same counter — see `tree-view.tsx`.
     const requestId = ++nextTrashRequest.current;
@@ -224,6 +271,18 @@ export function ApplicationsSection() {
                       trashed={app.nodeId !== null && trash.trashedIds.includes(app.nodeId)}
                       busy={trash.preparing || trash.running || trash.preparation !== null}
                       onTrash={askToTrash}
+                      // Offered only where the backend can actually do it, and
+                      // only for rows carrying its own identifier: a scanned
+                      // bundle is a directory, not something `mo uninstall` takes.
+                      removable={offer === "app" && canUninstall(uninstall, app.uninstallName)}
+                      uninstalled={
+                        app.uninstallName !== null &&
+                        uninstall.removedNames.some(
+                          (name) => name === app.uninstallName || name === app.name,
+                        )
+                      }
+                      reviewing={uninstall.reviewing && uninstall.activeName === app.uninstallName}
+                      onUninstall={askToUninstall}
                     />
                   ))}
                 </div>
@@ -231,6 +290,14 @@ export function ApplicationsSection() {
               {trash.error && <p className="mt-3 text-xs text-destructive">{trash.error}</p>}
               {trash.last && (
                 <p className="mt-3 text-xs text-muted-foreground">{outcomeMessage(trash.last)}</p>
+              )}
+              {uninstall.error && (
+                <p className="mt-3 text-xs text-destructive">{uninstall.error}</p>
+              )}
+              {uninstall.last && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {uninstallOutcomeMessage(uninstall.last)}
+                </p>
               )}
             </CardContent>
           </Card>
@@ -243,9 +310,13 @@ export function ApplicationsSection() {
           {installed ? (
             <SafetyBanner compact>
               <p className="text-xs text-muted-foreground">
-                {`This list comes from ${installed.backend}, which reports a path rather than a
-                position in a scan — and Nirmoka only moves things it can resolve itself, from its
-                own tree. Scan `}
+                {offer === "app"
+                  ? `Uninstall asks ${installed.backend} what it would remove, shows you that exact
+                     plan, and runs it only after you approve. It decides what to remove and applies
+                     its own protections; files go to the Trash. Scan `
+                  : `This list comes from ${installed.backend}, which reports a path rather than a
+                     position in a scan — and Nirmoka only moves things it can resolve itself, from
+                     its own tree. Scan `}
                 <code className="font-mono">/Applications</code>
                 {` to get the same bundles with a ${trashLabel} button on each one.`}
               </p>
@@ -255,10 +326,8 @@ export function ApplicationsSection() {
               <p className="text-xs text-muted-foreground">
                 {`${trashLabel} moves the application bundle and nothing else. Preferences, caches,
                 and support files stay where they are — finding an application's leftovers is
-                Mole's job, and `}
-                <code className="font-mono">mo uninstall</code>
-                {` cannot be driven past its own confirmation prompt. This is a smaller operation
-                than an uninstall, and it does not pretend otherwise.`}
+                Mole's job. Use Uninstall on the list Mole publishes for the complete removal; this
+                is a smaller operation, and it does not pretend otherwise.`}
               </p>
             </SafetyBanner>
           )}
@@ -268,9 +337,8 @@ export function ApplicationsSection() {
               <p className="text-sm font-medium">Uninstall runs in Terminal, not here</p>
               <p className="text-xs text-muted-foreground">
                 {`${installed.backend} lists these applications and the exact name its uninstall
-                command accepts, but every named uninstall stops at its own confirmation prompt and
-                the release exposes no non-interactive flag. Nirmoka will not answer another tool's
-                safety prompt for you, so run `}
+                command accepts, but this release cannot produce the plan Nirmoka shows you before
+                removing anything — and it will not run a removal it cannot describe first. Run `}
                 <code className="font-mono">mo uninstall &lt;name&gt;</code>
                 {` yourself and confirm it there. Files go to the Trash unless you pass
                 --permanent.`}
@@ -283,6 +351,15 @@ export function ApplicationsSection() {
             label={trashLabel}
             onCancel={() => dispatchTrash({ type: "dismissed" })}
             onConfirm={doTrash}
+          />
+
+          <UninstallReview
+            preview={uninstall.preview}
+            preparation={uninstall.preparation}
+            running={uninstall.running}
+            onCancel={() => dispatchUninstall({ type: "dismissed" })}
+            onApprove={approveUninstall}
+            onConfirm={doUninstall}
           />
         </>
       )}
@@ -308,17 +385,27 @@ function ApplicationRow({
   trashed,
   busy,
   onTrash,
+  removable,
+  uninstalled,
+  reviewing,
+  onUninstall,
 }: {
   app: ApplicationRowModel;
   trashLabel: string;
   trashed: boolean;
   busy: boolean;
   onTrash: (nodeId: number) => void;
+  removable: boolean;
+  uninstalled: boolean;
+  reviewing: boolean;
+  onUninstall: (name: string) => void;
 }) {
   // A local, so the button's callback keeps the narrowing: a property read
   // inside a closure does not, and the alternative is a `!` on the id that
   // decides which bundle moves.
   const nodeId = app.nodeId;
+  // Same reasoning for the identifier that decides which application is removed.
+  const uninstallName = app.uninstallName;
 
   return (
     <div className="flex items-center gap-3 py-3 text-sm">
@@ -343,6 +430,20 @@ function ApplicationRow({
       </span>
       {app.sizeIsPartial && <span className="text-xs text-warning-foreground">Partial</span>}
       <span className="tabular-nums">{app.size}</span>
+      {uninstallName !== null &&
+        (uninstalled ? (
+          <span className="shrink-0 text-xs text-muted-foreground">uninstalled</span>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={!removable}
+            onClick={() => onUninstall(uninstallName)}
+          >
+            {reviewing ? "Checking…" : "Uninstall"}
+          </Button>
+        ))}
       {nodeId !== null &&
         (trashed ? (
           <span className="shrink-0 text-xs text-muted-foreground">in the Trash</span>

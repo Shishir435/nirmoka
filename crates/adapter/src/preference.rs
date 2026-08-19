@@ -193,10 +193,15 @@ mod tests {
         assert!(Ability::CleanupCategories.is_offered_by(&mole));
         assert!(Ability::CleanupPreview.is_offered_by(&mole));
         assert!(Ability::SystemStatus.is_offered_by(&mole));
-        // Listing applications and removing one are different claims, and this
-        // backend can only make the first. See ADR 0021.
+        // Listing applications and removing one are different claims, and a
+        // backend can make either without the other. Read off the flags rather
+        // than inferred from one another — see ADR 0027.
         assert!(Ability::AppInventory.is_offered_by(&mole));
         assert!(!Ability::UninstallApps.is_offered_by(&mole));
+        assert!(Ability::UninstallApps.is_offered_by(&Capabilities {
+            uninstall_apps: true,
+            ..mole
+        }));
     }
 
     #[test]

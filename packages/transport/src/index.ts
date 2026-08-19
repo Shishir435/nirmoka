@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type {
+  AppFootprint,
   Backend,
   BackendSelection,
   ApplicationInventory,
@@ -38,6 +39,9 @@ import type {
   ScanSummary,
   Sort,
   SystemStatus,
+  UninstallOperation,
+  UninstallPreparation,
+  UninstallPreview,
   TrashOperation,
   TrashPreparation,
   VolumeInfo,
@@ -176,6 +180,19 @@ export interface Transport {
   /** Application bundles evidenced by the completed Rust-side scan tree. */
   applicationInventory(scanId: number): Promise<ApplicationInventory>;
 
+  /**
+   * What one application costs: the bundle, plus everything under `~/Library`
+   * carrying its bundle identifier.
+   *
+   * Takes the scan-and-node pair for the same reason reveal does — Rust
+   * resolves the path from the tree that issued the id. Slower than the other
+   * queries when the application's caches were outside the scanned set, because
+   * those are walked on demand.
+   *
+   * @see docs/adr/0028-an-applications-footprint-is-what-the-filesystem-says.md
+   */
+  appFootprint(scanId: number, nodeId: number): Promise<AppFootprint>;
+
   /** Backend-produced applications with stable uninstall identifiers. */
   installedApplicationInventory(): Promise<InstalledApplicationInventory>;
 
@@ -210,6 +227,38 @@ export interface Transport {
   cleanupLog(): Promise<CleanupOperation[]>;
 
   /**
+   * A backend-produced plan for uninstalling the named applications.
+   *
+   * Removes nothing: the backend runs its own dry run. `names` are the backend
+   * identifiers from `installedApplicationInventory`, never display names, and
+   * Rust checks every one against the live inventory before it becomes an
+   * argument.
+   */
+  uninstallPreview(names: string[]): Promise<UninstallPreview>;
+
+  /** Cancel the active uninstall preview, if one is running. */
+  cancelUninstallPreview(): Promise<boolean>;
+
+  /** Bind the latest Rust-held uninstall plan to a short-lived one-time token. */
+  prepareUninstall(): Promise<UninstallPreparation>;
+
+  /**
+   * Spend one confirmation token and run the backend's own uninstall.
+   *
+   * The token carries neither an application name nor a path. The backend
+   * rediscovers what to remove, applies its own protections, and moves the
+   * result to the Trash; it may also put up its own authorization dialog, which
+   * is the backend's own and never Nirmoka's.
+   */
+  confirmUninstall(confirmationToken: number): Promise<UninstallOperation>;
+
+  /** Cancel the active uninstall. What it already moved stays in the Trash. */
+  cancelUninstall(): Promise<boolean>;
+
+  /** Durable uninstall journal, newest first, reloaded across launches. */
+  uninstallLog(): Promise<UninstallOperation[]>;
+
+  /**
    * What this desktop can do with a selected path, and what to call it.
    *
    * Not a backend capability: revealing a file involves no disk tool. The label
@@ -227,6 +276,9 @@ export interface Transport {
 
   /** Show this row in Quick Look. Rejects where the platform has none. */
   quickLook(scanId: number, nodeId: number): Promise<void>;
+
+  /** Launch this row as an application, through the desktop's own launcher. */
+  openApplication(scanId: number, nodeId: number): Promise<void>;
 
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
@@ -280,6 +332,7 @@ export function tauriTransport(): Transport {
     volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
+    appFootprint: (scanId, nodeId) => invoke<AppFootprint>("app_footprint", { scanId, nodeId }),
     installedApplicationInventory: () =>
       invoke<InstalledApplicationInventory>("installed_application_inventory"),
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
@@ -291,10 +344,18 @@ export function tauriTransport(): Transport {
       invoke<CleanupOperation>("confirm_cleanup", { confirmationToken }),
     cancelCleanup: () => invoke<boolean>("cancel_cleanup"),
     cleanupLog: () => invoke<CleanupOperation[]>("cleanup_log"),
+    uninstallPreview: (names) => invoke<UninstallPreview>("uninstall_preview", { names }),
+    cancelUninstallPreview: () => invoke<boolean>("cancel_uninstall_preview"),
+    prepareUninstall: () => invoke<UninstallPreparation>("prepare_uninstall"),
+    confirmUninstall: (confirmationToken) =>
+      invoke<UninstallOperation>("confirm_uninstall", { confirmationToken }),
+    cancelUninstall: () => invoke<boolean>("cancel_uninstall"),
+    uninstallLog: () => invoke<UninstallOperation[]>("uninstall_log"),
     platformFeatures: () => invoke<PlatformFeatures>("platform_features"),
     revealInFileManager: (scanId, nodeId) =>
       invoke<void>("reveal_in_file_manager", { scanId, nodeId }),
     quickLook: (scanId, nodeId) => invoke<void>("quick_look", { scanId, nodeId }),
+    openApplication: (scanId, nodeId) => invoke<void>("open_application", { scanId, nodeId }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -648,16 +709,98 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     },
 
     async volumeInfo() {
+      // Coherent arithmetic rather than used === total, so the capacity bar the
+      // cold start draws is exercised in browser development mode instead of
+      // rendering full every time.
+      const totalBytes = summary.totalBytes * 4;
       return {
+        name: "Fixture Volume",
         mountPoint: "/fixtures",
-        totalBytes: summary.totalBytes,
+        totalBytes,
         usedBytes: summary.totalBytes,
-        freeBytes: 0,
+        freeBytes: totalBytes - summary.totalBytes,
       };
     },
 
     async applicationInventory() {
       return { scanId: summary.scanId, total: 0, rows: [] };
+    },
+
+    // Shaped the way a real footprint is: the bundle sized by the scan, the
+    // Library paths walked on demand, and components named by location rather
+    // than by anything the application keeps there — ADR 0028.
+    async appFootprint(scanId, nodeId) {
+      return {
+        scanId,
+        nodeId,
+        name: "Example",
+        path: "/Applications/Example.app",
+        bundleId: "com.example.desktop",
+        totalBytes: 1_476_395_008,
+        relatedBytes: 268_435_456,
+        unmeasuredPaths: 0,
+        lastUsedMs: null,
+        components: [
+          {
+            label: "Application",
+            totalBytes: 268_435_456,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "/Applications/Example.app",
+                totalBytes: 268_435_456,
+                complete: true,
+                source: "scan",
+              },
+            ],
+          },
+          {
+            label: "Containers",
+            totalBytes: 1_073_741_824,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "~/Library/Containers/com.example.desktop",
+                totalBytes: 1_073_741_824,
+                complete: true,
+                source: "filesystem",
+              },
+            ],
+          },
+          {
+            label: "Caches",
+            totalBytes: 134_217_728,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "~/Library/Caches/com.example.desktop",
+                totalBytes: 134_217_728,
+                complete: true,
+                source: "filesystem",
+              },
+            ],
+          },
+          // Matched by vendor name, not by identifier: excluded from
+          // totalBytes and marked uncertain. See ADR 0028.
+          {
+            label: "Possibly related",
+            totalBytes: 268_435_456,
+            complete: true,
+            certain: false,
+            paths: [
+              {
+                path: "~/Library/Application Support/Example",
+                totalBytes: 268_435_456,
+                complete: true,
+                source: "filesystem",
+              },
+            ],
+          },
+        ],
+      };
     },
 
     async installedApplicationInventory() {
@@ -820,6 +963,67 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return [];
     },
 
+    // A plan is readable outside the shell, so the mock produces one — the
+    // Applications page is otherwise undevelopable in `pnpm dev`. The two calls
+    // that would actually remove something still refuse.
+    async uninstallPreview(names) {
+      return {
+        backend: "mole",
+        backendVersion: "1.48.1",
+        requested: names,
+        reportedTotal: "83.4MB",
+        totalItems: 3,
+        hasReviewOnlyItems: true,
+        warnings: ["Homebrew apps will be fully cleaned, --zap removes configs and data"],
+        notes: ["Local Network permissions on macOS 15+ can outlive app removal: Example"],
+        transcript: "◎ Matched 1 app(s):\n1. Example  83.2MB  |  Last: 9m ago\n",
+        apps: [
+          {
+            name: "Example",
+            homebrewCask: true,
+            reportedSize: "83.4MB",
+            items: [
+              {
+                displayPath: "/Applications/Example.app",
+                reportedSize: "83.2MB",
+                scope: "removed",
+              },
+              {
+                displayPath: "~/Library/Containers/com.example.desktop",
+                reportedSize: "225KB",
+                scope: "removed",
+              },
+              {
+                displayPath: "/Library/Preferences/com.example.plist",
+                reportedSize: null,
+                scope: "reviewOnly",
+              },
+            ],
+          },
+        ],
+      };
+    },
+
+    async cancelUninstallPreview() {
+      return false;
+    },
+
+    async prepareUninstall() {
+      throw new Error("mock transport never prepares destructive uninstall operations");
+    },
+
+    async confirmUninstall() {
+      throw new Error("mock transport never runs destructive uninstall operations");
+    },
+
+    async cancelUninstall() {
+      return false;
+    },
+
+    async uninstallLog() {
+      return [];
+    },
+
     // Outside the shell there is no desktop to hand a path to, so the mock says
     // what it can do rather than pretending the buttons work.
     async platformFeatures() {
@@ -837,6 +1041,8 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     async revealInFileManager() {
       throw new Error("mock transport cannot reach a file manager");
     },
+
+    async openApplication() {},
 
     async quickLook() {
       throw new Error("mock transport cannot open Quick Look");

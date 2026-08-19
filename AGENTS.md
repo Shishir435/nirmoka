@@ -90,6 +90,10 @@ pnpm nrmk --backend mole backends    # prefer one; it falls back where it cannot
 pnpm tauri dev               # the desktop shell (starts Vite itself)
 pnpm types                   # regenerate packages/transport/src/generated/bindings.ts
 
+pnpm nrmk uninstall --list                    # apps Mole can address, with its identifiers
+pnpm nrmk uninstall localsend                 # Mole's own plan; preview only, removes nothing
+pnpm nrmk uninstall localsend --transcript    # the backend's output verbatim
+
 pnpm nrmk scan ~/Downloads                    # real backend, largest first
 pnpm nrmk scan . --json --depth 2 --limit 5
 pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed

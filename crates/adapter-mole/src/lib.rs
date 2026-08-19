@@ -38,7 +38,9 @@ use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::{
     Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupCompletion,
     CleanupExecution, CleanupItem, CleanupPreview, CleanupSystemScope, Detection,
-    InstalledApplication, ScanOptions, ScanSummary, SystemStatus, WireSink,
+    InstalledApplication, ScanOptions, ScanSummary, SystemStatus, UninstallApp,
+    UninstallCompletion, UninstallExecution, UninstallItem, UninstallItemScope, UninstallPreview,
+    WireSink,
 };
 
 const BINARY: &str = "mo";
@@ -154,16 +156,17 @@ impl Adapter for MoleAdapter {
             // `mo uninstall --list` is a machine-readable one-shot, and it
             // publishes the exact name the uninstall command accepts.
             app_inventory: true,
-            // The second headline exception. `mo uninstall <name>` — with or
-            // without `--dry-run` — matches the app and then stops at
-            // `Proceed with uninstallation? [y/N]`. There is no `--yes`, no
-            // `--force`, and no environment override; the flag set is `--list`,
-            // `--dry-run`, `--permanent`, `--whitelist`, `--debug`. Neither the
-            // plan nor the removal is reachable without writing to that prompt,
-            // and answering a backend's own safety prompt on its behalf is not
-            // something an adapter may do. See ADR 0021, and
-            // `fixtures/mole/1.48.1/uninstall-command-surface.txt`.
-            uninstall_apps: false,
+            // `mo uninstall <name>` reads a line from stdin before it prints
+            // anything, which is why ADR 0021 read the surface as closed. It is
+            // not: the plan is one line of input away, and under `--dry-run`
+            // that line guards nothing — every destructive call past it is
+            // individually gated on `MOLE_DRY_RUN`. So an exact preview costs
+            // nothing and risks nothing, and the removal it describes needs only
+            // the user's own approval relayed back. Mole even authenticates the
+            // user itself when a cask or a system app needs it, through its own
+            // native dialog. See ADR 0027, which supersedes ADR 0021, and
+            // `fixtures/mole/1.48.1/uninstall-plan.txt`.
+            uninstall_apps: true,
             // `mo status --json`.
             system_status: true,
         }
@@ -207,6 +210,25 @@ impl Adapter for MoleAdapter {
     ) -> Result<CleanupExecution, AdapterError> {
         let binary = execution_binary(self.detect()?, reviewed_version)?;
         execute_cleanup_from(&binary, cancel)
+    }
+
+    fn uninstall_preview(
+        &self,
+        names: &[String],
+        cancel: &CancelToken,
+    ) -> Result<UninstallPreview, AdapterError> {
+        let (binary, version) = supported_binary(self.detect()?)?;
+        uninstall_preview_from(&binary, names, &version, cancel)
+    }
+
+    fn execute_uninstall(
+        &self,
+        names: &[String],
+        reviewed_version: &str,
+        cancel: &CancelToken,
+    ) -> Result<UninstallExecution, AdapterError> {
+        let binary = execution_binary(self.detect()?, reviewed_version)?;
+        execute_uninstall_from(&binary, names, cancel)
     }
 
     /// Always [`AdapterError::Unsupported`].
@@ -772,6 +794,582 @@ fn parse_cleanup_item_detail(detail: &str) -> Result<(Option<String>, u64), Stri
     Ok((Some(size.to_string()), item_count))
 }
 
+/// The answer written to Mole's confirmation prompt, and nothing more.
+///
+/// `mo uninstall` asks twice. The first is `read -r confirm`, a whole line, and
+/// this is that line. The second is a single-key read *after* the plan has
+/// printed, and it treats end of input as confirmation — which this delivers by
+/// closing the pipe, because there is nothing left to write.
+///
+/// Both are reached only once the user has approved the exact plan Mole itself
+/// produced. That is the whole basis on which this is allowed to exist; see
+/// ADR 0027.
+const CONFIRMATION: &[u8] = b"y\n";
+
+/// Check every requested identifier against the backend's live inventory.
+///
+/// This is the adapter boundary doing its job: an identifier becomes a
+/// subprocess argument only if the backend itself just published it. That makes
+/// the class of "what if a name is really a flag" questions unaskable — Mole
+/// cannot list an application whose `uninstall_name` is `--permanent` — rather
+/// than answered with a denylist that a future release could outgrow.
+///
+/// It also fails closed on the case that matters most: an application that was
+/// uninstalled, renamed, or updated between review and execution is no longer in
+/// the inventory, so the run is refused instead of matching something else.
+fn validated_names(
+    binary: &Path,
+    requested: &[String],
+    operation: &'static str,
+    cancel: &CancelToken,
+) -> Result<Vec<String>, AdapterError> {
+    if requested.is_empty() {
+        return Err(AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "no application was named".to_string(),
+        });
+    }
+
+    let inventory = applications_from(binary, cancel)?;
+    let mut names = Vec::with_capacity(requested.len());
+    for name in requested {
+        if !inventory
+            .iter()
+            .any(|application| &application.uninstall_name == name)
+        {
+            return Err(AdapterError::OperationFailed {
+                backend: "mole",
+                operation,
+                reason: format!(
+                    "{name:?} is not an application Mole currently lists; \
+                     reload the inventory and select it again"
+                ),
+            });
+        }
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+    Ok(names)
+}
+
+/// Run Mole's own dry run and read back the plan it prints.
+///
+/// `--dry-run` is set during flag parsing, before anything is discovered, and
+/// every removal below it is separately gated on it. So the confirmation this
+/// writes guards nothing here: the run cannot modify a file whatever it answers.
+/// `--permanent` is never passed, in this function or the next.
+fn uninstall_preview_from(
+    binary: &Path,
+    requested: &[String],
+    backend_version: &str,
+    cancel: &CancelToken,
+) -> Result<UninstallPreview, AdapterError> {
+    let operation = "uninstall preview";
+    let names = validated_names(binary, requested, operation, cancel)?;
+    let mut command = process::command(binary);
+    command.args(["uninstall", "--dry-run"]).args(&names);
+
+    let (stdout, outcome, read_result) = run_uninstall(&mut command, operation, cancel)?;
+    if outcome.cancelled {
+        return Err(AdapterError::Cancelled {
+            backend: "mole",
+            operation,
+        });
+    }
+    if !outcome.status.success() {
+        return Err(AdapterError::BackendFailed {
+            binary: BINARY,
+            status: outcome.status.code().unwrap_or(-1),
+            stderr: outcome.stderr,
+        });
+    }
+    read_result?;
+
+    parse_uninstall_preview(
+        &String::from_utf8_lossy(&stdout),
+        &names,
+        backend_version,
+        PlanMode::DryRun,
+    )
+}
+
+/// Remove the named applications, relaying the approval the shell already holds.
+///
+/// Nothing from the preview is forwarded. Mole rediscovers every path here and
+/// applies its own protections while doing so, exactly as it does under
+/// `--dry-run` — which is what makes the reviewed plan an accurate description of
+/// this run rather than a list this function had to be trusted to reproduce.
+fn execute_uninstall_from(
+    binary: &Path,
+    requested: &[String],
+    cancel: &CancelToken,
+) -> Result<UninstallExecution, AdapterError> {
+    let operation = "uninstall execution";
+    // Re-validated here rather than trusted from the preview. The confirmation
+    // names identifiers, and this is the last moment before they become
+    // subprocess arguments — an app uninstalled, renamed, or updated since the
+    // review is no longer listed, and the run is refused instead of matching
+    // something else.
+    let names = validated_names(binary, requested, operation, cancel)?;
+    let mut command = process::command(binary);
+    command.arg("uninstall").args(&names);
+
+    let (stdout, outcome, read_result) = run_uninstall(&mut command, operation, cancel)?;
+    // Past this point Mole was running, so it may already have moved files.
+    // Every way this can end is an outcome to report — same rule as cleanup.
+    Ok(uninstall_execution_of(&stdout, outcome, read_result))
+}
+
+/// Spawn one `mo uninstall`, answer its prompt, and drain its output.
+///
+/// Returns `Err` only for failures that mean the backend never ran.
+type UninstallRun = (
+    Vec<u8>,
+    nirmoka_adapter::process::Outcome,
+    Result<(), AdapterError>,
+);
+
+fn run_uninstall(
+    command: &mut std::process::Command,
+    operation: &'static str,
+    cancel: &CancelToken,
+) -> Result<UninstallRun, AdapterError> {
+    use std::io::Read;
+
+    let mut process =
+        RunningProcess::spawn_with_input(command, CONFIRMATION, cancel).map_err(|source| {
+            AdapterError::Spawn {
+                binary: BINARY,
+                source,
+            }
+        })?;
+    let mut stdout = Vec::new();
+    let read_result = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|mut reader| {
+            reader
+                .read_to_end(&mut stdout)
+                .map(|_| ())
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })
+        });
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    Ok((stdout, outcome, read_result))
+}
+
+/// Turn one finished uninstall run into a single outcome.
+///
+/// Infallible for the same reason [`execution_of`] is: none of these inputs can
+/// show that Mole moved nothing, so a `Result` would let a real removal be
+/// reported as a run that never happened.
+fn uninstall_execution_of(
+    stdout: &[u8],
+    outcome: nirmoka_adapter::process::Outcome,
+    read_result: Result<(), AdapterError>,
+) -> UninstallExecution {
+    let transcript = strip_ansi(&String::from_utf8_lossy(stdout));
+    let mut execution = parse_uninstall_execution(&transcript);
+
+    if outcome.cancelled {
+        execution.completion = UninstallCompletion::Cancelled;
+        execution.warnings.push(
+            "The uninstall was stopped part way through. Anything Mole had already moved to the \
+             Trash stays there."
+                .to_string(),
+        );
+        return execution;
+    }
+    if !outcome.status.success() {
+        execution.completion = UninstallCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole exited with status {} part way through: {}",
+            outcome.status.code().unwrap_or(-1),
+            first_line(&outcome.stderr)
+        ));
+        return execution;
+    }
+    if let Err(error) = read_result {
+        execution.completion = UninstallCompletion::Failed;
+        execution.warnings.push(format!(
+            "Mole ran, and its output could not be read: {error}"
+        ));
+    }
+    execution
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanMode {
+    DryRun,
+}
+
+impl PlanMode {
+    /// The title Mole closes with. Required, and checked: it is the one line that
+    /// proves the run reached its own summary rather than dying in the middle of
+    /// printing a plan that would then look complete because it parsed.
+    fn title(self) -> &'static str {
+        match self {
+            Self::DryRun => "Uninstall dry run complete",
+        }
+    }
+}
+
+/// Read Mole's plan back out of its own output.
+///
+/// Every field here is for *rendering*. The preview also keeps the transcript,
+/// and execution forwards none of this, so the worst a parser bug can do is
+/// display a plan badly — not delete the wrong thing. Even so this refuses
+/// rather than guesses: a structure that no longer matches means Mole changed,
+/// and a narrowed plan shown as a complete one is the failure worth preventing.
+///
+/// The grammar, from `lib/uninstall/batch.sh` in Mole 1.48.1:
+///
+/// ```text
+/// ◎ Matched 1 app(s):
+/// 1. LocalSend  83.2MB  |  Last: 9m ago
+///
+/// Proceed with uninstallation? [y/N]
+/// Files to be removed:
+/// ◎ Homebrew apps will be fully cleaned, --zap removes configs and data
+///
+/// ◎ LocalSend [Brew] , 83.4MB
+///   ✓ /Applications/LocalSend.app , 83.2MB
+///   ✓ ~/Library/Containers/org.localsend.localsendApp , 225KB
+///   ◎ System: /Library/LaunchDaemons/com.example.helper.plist
+///   ◎ Review only: /Library/Preferences/com.example.plist
+///
+/// ➤ Remove 1 app, 83.4MB  Enter confirm, ESC cancel:
+/// Uninstall dry run complete
+/// Would remove 1 app, would free 83.4MB: LocalSend
+/// ☞ Local Network permissions on macOS 15+ can outlive app removal: LocalSend
+/// ↳ Mole does not reset …
+/// ```
+fn parse_uninstall_preview(
+    stdout: &str,
+    requested: &[String],
+    backend_version: &str,
+    mode: PlanMode,
+) -> Result<UninstallPreview, AdapterError> {
+    let transcript = strip_ansi(stdout);
+    let malformed = |reason: String| AdapterError::MalformedBackendOutput {
+        binary: BINARY,
+        operation: "uninstall preview",
+        reason,
+    };
+
+    let lines: Vec<&str> = transcript.lines().collect();
+    let matched = parse_matched_apps(&lines).map_err(malformed)?;
+    if matched.is_empty() {
+        return Err(malformed(
+            "Mole matched no application, and did not say so in a form this understands"
+                .to_string(),
+        ));
+    }
+
+    let plan_start = lines
+        .iter()
+        .position(|line| line.trim() == "Files to be removed:")
+        .ok_or_else(|| malformed("Mole printed no \"Files to be removed:\" section".to_string()))?;
+    if !lines.iter().any(|line| line.trim() == mode.title()) {
+        return Err(malformed(format!(
+            "Mole did not print {:?}, so its plan may be incomplete",
+            mode.title()
+        )));
+    }
+
+    let mut apps: Vec<UninstallApp> = Vec::new();
+    let mut warnings = Vec::new();
+    let mut notes = Vec::new();
+    let mut reported_total = None;
+
+    for line in &lines[plan_start + 1..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('=') {
+            continue;
+        }
+
+        // Indented lines belong to the app most recently opened. Checked on the
+        // raw line, because the indent is the only thing separating a path from
+        // an app header — both can begin with the same marker.
+        let indented = line.starts_with("  ") || line.starts_with('\t');
+        if indented {
+            if let Some(item) = parse_plan_item(trimmed) {
+                let app = apps.last_mut().ok_or_else(|| {
+                    malformed(format!(
+                        "Mole listed {:?} before naming an app",
+                        item.display_path
+                    ))
+                })?;
+                app.items.push(item);
+                continue;
+            }
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("➤ ") {
+            reported_total = parse_removal_note_total(rest);
+            continue;
+        }
+        if let Some(note) = trimmed
+            .strip_prefix("☞ ")
+            .or_else(|| trimmed.strip_prefix("↳ "))
+        {
+            notes.push(note.trim().to_string());
+            continue;
+        }
+        if let Some(freed) = parse_summary_freed(trimmed) {
+            reported_total = reported_total.or(freed);
+            continue;
+        }
+        if trimmed.starts_with("Failed: ") {
+            warnings.push(trimmed.to_string());
+            continue;
+        }
+
+        if let Some(header) = trimmed.strip_prefix("◎ ") {
+            // An app header and Mole's own notices share this marker, so the app
+            // list decides which this is. Matching on the notice text instead
+            // would make every new notice look like an application.
+            if let Some(app) = parse_app_header(header, &matched) {
+                apps.push(app);
+                continue;
+            }
+            warnings.push(header.trim().to_string());
+            continue;
+        }
+    }
+
+    if apps.is_empty() {
+        return Err(malformed(
+            "Mole matched applications and then listed none of them".to_string(),
+        ));
+    }
+    if apps.len() != matched.len() {
+        return Err(malformed(format!(
+            "Mole matched {} application(s) and detailed {}",
+            matched.len(),
+            apps.len()
+        )));
+    }
+
+    Ok(UninstallPreview {
+        backend_version: backend_version.to_string(),
+        requested: requested.to_vec(),
+        apps,
+        reported_total,
+        warnings,
+        notes,
+        transcript,
+    })
+}
+
+/// Display names from the `◎ Matched N app(s):` block, checked against the count
+/// Mole declared.
+fn parse_matched_apps(lines: &[&str]) -> Result<Vec<String>, String> {
+    let header = lines
+        .iter()
+        .position(|line| line.trim().starts_with("◎ Matched "))
+        .ok_or_else(|| "Mole printed no match header".to_string())?;
+    let declared = lines[header]
+        .trim()
+        .trim_start_matches("◎ Matched ")
+        .split_whitespace()
+        .next()
+        .and_then(|count| count.parse::<usize>().ok())
+        .ok_or_else(|| format!("unreadable match count: {:?}", lines[header].trim()))?;
+
+    let mut matched = Vec::new();
+    for line in &lines[header + 1..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if matched.is_empty() {
+                continue;
+            }
+            break;
+        }
+        // `printf "%d. %s  %s  |  Last: %s\n"` — the name is everything between
+        // the ordinal and the size, and it can contain spaces.
+        let Some((_, rest)) = trimmed.split_once(". ") else {
+            break;
+        };
+        let name = rest
+            .split_once("  |  Last: ")
+            .map(|(head, _)| head)
+            .unwrap_or(rest);
+        let name = name.rsplit_once("  ").map(|(head, _)| head).unwrap_or(name);
+        if name.is_empty() {
+            return Err("Mole listed a matched app with no name".to_string());
+        }
+        matched.push(name.trim().to_string());
+    }
+
+    if matched.len() != declared {
+        return Err(format!(
+            "Mole declared {declared} matched app(s) and listed {}",
+            matched.len()
+        ));
+    }
+    Ok(matched)
+}
+
+/// `LocalSend [Brew] , 83.4MB` — but only when the name is one Mole matched.
+fn parse_app_header(header: &str, matched: &[String]) -> Option<UninstallApp> {
+    let (name, reported_size) = match header.rsplit_once(" , ") {
+        Some((name, size)) if reported_size(size).is_some() => (name, reported_size(size)),
+        _ => (header, None),
+    };
+    let name = name.trim();
+    let (name, homebrew_cask) = match name.strip_suffix("[Brew]") {
+        Some(name) => (name.trim_end(), true),
+        None => (name, false),
+    };
+    matched
+        .iter()
+        .any(|candidate| candidate == name)
+        .then(|| UninstallApp {
+            name: name.to_string(),
+            homebrew_cask,
+            reported_size,
+            items: Vec::new(),
+        })
+}
+
+/// One path line: `✓ path , size`, `◎ System: path`, or `◎ Review only: path`.
+fn parse_plan_item(trimmed: &str) -> Option<UninstallItem> {
+    // Prefix first, scope second: the marker is what identifies the line, and
+    // the classification is what it means.
+    let (scope, rest) = [
+        ("✓ ", UninstallItemScope::Removed),
+        ("◎ System: ", UninstallItemScope::System),
+        ("◎ Review only: ", UninstallItemScope::ReviewOnly),
+    ]
+    .into_iter()
+    .find_map(|(prefix, scope)| trimmed.strip_prefix(prefix).map(|rest| (scope, rest)))?;
+
+    let (display_path, size) = match rest.rsplit_once(" , ") {
+        Some((path, size)) if reported_size(size).is_some() => (path, reported_size(size)),
+        _ => (rest, None),
+    };
+    let display_path = display_path.trim();
+    (!display_path.is_empty()).then(|| UninstallItem {
+        display_path: display_path.to_string(),
+        reported_size: size,
+        scope,
+    })
+}
+
+/// `Remove 1 app, 83.4MB  Enter confirm, ESC cancel:` → `83.4MB`.
+fn parse_removal_note_total(rest: &str) -> Option<String> {
+    let head = rest.split("  ").next()?;
+    reported_size(head.rsplit_once(", ")?.1.trim())
+}
+
+/// `Would remove 1 app, would free 83.4MB: LocalSend` → `83.4MB`.
+fn parse_summary_freed(trimmed: &str) -> Option<Option<String>> {
+    if !trimmed.starts_with("Would remove ") && !trimmed.starts_with("Removed ") {
+        return None;
+    }
+    let freed = trimmed
+        .split_once(", would free ")
+        .or_else(|| trimmed.split_once(", freed "))
+        .map(|(_, tail)| tail.split(':').next().unwrap_or(tail).trim())
+        .and_then(reported_size);
+    Some(freed)
+}
+
+/// A size label Mole published, or `None` when the text is not one.
+///
+/// Deliberately strict, and deliberately still a string. It exists to tell a size
+/// apart from a path fragment that happened to sit after a comma — not to turn
+/// `83.4MB` into a number, which would invent three digits Mole never measured.
+fn reported_size(text: &str) -> Option<String> {
+    let text = text.trim();
+    let unit_start = text.find(|character: char| character.is_ascii_alphabetic())?;
+    let (number, unit) = text.split_at(unit_start);
+    let valid = matches!(unit, "B" | "KB" | "MB" | "GB" | "TB" | "PB")
+        && !number.is_empty()
+        && number.matches('.').count() <= 1
+        && number
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.');
+    valid.then(|| text.to_string())
+}
+
+/// Read one real run's result out of its output.
+///
+/// Never fails: the run already happened. An unreadable summary becomes a
+/// `Failed` with the transcript attached, because "Mole ran and I cannot tell you
+/// what it did" is a true and useful thing to report, and an error that discarded
+/// the transcript would not be.
+fn parse_uninstall_execution(transcript: &str) -> UninstallExecution {
+    let mut removed = Vec::new();
+    let mut failed = Vec::new();
+    let mut warnings = Vec::new();
+    let mut reported_freed = None;
+    let mut saw_summary = false;
+
+    for line in transcript.lines() {
+        let trimmed = line.trim();
+        if let Some(freed) = parse_summary_freed(trimmed) {
+            saw_summary = true;
+            reported_freed = reported_freed.or(freed);
+            if let Some((_, names)) = trimmed.split_once(": ") {
+                removed.extend(
+                    names
+                        .split(", ")
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string),
+                );
+            }
+            continue;
+        }
+        if let Some(rest) = trimmed.split_once("Failed: ").map(|(_, rest)| rest) {
+            failed.push(rest.trim().to_string());
+            continue;
+        }
+        if let Some(note) = trimmed
+            .strip_prefix("☞ ")
+            .or_else(|| trimmed.strip_prefix("↳ "))
+        {
+            warnings.push(note.trim().to_string());
+        }
+    }
+
+    let completion = if !failed.is_empty() {
+        UninstallCompletion::Partial
+    } else if saw_summary {
+        UninstallCompletion::Finished
+    } else {
+        warnings.push(
+            "Mole finished without printing a summary, so what it removed could not be read back. \
+             Its full output is below."
+                .to_string(),
+        );
+        UninstallCompletion::Failed
+    };
+
+    UninstallExecution {
+        completion,
+        removed,
+        failed,
+        reported_freed,
+        warnings,
+        transcript: transcript.to_string(),
+    }
+}
+
 fn json_from_command<T: serde::de::DeserializeOwned>(
     binary: &Path,
     args: &[&str],
@@ -927,6 +1525,7 @@ mod tests {
     const CLEAN_PREVIEW: &str = include_str!("../../../fixtures/mole/1.48.1/clean-list.txt");
     const UNINSTALL_SURFACE: &str =
         include_str!("../../../fixtures/mole/1.48.1/uninstall-command-surface.txt");
+    const UNINSTALL_PLAN: &str = include_str!("../../../fixtures/mole/1.48.1/uninstall-plan.txt");
 
     /// Byte-for-byte what `mo --version` printed on Mole 1.48.1, leading blank
     /// line included. Trimming it here to make the parser's job easier is how
@@ -1020,38 +1619,537 @@ mod tests {
             "mo uninstall --list is machine-readable"
         );
         assert!(
-            !caps.uninstall_apps,
-            "every named uninstall stops at an interactive prompt"
+            caps.uninstall_apps,
+            "the plan is one line of input away, and the removal needs only the user's approval"
         );
     }
 
-    /// The gate that makes ADR 0021 re-testable rather than remembered.
+    /// The gate that makes ADR 0027 re-testable rather than remembered.
     ///
-    /// If a Mole release adds a way past `Proceed with uninstallation?`, this
-    /// fails and the capability should be reconsidered — which is the whole
-    /// reason the command surface is recorded.
+    /// Two things have to stay true. The prompt is still there — so the adapter
+    /// still has to answer it, and a release that dropped it would mean this
+    /// whole flow can be simplified. And Mole still routes to the Trash by
+    /// default, with `--permanent` the opt-in the adapter never passes: if that
+    /// default inverted, every uninstall would silently become unrecoverable.
     #[test]
-    fn the_recorded_uninstall_surface_offers_no_non_interactive_flag() {
-        let options = UNINSTALL_SURFACE
-            .split("== mo uninstall --dry-run")
-            .next()
-            .expect("the recorded help section");
-
-        for flag in [
-            "--yes",
-            "--force",
-            "--assume-yes",
-            "--non-interactive",
-            "-y ",
-        ] {
-            assert!(
-                !options.contains(flag),
-                "Mole now documents {flag}; uninstall may be scriptable, so revisit ADR 0021"
-            );
-        }
+    fn the_recorded_surface_still_prompts_and_still_defaults_to_the_trash() {
         assert!(
             UNINSTALL_SURFACE.contains("Proceed with uninstallation?"),
-            "the recorded probe no longer shows the prompt this decision rests on"
+            "Mole no longer prompts; the confirmation this adapter writes may now be unnecessary"
+        );
+        assert!(
+            UNINSTALL_SURFACE.contains("uninstalled files go to the macOS Trash"),
+            "Mole no longer documents Trash routing as the default; an uninstall may now be \
+             unrecoverable, so revisit ADR 0027 before shipping"
+        );
+        assert!(
+            UNINSTALL_SURFACE.contains("--permanent"),
+            "the flag this adapter must never pass is no longer documented"
+        );
+    }
+
+    /// What actually reaches Mole's command line, recorded by a backend that
+    /// writes its own argv down.
+    ///
+    /// Two claims in one, both about the arguments rather than about the parse.
+    /// `--permanent` is the single flag that would turn the recoverable operation
+    /// the user approved into an unrecoverable one. And no path from the reviewed
+    /// plan is forwarded: Mole rediscovers, which is what makes the preview an
+    /// accurate description of this run instead of a list to be reproduced.
+    #[test]
+    fn execution_passes_the_identifier_and_no_flag_that_changes_the_operation() {
+        let script = executable_script(
+            r#"#!/bin/sh
+if [ "$1" = "uninstall" ] && [ "$2" = "--list" ]; then
+  cat "$0.inventory"
+  exit 0
+fi
+printf '%s\n' "$@" > "$0.argv"
+read -r answer
+printf '%s' "$answer" > "$0.stdin"
+printf 'Uninstall complete\nRemoved 1 app, freed 83.4MB: Example Cask\n'
+"#,
+        );
+        std::fs::write(format!("{}.inventory", script.display()), APPLICATIONS)
+            .expect("inventory fixture");
+        let argv_path = PathBuf::from(format!("{}.argv", script.display()));
+        let stdin_path = PathBuf::from(format!("{}.stdin", script.display()));
+
+        let execution =
+            execute_uninstall_from(&script, &["example-cask".to_string()], &CancelToken::new())
+                .expect("uninstall execution");
+
+        let argv: Vec<String> = std::fs::read_to_string(&argv_path)
+            .expect("backend ran")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(argv, vec!["uninstall", "example-cask"]);
+        assert!(
+            !argv.iter().any(|argument| argument == "--permanent"),
+            "the user approved a recoverable uninstall"
+        );
+        assert!(
+            !argv.iter().any(|argument| argument.starts_with('/')),
+            "no reviewed path may be forwarded as an argument: {argv:?}"
+        );
+        // The confirmation is one line and nothing else. A backend reading a
+        // second answer finds end of input.
+        assert_eq!(
+            std::fs::read_to_string(&stdin_path).expect("the prompt was answered"),
+            "y"
+        );
+        assert_eq!(execution.completion, UninstallCompletion::Finished);
+        assert_eq!(execution.removed, vec!["Example Cask".to_string()]);
+
+        let _ = std::fs::remove_file(format!("{}.inventory", script.display()));
+        let _ = std::fs::remove_file(&argv_path);
+        let _ = std::fs::remove_file(&stdin_path);
+        let _ = std::fs::remove_file(script);
+    }
+
+    /// The preview asks for `--dry-run`, and asks for nothing else that would
+    /// change what Mole does.
+    #[test]
+    fn the_preview_runs_only_moles_own_dry_run() {
+        let script = executable_script(
+            r#"#!/bin/sh
+if [ "$1" = "uninstall" ] && [ "$2" = "--list" ]; then
+  cat "$0.inventory"
+  exit 0
+fi
+printf '%s\n' "$@" > "$0.argv"
+read -r _answer
+cat "$0.plan"
+"#,
+        );
+        std::fs::write(format!("{}.inventory", script.display()), APPLICATIONS)
+            .expect("inventory fixture");
+        std::fs::write(format!("{}.plan", script.display()), UNINSTALL_PLAN).expect("plan fixture");
+        let argv_path = PathBuf::from(format!("{}.argv", script.display()));
+
+        let preview = uninstall_preview_from(
+            &script,
+            &["example-cask".to_string()],
+            "1.48.1",
+            &CancelToken::new(),
+        )
+        .expect("uninstall preview");
+
+        let argv: Vec<String> = std::fs::read_to_string(&argv_path)
+            .expect("backend ran")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(argv, vec!["uninstall", "--dry-run", "example-cask"]);
+        assert_eq!(preview.apps.len(), 1);
+        assert_eq!(preview.backend_version, "1.48.1");
+
+        let _ = std::fs::remove_file(format!("{}.inventory", script.display()));
+        let _ = std::fs::remove_file(format!("{}.plan", script.display()));
+        let _ = std::fs::remove_file(&argv_path);
+        let _ = std::fs::remove_file(script);
+    }
+
+    /// Cancelling must kill the subprocess rather than orphan it — the contract's
+    /// rule, and one an uninstall needs more than a scan does.
+    #[test]
+    fn cancelling_an_uninstall_kills_the_subprocess_and_reports_the_run() {
+        let script = executable_script(
+            r#"#!/bin/sh
+if [ "$1" = "uninstall" ] && [ "$2" = "--list" ]; then
+  cat "$0.inventory"
+  exit 0
+fi
+: > "$0.started"
+exec sleep 60
+"#,
+        );
+        std::fs::write(format!("{}.inventory", script.display()), APPLICATIONS)
+            .expect("inventory fixture");
+        let started = PathBuf::from(format!("{}.started", script.display()));
+
+        let cancel = CancelToken::new();
+        let worker_cancel = cancel.clone();
+        let worker_script = script.clone();
+        let worker = std::thread::spawn(move || {
+            execute_uninstall_from(
+                &worker_script,
+                &["example-cask".to_string()],
+                &worker_cancel,
+            )
+        });
+
+        // Waited for rather than slept past. The inventory check runs first, and
+        // a fixed delay long enough to clear it on this machine is a delay that
+        // cancels the wrong subprocess on a slower one.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !started.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the uninstall never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        cancel.cancel();
+
+        let execution = worker
+            .join()
+            .unwrap()
+            .expect("a stopped run still happened");
+        assert_eq!(execution.completion, UninstallCompletion::Cancelled);
+        assert!(execution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("stays there")));
+
+        let _ = std::fs::remove_file(format!("{}.inventory", script.display()));
+        let _ = std::fs::remove_file(&started);
+        let _ = std::fs::remove_file(script);
+    }
+
+    #[test]
+    fn the_recorded_plan_is_a_dry_run_that_reached_its_own_summary() {
+        assert!(
+            UNINSTALL_PLAN.contains("DRY RUN MODE, No app files or settings will be modified"),
+            "the recorded plan is not from a dry run"
+        );
+        assert!(
+            UNINSTALL_PLAN.contains("Uninstall dry run complete"),
+            "the recorded plan never reached Mole's summary, so it may be truncated"
+        );
+    }
+
+    /// The parse of the real recording, field by field.
+    ///
+    /// A hand-written input would test the parser against itself. This one came
+    /// out of Mole with the same `y` the adapter writes.
+    #[test]
+    fn parses_the_recorded_dry_run_plan() {
+        let preview = parse_uninstall_preview(
+            UNINSTALL_PLAN,
+            &["example-cask".to_string()],
+            "1.48.1",
+            PlanMode::DryRun,
+        )
+        .expect("the recorded plan");
+
+        assert_eq!(preview.requested, vec!["example-cask".to_string()]);
+        assert_eq!(preview.reported_total.as_deref(), Some("83.4MB"));
+        assert_eq!(preview.apps.len(), 1);
+
+        let app = &preview.apps[0];
+        assert_eq!(app.name, "Example");
+        assert!(app.homebrew_cask, "the [Brew] tag was recorded");
+        assert_eq!(app.reported_size.as_deref(), Some("83.4MB"));
+        assert_eq!(app.items.len(), 7);
+        assert_eq!(app.items[0].display_path, "/Applications/Example.app");
+        assert_eq!(app.items[0].reported_size.as_deref(), Some("83.2MB"));
+        assert_eq!(app.items[0].scope, UninstallItemScope::Removed);
+        // A path with no size stays a path: the size suffix is optional, and
+        // splitting on the comma regardless would truncate one.
+        assert_eq!(
+            app.items[2].display_path,
+            "~/Library/Application Scripts/com.example.desktop"
+        );
+        assert_eq!(app.items[2].reported_size, None);
+        assert_eq!(preview.total_items(), 7);
+
+        // Mole's `--zap` notice is not an application, and it is not silently
+        // dropped either.
+        assert!(
+            preview
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("--zap removes configs and data")),
+            "{:?}",
+            preview.warnings
+        );
+        assert!(
+            preview
+                .notes
+                .iter()
+                .any(|note| note.starts_with("Local Network permissions")),
+            "{:?}",
+            preview.notes
+        );
+        assert!(
+            preview.transcript.contains("Proceed with uninstallation?"),
+            "the transcript is what the user approves, so it keeps the prompt"
+        );
+    }
+
+    /// The classifications that decide whether a row means "will be removed" or
+    /// "you have to deal with this yourself". Rendering the second as the first
+    /// would promise a removal that never happens.
+    #[test]
+    fn system_and_review_only_rows_keep_their_own_scope() {
+        let plan = "\
+◎ Matched 1 app(s):
+1. Example  1MB  |  Last: <when>
+
+Files to be removed:
+
+◎ Example , 1MB
+  ✓ /Applications/Example.app , 1MB
+  ◎ System: /Library/LaunchDaemons/com.example.helper.plist
+  ◎ Review only: /Library/Preferences/com.example.plist
+Uninstall dry run complete
+";
+        let preview = parse_uninstall_preview(plan, &[], "1.48.1", PlanMode::DryRun)
+            .expect("a plan with every row kind");
+        let scopes: Vec<_> = preview.apps[0]
+            .items
+            .iter()
+            .map(|item| item.scope)
+            .collect();
+        assert_eq!(
+            scopes,
+            vec![
+                UninstallItemScope::Removed,
+                UninstallItemScope::System,
+                UninstallItemScope::ReviewOnly
+            ]
+        );
+        assert!(preview.has_review_only_items());
+        assert!(!preview.apps[0].homebrew_cask);
+    }
+
+    /// Every way Mole's plan can stop making sense has to be an error rather than
+    /// a shorter plan. A narrowed list shown as a complete one is the failure this
+    /// whole parser exists to prevent.
+    #[test]
+    fn a_changed_plan_structure_is_refused_rather_than_narrowed() {
+        let complete = "\
+◎ Matched 1 app(s):
+1. Example  1MB  |  Last: <when>
+
+Files to be removed:
+
+◎ Example , 1MB
+  ✓ /Applications/Example.app , 1MB
+Uninstall dry run complete
+";
+        assert!(parse_uninstall_preview(complete, &[], "1.48.1", PlanMode::DryRun).is_ok());
+
+        for (reason, plan) in [
+            (
+                "no match header",
+                complete.replace("◎ Matched 1 app(s):", ""),
+            ),
+            (
+                "the declared count disagrees with the list",
+                complete.replace("Matched 1 app(s)", "Matched 2 app(s)"),
+            ),
+            (
+                "no file section",
+                complete.replace("Files to be removed:", ""),
+            ),
+            (
+                "no terminal summary",
+                complete.replace("Uninstall dry run complete", ""),
+            ),
+            (
+                "a matched app was never detailed",
+                complete.replace("◎ Example , 1MB", ""),
+            ),
+        ] {
+            let error =
+                parse_uninstall_preview(&plan, &[], "1.48.1", PlanMode::DryRun).expect_err(reason);
+            assert!(
+                matches!(error, AdapterError::MalformedBackendOutput { .. }),
+                "{reason}: {error}"
+            );
+        }
+    }
+
+    /// An app whose display name Mole did not match cannot open a section. The
+    /// marker is shared with Mole's own notices, so the match list is what tells
+    /// them apart — and a notice that looked like an app would attach the next
+    /// app's paths to it.
+    #[test]
+    fn a_notice_sharing_the_app_marker_is_not_read_as_an_app() {
+        let plan = "\
+◎ Matched 1 app(s):
+1. Example  1MB  |  Last: <when>
+
+Files to be removed:
+◎ Some notice Mole has not written yet , 4KB
+
+◎ Example , 1MB
+  ✓ /Applications/Example.app , 1MB
+Uninstall dry run complete
+";
+        let preview =
+            parse_uninstall_preview(plan, &[], "1.48.1", PlanMode::DryRun).expect("one app");
+        assert_eq!(preview.apps.len(), 1);
+        assert_eq!(preview.apps[0].name, "Example");
+        assert_eq!(preview.apps[0].items.len(), 1);
+        assert!(preview
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("Some notice")));
+    }
+
+    /// An application name with spaces is the common case, not the exotic one:
+    /// "Google Chrome", "Visual Studio Code", "LM Studio".
+    #[test]
+    fn a_matched_name_may_contain_spaces() {
+        let plan = "\
+◎ Matched 2 app(s):
+1. Google Chrome  1.47GB  |  Last: <when>
+2. LM Studio  7.1GB  |  Last: <when>
+
+Files to be removed:
+
+◎ Google Chrome , 1.47GB
+  ✓ /Applications/Google Chrome.app , 1.47GB
+
+◎ LM Studio , 7.1GB
+  ✓ /Applications/LM Studio.app , 7.1GB
+Uninstall dry run complete
+";
+        let preview =
+            parse_uninstall_preview(plan, &[], "1.48.1", PlanMode::DryRun).expect("two apps");
+        let names: Vec<_> = preview.apps.iter().map(|app| app.name.as_str()).collect();
+        assert_eq!(names, vec!["Google Chrome", "LM Studio"]);
+        assert_eq!(
+            preview.apps[1].items[0].display_path,
+            "/Applications/LM Studio.app"
+        );
+    }
+
+    #[test]
+    fn a_size_is_only_read_where_mole_published_one() {
+        assert_eq!(reported_size("83.4MB").as_deref(), Some("83.4MB"));
+        assert_eq!(reported_size("4KB").as_deref(), Some("4KB"));
+        assert_eq!(reported_size("2.07GB").as_deref(), Some("2.07GB"));
+        // Not sizes. Each of these would otherwise be read off the end of a path
+        // that happened to contain a comma.
+        assert_eq!(reported_size("Application Scripts"), None);
+        assert_eq!(reported_size("1.2.3MB"), None);
+        assert_eq!(reported_size("MB"), None);
+        assert_eq!(reported_size("12"), None);
+        assert_eq!(reported_size("12 Mb"), None);
+    }
+
+    #[test]
+    fn a_real_run_reports_what_it_removed() {
+        let execution = parse_uninstall_execution(
+            "\
+Uninstall complete
+Removed 1 app, freed 83.4MB: Example
+☞ Local Network permissions on macOS 15+ can outlive app removal: Example
+",
+        );
+        assert_eq!(execution.completion, UninstallCompletion::Finished);
+        assert_eq!(execution.removed, vec!["Example".to_string()]);
+        assert_eq!(execution.reported_freed.as_deref(), Some("83.4MB"));
+        assert!(execution.failed.is_empty());
+        assert_eq!(execution.warnings.len(), 1);
+    }
+
+    #[test]
+    fn a_partly_failed_run_is_not_reported_as_finished() {
+        let execution = parse_uninstall_execution(
+            "\
+Uninstall complete
+Removed 1 app, freed 12MB: Example
+✗ Failed: Other is still running
+",
+        );
+        assert_eq!(execution.completion, UninstallCompletion::Partial);
+        assert_eq!(execution.removed, vec!["Example".to_string()]);
+        assert_eq!(execution.failed, vec!["Other is still running".to_string()]);
+    }
+
+    /// The case that must never read as success. Mole ran, so files may be gone,
+    /// and the summary that would say which is missing.
+    #[test]
+    fn a_run_with_no_summary_is_failed_and_keeps_its_transcript() {
+        let execution = parse_uninstall_execution("→ Scanning applications\n");
+        assert_eq!(execution.completion, UninstallCompletion::Failed);
+        assert!(execution.removed.is_empty());
+        assert_eq!(execution.transcript, "→ Scanning applications\n");
+        assert!(execution.warnings[0].contains("without printing a summary"));
+    }
+
+    /// Cancellation is an outcome, not an error: the subprocess was killed part
+    /// way through, and whatever it had already moved stays moved.
+    #[test]
+    fn a_cancelled_run_reports_the_removal_it_may_have_started() {
+        let execution = uninstall_execution_of(
+            b"Removed 1 app, freed 1MB: Example\n",
+            nirmoka_adapter::process::Outcome {
+                status: std::process::Command::new("false")
+                    .status()
+                    .expect("a failing status"),
+                stderr: String::new(),
+                cancelled: true,
+            },
+            Ok(()),
+        );
+        assert_eq!(execution.completion, UninstallCompletion::Cancelled);
+        assert!(execution.warnings[0].contains("stays there"));
+        // The removal Mole did report survives the cancellation.
+        assert_eq!(execution.removed, vec!["Example".to_string()]);
+    }
+
+    /// An identifier only reaches the command line if the backend just published
+    /// it, so a name that is really a flag is not a case that can arise.
+    #[test]
+    fn only_an_identifier_mole_published_can_become_an_argument() {
+        let listing = executable_script(&format!(
+            "#!/bin/sh\nif [ \"$1\" = uninstall ]; then cat <<'JSON'\n{APPLICATIONS}\nJSON\nfi\n"
+        ));
+        let cancel = CancelToken::new();
+
+        assert_eq!(
+            validated_names(
+                &listing,
+                &["example-cask".to_string()],
+                "uninstall preview",
+                &cancel
+            )
+            .expect("a published identifier"),
+            vec!["example-cask".to_string()]
+        );
+
+        for rejected in ["--permanent", "Example Cask", "", "example-cask "] {
+            let error = validated_names(
+                &listing,
+                &[rejected.to_string()],
+                "uninstall preview",
+                &cancel,
+            )
+            .expect_err(rejected);
+            assert!(
+                matches!(error, AdapterError::OperationFailed { .. }),
+                "{rejected}: {error}"
+            );
+        }
+
+        let error = validated_names(&listing, &[], "uninstall preview", &cancel)
+            .expect_err("no application named");
+        assert!(matches!(error, AdapterError::OperationFailed { .. }));
+    }
+
+    /// Same duplicate twice is one argument. Mole matches by name, and passing it
+    /// twice would list the app twice and then disagree with its own count.
+    #[test]
+    fn a_repeated_identifier_is_passed_once() {
+        let listing = executable_script(&format!(
+            "#!/bin/sh\nif [ \"$1\" = uninstall ]; then cat <<'JSON'\n{APPLICATIONS}\nJSON\nfi\n"
+        ));
+        assert_eq!(
+            validated_names(
+                &listing,
+                &["example-cask".to_string(), "example-cask".to_string()],
+                "uninstall preview",
+                &CancelToken::new(),
+            )
+            .expect("one identifier"),
+            vec!["example-cask".to_string()]
         );
     }
 
@@ -1179,6 +2277,62 @@ printf '%s
         for application in &applications {
             assert!(!application.uninstall_name.is_empty());
             assert!(!application.reported_size.is_empty());
+        }
+    }
+
+    /// Parse a real plan out of the real backend, and prove the dry run was one.
+    ///
+    /// The recorded fixture makes the parser testable in CI; this makes it
+    /// testable against whatever Mole is actually installed, which is the version
+    /// that will run on a user's machine. It removes nothing — `--dry-run` is set
+    /// before any discovery — and it asserts that, by checking the bundle it
+    /// claims it would remove is still there afterwards.
+    ///
+    /// `cargo test -p nirmoka-adapter-mole -- --ignored live_`
+    #[test]
+    #[ignore = "requires a real Mole install"]
+    fn live_uninstall_preview_parses_and_removes_nothing() {
+        let adapter = MoleAdapter::new();
+        let cancel = CancelToken::new();
+        let applications = adapter
+            .installed_applications(&cancel)
+            .expect("an inventory to pick a target from");
+        // Prefer one whose display name and identifier disagree — a Homebrew cask.
+        // That probes the path where the identifier matters, which is the one a
+        // display name would silently get wrong.
+        let target = applications
+            .iter()
+            .find(|application| application.uninstall_name != application.name)
+            .or_else(|| applications.first())
+            .expect("this machine has applications");
+
+        let preview = adapter
+            .uninstall_preview(std::slice::from_ref(&target.uninstall_name), &cancel)
+            .expect("the installed Mole must produce a parseable plan");
+
+        assert_eq!(preview.requested, vec![target.uninstall_name.clone()]);
+        assert_eq!(preview.apps.len(), 1, "one identifier, one app");
+        assert!(
+            preview.total_items() > 0,
+            "a plan that lists nothing is not a plan"
+        );
+        assert!(
+            preview.transcript.contains("DRY RUN MODE"),
+            "the preview must be a dry run"
+        );
+
+        // The claim that matters. Every path it says it would remove is still
+        // present, the application bundle included.
+        assert!(
+            target.path.exists(),
+            "the preview moved {}",
+            target.path.display()
+        );
+        for item in preview.apps.iter().flat_map(|app| &app.items) {
+            assert!(
+                !item.display_path.is_empty(),
+                "a plan row with no path is a parse failure"
+            );
         }
     }
 

@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attribution;
 pub mod cleanup;
 pub mod commands;
 pub mod deletion;
@@ -21,6 +22,7 @@ pub mod scan;
 pub mod settings;
 pub mod state;
 pub mod trash;
+pub mod uninstall;
 pub mod volume;
 
 use state::AppState;
@@ -50,6 +52,8 @@ pub fn run() {
             commands::platform_features,
             commands::reveal_in_file_manager,
             commands::quick_look,
+            commands::app_footprint,
+            commands::open_application,
             commands::application_inventory,
             commands::installed_application_inventory,
             commands::developer_inventory,
@@ -60,6 +64,12 @@ pub fn run() {
             commands::confirm_cleanup,
             commands::cancel_cleanup,
             commands::cleanup_log,
+            commands::uninstall_preview,
+            commands::cancel_uninstall_preview,
+            commands::prepare_uninstall,
+            commands::confirm_uninstall,
+            commands::cancel_uninstall,
+            commands::uninstall_log,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

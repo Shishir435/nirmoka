@@ -17,6 +17,7 @@ use nirmoka_core::Tree;
 
 use crate::cleanup::CleanupState;
 use crate::deletion::DeletionState;
+use crate::uninstall::UninstallState;
 use crate::{dto, settings};
 
 /// The registry every entry point builds.
@@ -91,6 +92,7 @@ pub struct AppState {
     /// the setting silently evaporate on quit.
     persistent: bool,
     cleanup: Mutex<CleanupState>,
+    uninstall: Mutex<UninstallState>,
     deletion: Mutex<DeletionState>,
 }
 
@@ -124,6 +126,7 @@ impl AppState {
             preference: Mutex::new(preference),
             persistent,
             cleanup: Mutex::new(CleanupState::default()),
+            uninstall: Mutex::new(UninstallState::default()),
             deletion: Mutex::new(DeletionState::new(operation_log)),
         }
     }
@@ -151,6 +154,12 @@ impl AppState {
 
     pub fn cleanup(&self) -> MutexGuard<'_, CleanupState> {
         self.cleanup
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn uninstall(&self) -> MutexGuard<'_, UninstallState> {
+        self.uninstall
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }

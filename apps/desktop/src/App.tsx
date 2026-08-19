@@ -73,7 +73,9 @@ export function App() {
       <>
         <Suspense
           fallback={
-            <div className="grid min-h-screen place-items-center">
+            // Opaque for the same reason `OnboardingLayout` is: this renders
+            // outside the shell, and the window itself is transparent.
+            <div className="bg-muted grid min-h-screen place-items-center">
               <Skeleton className="h-140 w-full max-w-155 rounded-[20px]" />
             </div>
           }

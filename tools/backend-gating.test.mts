@@ -86,13 +86,28 @@ test("cleanup review needs a usable Mole with both flags", () => {
 });
 
 /**
- * The capability split from ADR 0021 reaching the screen: listing applications
- * is offered, removing one is not, and the page says which.
+ * The capability split reaching the screen. Listing applications, previewing a
+ * removal, and performing one are three claims, and the page says which it has.
+ * See ADR 0027.
  */
-test("uninstall is offered in Terminal while the backend only lists apps", () => {
+test("uninstall is offered in the window only when the backend can preview and perform it", () => {
+  assert.equal(
+    uninstallOffer(mole({ appInventory: true, uninstallApps: true, dryRun: true })),
+    "app",
+  );
   assert.equal(uninstallOffer(mole({ appInventory: true })), "terminal");
-  assert.equal(uninstallOffer(mole({ appInventory: true, uninstallApps: true })), "app");
-  assert.equal(uninstallOffer(mole({ uninstallApps: true })), "none", "no inventory, no page");
+  // The preview is the whole basis on which the removal is approved, so a
+  // backend that could remove without previewing gets the handoff, not a button.
+  assert.equal(
+    uninstallOffer(mole({ appInventory: true, uninstallApps: true })),
+    "terminal",
+    "no dry run, no plan to approve",
+  );
+  assert.equal(
+    uninstallOffer(mole({ uninstallApps: true, dryRun: true })),
+    "none",
+    "no inventory, no page",
+  );
   assert.equal(uninstallOffer(mole({ appInventory: true }, false)), "none");
   assert.equal(uninstallOffer([]), "none");
   assert.equal(uninstallOffer(null), "none");

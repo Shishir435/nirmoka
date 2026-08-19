@@ -63,14 +63,18 @@ export function cleanupAvailability(backends: Backend[] | null): Availability {
 /**
  * What the Applications page may say about removing an application.
  *
- * `terminal` is the honest middle state, and the one that holds today: Mole
- * lists applications and the exact name its command takes, but every named
- * uninstall stops at a confirmation prompt with no non-interactive flag, and
- * answering another tool's safety prompt is not something this app does. See
- * ADR 0021.
+ * Three states, and the middle one is not a placeholder. `app` means the backend
+ * can both preview and perform the removal. `terminal` is the honest fallback for
+ * a backend that lists applications and the exact name its command takes but
+ * cannot be driven to remove one — the page then names the command instead of
+ * offering a button that dies. `none` means there is no inventory at all.
+ *
+ * Both flags are required for `app`: a preview is the whole basis on which the
+ * removal is approved, so a release that could remove without previewing would
+ * get the Terminal handoff, not the button. See ADR 0027.
  */
 export function uninstallOffer(backends: Backend[] | null): "app" | "terminal" | "none" {
   const mole = usable(backends, "mole");
   if (!mole?.capabilities.appInventory) return "none";
-  return mole.capabilities.uninstallApps ? "app" : "terminal";
+  return mole.capabilities.uninstallApps && mole.capabilities.dryRun ? "app" : "terminal";
 }

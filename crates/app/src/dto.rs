@@ -21,7 +21,9 @@ use nirmoka_adapter::{
     Capabilities as AdapterCapabilities, CleanupCompletion as AdapterCleanupCompletion,
     CleanupPreview as AdapterCleanupPreview, CleanupSystemScope as AdapterCleanupSystemScope,
     Detection as AdapterDetection, InstalledApplication as AdapterInstalledApplication,
-    SystemStatus as AdapterSystemStatus,
+    SystemStatus as AdapterSystemStatus, UninstallApp as AdapterUninstallApp,
+    UninstallCompletion as AdapterUninstallCompletion,
+    UninstallItemScope as AdapterUninstallItemScope, UninstallPreview as AdapterUninstallPreview,
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
@@ -144,6 +146,10 @@ pub struct PlatformFeatures {
     export_to = "../../../packages/transport/src/generated/bindings.ts"
 )]
 pub struct VolumeInfo {
+    /// What the desktop calls this volume — "Macintosh HD" rather than
+    /// `/System/Volumes/Data`. Resolved by the platform layer, because the name
+    /// is not in `df` output and the window has no way to look it up.
+    pub name: String,
     pub mount_point: String,
     #[ts(type = "number")]
     pub total_bytes: u64,
@@ -269,6 +275,253 @@ pub enum CleanupCompletion {
     Partial,
     Cancelled,
     Failed,
+}
+
+/// One backend-produced uninstall plan, for the window to render and the user to
+/// approve.
+///
+/// Carries the backend's own transcript beside the parsed rows. That is
+/// deliberate: the rows are what the UI draws, and the transcript is what the
+/// user is actually approving, so a parse that silently narrowed the plan stays
+/// visible instead of becoming the whole story.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallPreview {
+    pub backend: String,
+    pub backend_version: String,
+    /// The backend identifiers this plan covers, which is what a confirmation
+    /// later names. Never a display name.
+    pub requested: Vec<String>,
+    pub apps: Vec<UninstallApp>,
+    pub reported_total: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub has_review_only_items: bool,
+    pub warnings: Vec<String>,
+    pub notes: Vec<String>,
+    pub transcript: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallApp {
+    pub name: String,
+    pub homebrew_cask: bool,
+    pub reported_size: Option<String>,
+    pub items: Vec<UninstallItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallItem {
+    /// The backend's display form, tilde-abbreviated. Not a resolvable path, and
+    /// nothing in the window may treat it as one — see `nirmoka_adapter::uninstall`.
+    pub display_path: String,
+    pub reported_size: Option<String>,
+    pub scope: UninstallItemScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum UninstallItemScope {
+    Removed,
+    System,
+    ReviewOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum UninstallCompletion {
+    Finished,
+    Partial,
+    Cancelled,
+    Failed,
+}
+
+/// Latest Rust-held uninstall review, bound to a short-lived one-time token.
+///
+/// The token is the only thing that can start the removal. No application name
+/// and no path returns as an execute parameter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallPreparation {
+    #[ts(type = "number")]
+    pub confirmation_token: u64,
+    pub backend: String,
+    pub backend_version: String,
+    /// Display names, for the dialog's own sentence. The identifiers stay in Rust.
+    pub applications: Vec<String>,
+    pub reported_total: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub has_review_only_items: bool,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub expires_in_seconds: u64,
+    pub requires_confirmation: bool,
+    pub warning: String,
+}
+
+/// One durable uninstall journal entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallOperation {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub reviewed_applications: Vec<String>,
+    #[ts(type = "number")]
+    pub reviewed_items: u64,
+    pub reviewed_total: Option<String>,
+    pub completion: UninstallCompletion,
+    pub removed: Vec<String>,
+    pub failed: Vec<String>,
+    pub reported_freed: Option<String>,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub executed_at_ms: u64,
+    pub log_error: Option<String>,
+}
+
+impl UninstallPreview {
+    pub fn from_adapter(backend: &str, preview: AdapterUninstallPreview) -> Self {
+        Self {
+            backend: backend.to_string(),
+            backend_version: preview.backend_version.clone(),
+            requested: preview.requested.clone(),
+            total_items: preview.total_items() as u64,
+            has_review_only_items: preview.has_review_only_items(),
+            apps: preview
+                .apps
+                .iter()
+                .map(UninstallApp::from_adapter)
+                .collect(),
+            reported_total: preview.reported_total,
+            warnings: preview.warnings,
+            notes: preview.notes,
+            transcript: preview.transcript,
+        }
+    }
+}
+
+impl UninstallApp {
+    fn from_adapter(app: &AdapterUninstallApp) -> Self {
+        Self {
+            name: app.name.clone(),
+            homebrew_cask: app.homebrew_cask,
+            reported_size: app.reported_size.clone(),
+            items: app
+                .items
+                .iter()
+                .map(|item| UninstallItem {
+                    display_path: item.display_path.clone(),
+                    reported_size: item.reported_size.clone(),
+                    scope: uninstall_item_scope(item.scope),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl UninstallPreparation {
+    pub fn from_state(preparation: crate::uninstall::UninstallPreparation) -> Self {
+        let preview = &preparation.pending.preview;
+        let applications: Vec<String> = preview.apps.iter().map(|app| app.name.clone()).collect();
+        Self {
+            confirmation_token: preparation.token,
+            backend: preparation.pending.backend.clone(),
+            backend_version: preview.backend_version.clone(),
+            reported_total: preview.reported_total.clone(),
+            total_items: preview.total_items() as u64,
+            has_review_only_items: preview.has_review_only_items(),
+            warnings: preview.warnings.clone(),
+            expires_in_seconds: preparation.expires_in.as_secs(),
+            requires_confirmation: true,
+            warning: format!(
+                "{} and the files listed above will be moved to the Trash by {}. \
+                 Recover them from the Trash if this was a mistake.",
+                sentence_list(&applications),
+                preparation.pending.backend,
+            ),
+            applications,
+        }
+    }
+}
+
+impl UninstallOperation {
+    pub fn from_operation(operation: &crate::deletion::UninstallOperation) -> Self {
+        Self {
+            id: operation.id,
+            backend: operation.backend.clone(),
+            backend_version: operation.backend_version.clone(),
+            reviewed_applications: operation.reviewed_applications.clone(),
+            reviewed_items: operation.reviewed_items,
+            reviewed_total: operation.reviewed_total.clone(),
+            completion: uninstall_completion(operation.completion),
+            removed: operation.removed.clone(),
+            failed: operation.failed.clone(),
+            reported_freed: operation.reported_freed.clone(),
+            warnings: operation.warnings.clone(),
+            executed_at_ms: operation.executed_at_ms,
+            log_error: operation.log_error.clone(),
+        }
+    }
+}
+
+fn uninstall_item_scope(scope: AdapterUninstallItemScope) -> UninstallItemScope {
+    match scope {
+        AdapterUninstallItemScope::Removed => UninstallItemScope::Removed,
+        AdapterUninstallItemScope::System => UninstallItemScope::System,
+        AdapterUninstallItemScope::ReviewOnly => UninstallItemScope::ReviewOnly,
+    }
+}
+
+fn uninstall_completion(completion: AdapterUninstallCompletion) -> UninstallCompletion {
+    match completion {
+        AdapterUninstallCompletion::Finished => UninstallCompletion::Finished,
+        AdapterUninstallCompletion::Partial => UninstallCompletion::Partial,
+        AdapterUninstallCompletion::Cancelled => UninstallCompletion::Cancelled,
+        AdapterUninstallCompletion::Failed => UninstallCompletion::Failed,
+    }
+}
+
+/// `"A"`, `"A and B"`, `"A, B and C"` — for a sentence a user reads before
+/// approving a removal, where "1 app(s)" would be the wrong register.
+fn sentence_list(names: &[String]) -> String {
+    match names {
+        [] => "No application".to_string(),
+        [only] => only.clone(),
+        [head @ .., last] => format!("{} and {last}", head.join(", ")),
+    }
 }
 
 /// One durable cleanup journal entry.
@@ -649,6 +902,116 @@ impl InstalledApplicationInventory {
             rows,
         }
     }
+}
+
+/// Where a size came from, carried beside the number rather than implied by it.
+///
+/// A footprint mixes two ways of knowing: the scan already walked part of it,
+/// and the rest was walked on demand. `Unavailable` is the third answer and is
+/// not zero — a cache directory the walk could not finish is unknown, and
+/// showing it as empty would understate exactly the thing the user opened this
+/// screen to find.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum FootprintSource {
+    Scan,
+    Filesystem,
+    Unavailable,
+}
+
+/// One path belonging to an application, and what it cost to find out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct FootprintPath {
+    pub path: String,
+    /// `null` when the size is not known. See [`FootprintSource`].
+    #[ts(type = "number | null")]
+    pub total_bytes: Option<u64>,
+    /// False when part of this path could not be read — a locked subdirectory,
+    /// or an entry a scan recorded as unreadable or excluded. `total_bytes` is
+    /// then a lower bound rather than a wrong number, and the window says "at
+    /// least" rather than dropping it.
+    pub complete: bool,
+    pub source: FootprintSource,
+}
+
+/// A group of paths reported under one name — Caches, Containers, Logs.
+///
+/// The label names a location macOS defines, never a concept the application
+/// keeps there: `Docker.raw` is one path under Containers at its real size, and
+/// the images and volumes inside it are Docker's vocabulary for the contents of
+/// a file this program can only see the outside of. See ADR 0028.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct StorageComponent {
+    pub label: String,
+    /// The sum of the paths whose size is known.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// False when a path here could not be sized, or was only read in part.
+    /// The total is then a lower bound.
+    pub complete: bool,
+    /// True when every path here carries the application's bundle identifier.
+    ///
+    /// False for the one component matched by vendor name instead — Chrome's
+    /// 6 GB lives in `~/Library/Application Support/Google`, which no
+    /// identifier finds and which may also hold a sibling application's data.
+    /// It is excluded from `AppFootprint::total_bytes` and the window marks it,
+    /// because a guess folded into a total stops looking like one. See ADR 0028.
+    pub certain: bool,
+    pub paths: Vec<FootprintPath>,
+}
+
+/// What one application costs: the bundle, plus everything under `~/Library`
+/// carrying its bundle identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct AppFootprint {
+    #[ts(type = "number")]
+    pub scan_id: u64,
+    pub node_id: u32,
+    /// Without the `.app` suffix, which is a filesystem detail and not the name
+    /// anyone calls the application.
+    pub name: String,
+    pub path: String,
+    /// `null` when `Contents/Info.plist` could not be read or holds no
+    /// identifier. The footprint is then the bundle alone, and that is the
+    /// honest total rather than a failure.
+    pub bundle_id: Option<String>,
+    /// The sum of the components attributed by bundle identifier. Excludes
+    /// anything matched by vendor name — see `related_bytes`.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// Bytes in vendor-named directories that probably belong to this
+    /// application. Zero when none were found. Deliberately a second number
+    /// rather than part of the first.
+    #[ts(type = "number")]
+    pub related_bytes: u64,
+    /// How many existing paths could not be sized. Greater than zero means
+    /// `total_bytes` is a lower bound, and the window says so.
+    pub unmeasured_paths: u32,
+    /// Epoch milliseconds, from Spotlight. `null` where Spotlight has no answer
+    /// — indexing off, a volume it does not index, or a platform that is not
+    /// macOS. The window omits the line rather than claiming "never".
+    #[ts(type = "number | null")]
+    pub last_used_ms: Option<i64>,
+    pub components: Vec<StorageComponent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]

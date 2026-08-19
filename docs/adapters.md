@@ -257,16 +257,20 @@ what the backend would delete.
   parsed back into bytes, so the window shows a per-application label and no total. The fixture is
   recorded from the real command for this reason: a hand-written one claiming a number passed every
   test and failed every user
-- Application uninstall: **none.** Every named `mo uninstall`, `--dry-run` included, stops at
-  `Proceed with uninstallation? [y/N]` and blocks on stdin; the flag set is `--list`, `--dry-run`,
-  `--permanent`, `--whitelist`, `--debug`, with no non-interactive escape. Answering another tool's
-  confirmation prompt is not something an adapter may do, so `uninstall_apps` is false and the trait
-  gains no uninstall method. The window shows the inventory and the exact name, and the user runs the
-  command. See [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md) and
+- Application uninstall: `uninstall_preview` then `execute_uninstall`, both driving
+  `mo uninstall <name>` with one line on stdin. Every named `mo uninstall` — `--dry-run`
+  included — first stops at `Proceed with uninstallation? [y/N]`, and under `--dry-run` that
+  prompt guards nothing: the flag is set before any discovery and every removal below it is
+  separately gated on it, so the preview modifies no file whatever it answers. The removal
+  itself runs only once the user has approved that exact plan, and Mole requests administrator
+  authorization itself through its own native dialog. `--permanent` is never passed, so files
+  go to the Trash. Identifiers are validated against a live `mo uninstall --list` at preview
+  and again at execution, so only a name the backend published can become an argument. See
+  [ADR 0027](adr/0027-uninstall-is-a-relayed-confirmation.md),
+  `fixtures/mole/1.48.1/uninstall-plan.txt`, and
   `fixtures/mole/1.48.1/uninstall-command-surface.txt`
-- Capabilities: dry run, cleanup categories, app inventory, status. Not arbitrary-path
-  deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such. Not app
-  uninstall, which is a prompt rather than a command surface
+- Capabilities: dry run, cleanup categories, app inventory, app uninstall, status. Not
+  arbitrary-path deletion: neither `mo clean` nor `mo uninstall` accepts a scanned path as such
 - Note: macOS only. GPL-3.0, so read its output, never its data tables.
 
 Mole is the reason no single capability is a floor. A backend has to be able to do

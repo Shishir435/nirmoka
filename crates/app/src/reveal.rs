@@ -122,6 +122,54 @@ pub fn quick_look(path: &Path) -> Result<(), String> {
     }
 }
 
+/// Launch the application at `path`.
+///
+/// The Inspector lists an application's storage next to the question of whether
+/// it is still wanted, and opening it is how that question gets answered. Like
+/// reveal, this hands a path to the desktop rather than to a backend: no disk
+/// tool decides what "open" means.
+///
+/// The path is passed as an argument to the platform's own launcher, never
+/// interpolated into a shell string, and the launcher decides what to do with
+/// something that is not an application.
+pub fn open_application(path: &Path) -> Result<(), String> {
+    let target = existing(path)?;
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg("-a").arg(&target);
+        command
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.arg("/C").arg("start").arg("").arg(&target);
+        command
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(&target);
+        command
+    };
+
+    let status = command
+        .status()
+        .map_err(|error| format!("could not open the application: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the application did not open: exit status {}",
+            status.code().unwrap_or(-1)
+        ))
+    }
+}
+
 /// Canonicalise, and refuse anything that is not there.
 ///
 /// A scan describes the filesystem as it was. Passing a path that has since

@@ -1,8 +1,15 @@
 # ADR 0021: Application uninstall is not an adapter API
 
-- Status: accepted
+- Status: superseded by [ADR 0027](0027-uninstall-is-a-relayed-confirmation.md)
 - Date: 2026-08-04
 - Supersedes the uninstall portion of [ADR 0019](0019-mole-consumer-operations-before-beta.md)
+
+> **Superseded.** The central factual claim below — that Mole's leftover plan cannot be
+> reached without also being asked to proceed — was established by probing with stdin
+> _closed_. With `y` on stdin the same Mole 1.48.1 prints the complete plan and modifies
+> nothing, because `--dry-run` gates every removal below that prompt. There is also a second
+> gate, after the plan, that this ADR never saw. The capability split it introduced was right
+> and survives; the withdrawal did not. See ADR 0027.
 
 ## Context
 

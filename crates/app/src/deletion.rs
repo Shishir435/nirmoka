@@ -4,9 +4,10 @@
 //! is held here behind a one-time token, which makes explicit confirmation an
 //! enforced backend property rather than a convention in a future button.
 //!
-//! One journal file holds every destructive operation — selected-path deletions
-//! and backend cleanup runs — because they share an id space and a reader. Two
-//! files with two writers would eventually disagree about what happened first.
+//! One journal file holds every destructive operation — selected-path deletions,
+//! backend cleanup runs, and application uninstalls — because they share an id
+//! space and a reader. Two files with two writers would eventually disagree about
+//! what happened first.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -16,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nirmoka_adapter::{
     CleanupCompletion, CleanupExecution, CleanupSystemScope, DeletePlan, DeleteReceipt,
+    UninstallCompletion, UninstallExecution,
 };
 use serde::{Deserialize, Serialize};
 
@@ -109,6 +111,43 @@ pub struct CleanupRecord {
     pub execution: CleanupExecution,
 }
 
+/// One completed application uninstall, recorded as the backend reported it.
+///
+/// Unlike a cleanup run this one *does* carry per-application results, because
+/// Mole publishes them: it names what it removed and what it could not. The
+/// reviewed identifiers are recorded beside them so a journal entry says both what
+/// the user approved and what happened.
+///
+/// Terminal, like a cleanup run. Files went to the Trash, and the Trash is its own
+/// record — see ADR 0025 for why Nirmoka does not claim to know where they landed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UninstallOperation {
+    pub id: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub reviewed_applications: Vec<String>,
+    pub reviewed_items: u64,
+    pub reviewed_total: Option<String>,
+    pub completion: UninstallCompletion,
+    pub removed: Vec<String>,
+    pub failed: Vec<String>,
+    pub reported_freed: Option<String>,
+    pub warnings: Vec<String>,
+    pub executed_at_ms: u64,
+    pub log_error: Option<String>,
+}
+
+/// What a finished uninstall knows before it has an id or a timestamp.
+#[derive(Debug, Clone)]
+pub struct UninstallRecord {
+    pub backend: String,
+    pub backend_version: String,
+    pub reviewed_applications: Vec<String>,
+    pub reviewed_items: u64,
+    pub reviewed_total: Option<String>,
+    pub execution: UninstallExecution,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 enum LogEvent {
@@ -130,6 +169,24 @@ enum LogEvent {
         id: u64,
         target: PathBuf,
         total_bytes: u64,
+        at_ms: u64,
+    },
+    /// An uninstall is terminal for the same reason a cleanup run is. The
+    /// transcript is deliberately not journalled: it can name every path in a
+    /// user's library, and the journal is a durable file. What is recorded is what
+    /// was approved and what the backend said it did.
+    Uninstalled {
+        id: u64,
+        backend: String,
+        backend_version: String,
+        reviewed_applications: Vec<String>,
+        reviewed_items: u64,
+        reviewed_total: Option<String>,
+        completion: UninstallCompletion,
+        removed: Vec<String>,
+        failed: Vec<String>,
+        reported_freed: Option<String>,
+        warnings: Vec<String>,
         at_ms: u64,
     },
     /// A cleanup run is terminal: the backend removed what it found, and there
@@ -154,6 +211,7 @@ pub struct DeletionState {
     pending: HashMap<u64, Pending>,
     operations: Vec<Operation>,
     cleanups: Vec<CleanupOperation>,
+    uninstalls: Vec<UninstallOperation>,
     trashed: Vec<TrashOperation>,
     log_path: Option<PathBuf>,
 }
@@ -164,14 +222,16 @@ impl DeletionState {
         let Journal {
             operations,
             cleanups,
+            uninstalls,
             trashed,
         } = journal;
         // One id space across every kind, so "operation 4" in the journal names
-        // one event rather than three.
+        // one event rather than four.
         let next_operation = operations
             .iter()
             .map(|op| op.id)
             .chain(cleanups.iter().map(|op| op.id))
+            .chain(uninstalls.iter().map(|op| op.id))
             .chain(trashed.iter().map(|op| op.id))
             .max()
             .unwrap_or(0);
@@ -182,6 +242,7 @@ impl DeletionState {
             pending: HashMap::new(),
             operations,
             cleanups,
+            uninstalls,
             trashed,
             log_path,
         }
@@ -297,6 +358,53 @@ impl DeletionState {
         operation
     }
 
+    /// Record one completed uninstall.
+    ///
+    /// Same rule as [`record_cleanup`](Self::record_cleanup): the run already
+    /// happened inside the backend and cannot be undone from here, so a write
+    /// failure travels beside the result instead of replacing it. Hiding a removal
+    /// because the journal could not be written would lose the only record of it.
+    pub fn record_uninstall(&mut self, record: UninstallRecord) -> UninstallOperation {
+        self.next_operation = self.next_operation.saturating_add(1);
+        let id = self.next_operation;
+        let at_ms = now_ms();
+        let log_error = self
+            .append(&LogEvent::Uninstalled {
+                id,
+                backend: record.backend.clone(),
+                backend_version: record.backend_version.clone(),
+                reviewed_applications: record.reviewed_applications.clone(),
+                reviewed_items: record.reviewed_items,
+                reviewed_total: record.reviewed_total.clone(),
+                completion: record.execution.completion,
+                removed: record.execution.removed.clone(),
+                failed: record.execution.failed.clone(),
+                reported_freed: record.execution.reported_freed.clone(),
+                warnings: record.execution.warnings.clone(),
+                at_ms,
+            })
+            .err()
+            .map(|error| error.to_string());
+
+        let operation = UninstallOperation {
+            id,
+            backend: record.backend,
+            backend_version: record.backend_version,
+            reviewed_applications: record.reviewed_applications,
+            reviewed_items: record.reviewed_items,
+            reviewed_total: record.reviewed_total,
+            completion: record.execution.completion,
+            removed: record.execution.removed,
+            failed: record.execution.failed,
+            reported_freed: record.execution.reported_freed,
+            warnings: record.execution.warnings,
+            executed_at_ms: at_ms,
+            log_error,
+        };
+        self.uninstalls.push(operation.clone());
+        operation
+    }
+
     /// Record one item moved to the Trash.
     ///
     /// This follows [`record_cleanup`](Self::record_cleanup) rather than
@@ -343,6 +451,10 @@ impl DeletionState {
         self.cleanups.iter().rev().cloned().collect()
     }
 
+    pub fn uninstalls(&self) -> Vec<UninstallOperation> {
+        self.uninstalls.iter().rev().cloned().collect()
+    }
+
     fn append(&self, event: &LogEvent) -> io::Result<()> {
         let Some(path) = &self.log_path else {
             return Ok(());
@@ -363,6 +475,7 @@ impl DeletionState {
 struct Journal {
     operations: Vec<Operation>,
     cleanups: Vec<CleanupOperation>,
+    uninstalls: Vec<UninstallOperation>,
     trashed: Vec<TrashOperation>,
 }
 
@@ -373,6 +486,7 @@ fn load_journal(path: &Path) -> Journal {
 
     let mut operations = Vec::<Operation>::new();
     let mut cleanups = Vec::<CleanupOperation>::new();
+    let mut uninstalls = Vec::<UninstallOperation>::new();
     let mut trashed = Vec::<TrashOperation>::new();
     for event in text
         .lines()
@@ -425,6 +539,35 @@ fn load_journal(path: &Path) -> Journal {
                 // off disk.
                 log_error: None,
             }),
+            LogEvent::Uninstalled {
+                id,
+                backend,
+                backend_version,
+                reviewed_applications,
+                reviewed_items,
+                reviewed_total,
+                completion,
+                removed,
+                failed,
+                reported_freed,
+                warnings,
+                at_ms,
+            } => uninstalls.push(UninstallOperation {
+                id,
+                backend,
+                backend_version,
+                reviewed_applications,
+                reviewed_items,
+                reviewed_total,
+                completion,
+                removed,
+                failed,
+                reported_freed,
+                warnings,
+                executed_at_ms: at_ms,
+                // Read back off disk, so durable by definition.
+                log_error: None,
+            }),
             LogEvent::Trashed {
                 id,
                 target,
@@ -442,6 +585,7 @@ fn load_journal(path: &Path) -> Journal {
     Journal {
         operations,
         cleanups,
+        uninstalls,
         trashed,
     }
 }

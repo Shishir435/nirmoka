@@ -104,12 +104,23 @@ export function SummarySection({ summary }: { summary: ScanSummary }) {
                 <p className="mb-2 text-xs font-medium text-muted-foreground">
                   Largest entries at scan root
                 </p>
+                {/* A bar per row, on the same scale as the browser's. Eight byte
+                    counts in mixed units is a table to read; eight bars is a
+                    shape to glance at. */}
                 <div className="divide-y">
                   {rows.slice(0, 8).map((row) => (
                     <div key={row.id} className="flex items-center gap-3 py-2.5 text-sm">
-                      <Folder className="size-4 text-muted-foreground" />
-                      <span className="flex-1 truncate">{row.name}</span>
-                      <span className="text-xs tabular-nums text-muted-foreground">
+                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                      <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{
+                            width: `${Math.min(100, Math.max(0, row.share * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                         {formatBytes(row.totalBytes)}
                       </span>
                     </div>
