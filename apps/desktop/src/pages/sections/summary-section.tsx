@@ -34,7 +34,10 @@ const TOP_CONSUMERS = 6;
  *
  * Each can walk `~/Library` when the scan did not cover it, so they are not all
  * fired together: the list is readable from its first paint and the numbers
- * upgrade as they arrive.
+ * upgrade as they arrive. The queue is every installed application rather than
+ * a chosen few — the backend caps ordinary rows and exempts bundles, because a
+ * bundle's size cannot say whether its footprint belongs at the top — and it is
+ * worked largest-bundle-first, so the rows most likely to move settle early.
  */
 const FOOTPRINT_CONCURRENCY = 2;
 
