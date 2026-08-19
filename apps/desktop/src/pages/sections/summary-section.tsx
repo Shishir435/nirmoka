@@ -1,4 +1,4 @@
-import { HardDrive, Sparkles } from "lucide-react";
+import { HardDrive, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { CategoryBreakdown, ScanSummary } from "@nirmoka/transport";
@@ -315,6 +315,17 @@ function ReclaimableBanner() {
   const [state, setState] = useState<
     { kind: "idle" } | { kind: "checking" } | { kind: "known"; total: string } | { kind: "none" }
   >({ kind: "idle" });
+  const [elapsed, setElapsed] = useState(0);
+
+  // Measured at 2m26s against Mole 1.48.1 on a full disk. A spinner with no
+  // clock reads as a hang at that length, and the button that would stop it has
+  // to be reachable rather than disabled.
+  useEffect(() => {
+    if (state.kind !== "checking") return;
+    setElapsed(0);
+    const tick = setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
+    return () => clearInterval(tick);
+  }, [state.kind]);
 
   const check = () => {
     setState({ kind: "checking" });
@@ -325,8 +336,15 @@ function ReclaimableBanner() {
             ? { kind: "known", total: preview.potentialCleanup }
             : { kind: "none" },
         ),
-      () => setState({ kind: "none" }),
+      // Includes the cancellation below: a stopped run has no figure, and the
+      // banner goes back to offering one rather than reporting a failure.
+      () => setState({ kind: "idle" }),
     );
+  };
+
+  const stop = () => {
+    void transport.cancelCleanupPreview();
+    setState({ kind: "idle" });
   };
 
   if (state.kind === "none") return null;
@@ -344,30 +362,49 @@ function ReclaimableBanner() {
               Mole&apos;s own figure, from its dry run. Review it before anything is removed.
             </p>
           </>
+        ) : state.kind === "checking" ? (
+          <>
+            <p className="text-sm font-medium">
+              Checking what can be reclaimed · {formatElapsed(elapsed)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Mole is walking the disk, which takes a few minutes. Nothing is being removed.
+            </p>
+          </>
         ) : (
           <>
             <p className="text-sm font-medium">Check what can be reclaimed</p>
             <p className="text-xs text-muted-foreground">
-              Runs Mole&apos;s dry run. Nothing is removed, and the figure is Mole&apos;s rather
-              than an estimate of ours.
+              Runs Mole&apos;s dry run, which takes a few minutes. Nothing is removed, and the
+              figure is Mole&apos;s rather than an estimate of ours.
             </p>
           </>
         )}
       </div>
-      <Button
-        variant={state.kind === "known" ? "default" : "outline"}
-        size="sm"
-        disabled={state.kind === "checking"}
-        onClick={
-          state.kind === "known"
-            ? () => {
-                window.location.hash = "/clean";
-              }
-            : check
-        }
-      >
-        {state.kind === "known" ? "Review" : state.kind === "checking" ? "Checking…" : "Check"}
-      </Button>
+      {state.kind === "checking" ? (
+        <Button variant="outline" size="sm" onClick={stop}>
+          <Square /> Stop
+        </Button>
+      ) : (
+        <Button
+          variant={state.kind === "known" ? "default" : "outline"}
+          size="sm"
+          onClick={
+            state.kind === "known"
+              ? () => {
+                  window.location.hash = "/clean";
+                }
+              : check
+          }
+        >
+          {state.kind === "known" ? "Review" : "Check"}
+        </Button>
+      )}
     </div>
   );
+}
+
+/** `m:ss`, so a wait of minutes reads as one rather than as a growing integer. */
+function formatElapsed(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
