@@ -51,12 +51,15 @@ export function AppShell({
             The outer columns are the same width, which is what keeps it there
             when one side has a back control and the other has three buttons.
 
-            44px tall, not 56. The frame draws its buttons at a fixed offset
-            from the top of the window, so a taller header centres its own
-            contents below them and the back control sits visibly low beside
-            them. Matching their height is what puts `‹ Nirmoka` on their line,
-            which is where the design draws it, and is why every control in here
-            is `sm` rather than default. */}
+            44px tall, not 56, and the frame's buttons are positioned to match
+            rather than the other way round. `trafficLightPosition` in
+            `tauri.conf.json` sets their centre to this row's; shrinking the
+            header to chase wherever macOS put them was solving it with the one
+            number this window does not own. That config is read when the window
+            is created, so a running dev server has to be restarted before a
+            change to it shows.
+
+            Everything in here is `sm` because 44px is the budget. */}
         <header
           data-tauri-drag-region
           className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-3"
