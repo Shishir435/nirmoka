@@ -1,4 +1,9 @@
-import type { CategoryBreakdown, CategoryConsumer, StorageCategory } from "@nirmoka/transport";
+import type {
+  CategoryBreakdown,
+  CategoryConsumer,
+  StorageCategory,
+  VolumeInfo,
+} from "@nirmoka/transport";
 
 /**
  * The dashboard's arithmetic, apart from its rendering.
@@ -30,12 +35,34 @@ export function isBundle(consumer: CategoryConsumer): boolean {
 }
 
 /**
+ * The volume the bar is drawn against, or `null` to draw the scan alone.
+ *
+ * A scan is not guaranteed to live on one filesystem. Scanning `/` walks into
+ * `/Volumes`, and a mounted disk or network share under home does the same, so
+ * the scanned bytes can exceed everything this filesystem holds. Framing that
+ * scan against this volume's capacity would draw category slices, free space,
+ * and a clamped-to-zero unscanned slice that together add up to more than the
+ * bar: the widths stop being shares of anything, and the last slices are
+ * clipped off the end.
+ *
+ * Where the two numbers cannot both be true, the volume is not the frame. The
+ * bar falls back to the scan, which is still a true statement about what was
+ * measured — see the "degrade, don't lie" rule.
+ */
+export function barVolume(breakdown: CategoryBreakdown): VolumeInfo | null {
+  const volume = breakdown.volume;
+  if (!volume) return null;
+  return breakdown.scannedBytes <= volume.usedBytes ? volume : null;
+}
+
+/**
  * The slices of the volume bar, in the order they are drawn.
  *
  * Free space is a slice because the bar is about the volume, not about the
  * scan: a chart of used space alone cannot answer "how much room is left".
- * Where capacity could not be read there is no free slice and the bar is the
- * scan alone, which is still true about what was measured.
+ * Where capacity could not be read — or could not contain the scan, see
+ * [`barVolume`] — there is no free slice and the bar is the scan alone, which
+ * is still true about what was measured.
  *
  * A scan of one directory leaves a third quantity — space that is in use and
  * was not looked at. It gets its own slice rather than being left as bare
@@ -56,10 +83,11 @@ export function usageSlices(
     color: display[category.category].color,
   }));
 
-  const volume = breakdown.volume;
+  const volume = barVolume(breakdown);
   if (!volume) return categories;
 
-  const unscanned = Math.max(0, volume.usedBytes - breakdown.scannedBytes);
+  // Non-negative by `barVolume`'s test, so the slices sum to the capacity.
+  const unscanned = volume.usedBytes - breakdown.scannedBytes;
   return [
     ...categories,
     ...(unscanned > 0
@@ -71,7 +99,8 @@ export function usageSlices(
 
 /** What the bar's widths are a fraction of. */
 export function barTotal(breakdown: CategoryBreakdown): number {
-  return breakdown.volume ? breakdown.volume.totalBytes : breakdown.scannedBytes;
+  const volume = barVolume(breakdown);
+  return volume ? volume.totalBytes : breakdown.scannedBytes;
 }
 
 /**

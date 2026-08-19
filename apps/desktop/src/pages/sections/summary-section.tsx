@@ -15,6 +15,7 @@ import {
   applyFootprint,
   applyIcon,
   barTotal,
+  barVolume,
   isBundle,
   openTarget,
   rankConsumers,
@@ -94,6 +95,10 @@ export function SummarySection({
   }
 
   const volume = breakdown.volume;
+  // The volume the bar could honestly be drawn against, which is not every
+  // volume that was read: a scan that crossed onto another filesystem does not
+  // fit inside this one's capacity.
+  const framed = barVolume(breakdown);
   // Trimmed here rather than in the hook, so a footprint that arrives late can
   // still promote its row into view.
   const visible = consumers.slice(0, TOP_CONSUMERS);
@@ -141,11 +146,20 @@ export function SummarySection({
 
           {/* The scan and the volume are different numbers whenever the scan was
               not the whole disk, and saying so is cheaper than a user working
-              out why the bar does not fill. */}
-          {volume && breakdown.scannedBytes < volume.usedBytes ? (
+              out why the bar does not fill. A scan larger than the volume is the
+              other direction of the same problem: it crossed onto another
+              filesystem, the bar is the scan, and that is worth stating rather
+              than leaving as a chart that quietly changed what it measures. */}
+          {volume && !framed ? (
+            <p className="mt-4 text-xs text-muted-foreground">
+              This scan measured {formatBytes(breakdown.scannedBytes)}, more than {volume.name}{" "}
+              holds, so it reached onto another volume. The bar shows the scan rather than this
+              volume's capacity.
+            </p>
+          ) : framed && breakdown.scannedBytes < framed.usedBytes ? (
             <p className="mt-4 text-xs text-muted-foreground">
               This scan covered {formatBytes(breakdown.scannedBytes)} of{" "}
-              {formatBytes(volume.usedBytes)} in use. The rest was not looked at.
+              {formatBytes(framed.usedBytes)} in use. The rest was not looked at.
             </p>
           ) : null}
         </CardContent>

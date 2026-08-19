@@ -27,11 +27,25 @@ use nirmoka_core::{NodeId, Tree};
 use crate::dto::{CategoryBreakdown, CategoryConsumer, CategorySummary, StorageCategory};
 use crate::state::ScanId;
 
-/// Consumers reported per category.
+/// Consumers reported per category, ranked by the bytes they account for.
 ///
 /// The dashboard shows a handful and the list is a summary, not a browser: the
 /// tree view is what exists for looking at everything.
 const MAX_CONSUMERS: usize = 8;
+
+/// Application bundles carried past that cap.
+///
+/// A bundle's size on disk is a fraction of what the application costs — see
+/// ADR 0028 — and the footprint that says so is measured later, on the rows
+/// this list hands over. Cutting at eight by bundle size therefore drops
+/// exactly the applications that belong at the top: a 300 MB bundle in
+/// eleventh place can carry tens of gigabytes under `~/Library`.
+///
+/// So bundles ride along beyond the ranked cap. They cost nothing on screen —
+/// the dashboard still shows six rows — and they only take a place once their
+/// real number earns it. The count is bounded because each footprint is a
+/// filesystem walk, not because eight was ever the right number of candidates.
+const MAX_BUNDLE_CANDIDATES: usize = 16;
 
 /// Directories a user's own files live in, directly under home.
 const PERSONAL_DIRECTORIES: &[&str] = &[
@@ -249,7 +263,7 @@ pub fn breakdown(
                     .cmp(&a.total_bytes)
                     .then_with(|| a.path.cmp(&b.path))
             });
-            rows.truncate(MAX_CONSUMERS);
+            trim_consumers(&mut rows);
             CategorySummary {
                 category: *category,
                 total_bytes,
@@ -266,6 +280,33 @@ pub fn breakdown(
         volume,
         categories,
     }
+}
+
+/// Cut a category's sorted consumers down to what the dashboard needs.
+///
+/// Two rules, not one: the largest [`MAX_CONSUMERS`] by attributed bytes, plus
+/// application bundles up to [`MAX_BUNDLE_CANDIDATES`] whatever their rank.
+/// Order is untouched, so the caller's sort still holds.
+fn trim_consumers(rows: &mut Vec<CategoryConsumer>) {
+    let mut ranked = 0usize;
+    let mut bundles = 0usize;
+    rows.retain(|row| {
+        let bundle = is_app_bundle(row);
+        let keep = ranked < MAX_CONSUMERS || (bundle && bundles < MAX_BUNDLE_CANDIDATES);
+        if keep {
+            ranked += 1;
+            if bundle {
+                bundles += 1;
+            }
+        }
+        keep
+    });
+}
+
+/// A `.app` directory: the same test [`claim`] uses, and the same one the
+/// frontend uses to decide a row is measured as an application.
+fn is_app_bundle(row: &CategoryConsumer) -> bool {
+    row.is_dir && row.name.to_ascii_lowercase().ends_with(".app")
 }
 
 /// The category a node inherits, for a consumer that claimed nothing itself.
@@ -582,6 +623,68 @@ mod tests {
             .find(|summary| summary.category == StorageCategory::PersonalFiles)
             .expect("personal files are reported");
         assert!(personal.consumers[0].is_dir);
+    }
+
+    /// A bundle's size is not what the application costs, and the footprint that
+    /// says so is measured after this cut. So a small bundle ranked below the
+    /// size cap has to survive it — otherwise the biggest application on the
+    /// disk can never reach the list at all.
+    #[test]
+    fn a_small_bundle_survives_the_size_cap() {
+        let mut tree = Tree::new("/Applications");
+        let root = tree.push(None, Node::directory("Applications"));
+        // Twelve bundles, descending, so the smallest three rank past the cap.
+        for index in 0..12u64 {
+            let bundle = tree.push(Some(root), Node::directory(format!("App{index:02}.app")));
+            tree.push(
+                Some(bundle),
+                Node::file("binary", 1_000_000 - index * 1_000),
+            );
+        }
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let apps = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Apps)
+            .expect("apps are reported");
+
+        assert!(
+            apps.consumers.len() > MAX_CONSUMERS,
+            "bundles ride past the ranked cap: {}",
+            apps.consumers.len()
+        );
+        assert!(
+            apps.consumers.iter().any(|row| row.name == "App11.app"),
+            "the smallest bundle is still a footprint candidate"
+        );
+        assert!(apps.consumers.len() <= MAX_BUNDLE_CANDIDATES);
+        // Order is untouched: the ranked rows still come first.
+        assert_eq!(apps.consumers[0].name, "App00.app");
+    }
+
+    /// Only bundles get that exemption. Anything else is measured by the size
+    /// already reported, so the cap is the whole truth about it.
+    #[test]
+    fn an_ordinary_directory_does_not_survive_the_size_cap() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        for index in 0..12u64 {
+            let dir = tree.push(Some(root), Node::directory(format!("dir{index:02}")));
+            tree.push(Some(dir), Node::file("blob", 1_000_000 - index * 1_000));
+        }
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let other = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Other)
+            .expect("other is reported");
+
+        assert_eq!(other.consumers.len(), MAX_CONSUMERS);
+        assert!(!other.consumers.iter().any(|row| row.name == "dir11"));
     }
 
     /// Every category is always reported, so the dashboard's cards do not move
