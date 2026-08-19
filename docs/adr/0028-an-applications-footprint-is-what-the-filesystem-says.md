@@ -59,6 +59,12 @@ Support/Google` may hold another Google application's data, and there is no way 
 outside; a total that quietly absorbed it would be confident about a guess. The window styles the
 component as uncertain because `StorageComponent::certain` says it is.
 
+**A partial read is a lower bound, said out loud.** `Tree::rollup` sums bytes and propagates
+nothing else, so a directory whose own entry read cleanly carries a clean flag over an unreadable
+descendant. Completeness is therefore taken from the subtree, not from the node, at both levels —
+the bundle and every Library path. A locked cache directory still contributes what was counted, and
+the component says the total is a bound rather than a number.
+
 **An opaque container is one row at its real size.** `Docker.raw` is 22 GB of something. Nirmoka
 reports 22 GB and its path. It does not guess at the shape inside.
 

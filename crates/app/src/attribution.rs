@@ -134,7 +134,15 @@ pub fn library_paths(home: &Path, bundle_id: &str) -> Vec<(&'static str, PathBuf
 /// in the tree and this is a descent by name. Returns `None` when the path was
 /// outside the scanned set, which is the common case for a scan of
 /// `/Applications` and the reason [`walk`] exists.
-pub fn size_from_tree(tree: &Tree, path: &Path) -> Option<u64> {
+///
+/// The second value is whether the subtree was read in full. It is not
+/// `Node::size_is_partial`, which is a fact about one node: `rollup` sums
+/// `total_bytes` up the tree and propagates nothing else, so a directory whose
+/// own entry read cleanly reports a clean flag over an unreadable descendant.
+/// A footprint built from that would understate an application's storage while
+/// claiming to be complete, which is the one direction the number must not be
+/// wrong in silently.
+pub fn size_from_tree(tree: &Tree, path: &Path) -> Option<(u64, bool)> {
     let relative = path.strip_prefix(tree.root_path()).ok()?;
     let mut current = tree.root()?;
 
@@ -150,7 +158,26 @@ pub fn size_from_tree(tree: &Tree, path: &Path) -> Option<u64> {
             .find(|child| tree.get(*child).is_ok_and(|node| node.name == name))?;
     }
 
-    tree.get(current).ok().map(|node| node.total_bytes)
+    let bytes = tree.get(current).ok()?.total_bytes;
+    Some((bytes, subtree_is_complete(tree, current)))
+}
+
+/// Whether every node under `id`, and `id` itself, was read in full.
+///
+/// An in-memory descent over an arena that is already resident: no filesystem
+/// access, and the subtree of one `~/Library` entry rather than of the scan.
+fn subtree_is_complete(tree: &Tree, id: NodeId) -> bool {
+    let mut pending = vec![id];
+    while let Some(current) = pending.pop() {
+        let Ok(node) = tree.get(current) else {
+            return false;
+        };
+        if node.size_is_partial() {
+            return false;
+        }
+        pending.extend(tree.children_of(current).iter().copied());
+    }
+    true
 }
 
 /// Disk usage of `path`, by walking it.
@@ -161,11 +188,34 @@ pub fn size_from_tree(tree: &Tree, path: &Path) -> Option<u64> {
 /// followed, so a link into `/Applications` cannot make a cache look enormous
 /// or send the walk in a circle.
 ///
-/// Returns the bytes found and whether the walk finished. An unreadable
-/// subdirectory lowers the total rather than failing the call — the same
-/// treatment a scan gives a permission error.
-pub fn walk(path: &Path) -> (u64, bool) {
+/// How much of a subtree a walk actually reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalkOutcome {
+    /// Everything under the path was counted.
+    Complete,
+    /// A locked or vanished entry was skipped. The total is a lower bound, and
+    /// a useful one: the rest of the subtree was counted normally.
+    Partial,
+    /// The entry budget ran out. An unknown fraction was counted, so the total
+    /// is not a bound in either direction and is not offered as a number.
+    Exhausted,
+}
+
+/// Returns the bytes found and how much of the subtree they represent.
+///
+/// An unreadable subdirectory lowers the total rather than failing the call —
+/// the same treatment a scan gives a permission error — and downgrades the
+/// outcome, because a total missing a locked directory has to say so.
+///
+/// A path that does not exist is `(0, Complete)`: nothing there is nothing
+/// missed.
+pub fn walk(path: &Path) -> (u64, WalkOutcome) {
+    if path.symlink_metadata().is_err() {
+        return (0, WalkOutcome::Complete);
+    }
+
     let mut total = 0;
+    let mut complete = true;
     let mut budget = WALK_BUDGET;
     // An explicit stack: `~/Library` nests deeply enough that recursion here
     // would be a stack depth that depends on the user's disk.
@@ -173,23 +223,34 @@ pub fn walk(path: &Path) -> (u64, bool) {
 
     while let Some(current) = pending.pop() {
         let Ok(metadata) = current.symlink_metadata() else {
+            complete = false;
             continue;
         };
         if budget == 0 {
-            return (total, false);
+            return (total, WalkOutcome::Exhausted);
         }
         budget -= 1;
         total += disk_bytes(&metadata);
 
         if metadata.is_dir() {
             let Ok(entries) = std::fs::read_dir(&current) else {
+                // Permission denied on a cache directory is the common case, and
+                // the bytes behind it are real whether or not they can be read.
+                complete = false;
                 continue;
             };
             pending.extend(entries.flatten().map(|entry| entry.path()));
         }
     }
 
-    (total, true)
+    (
+        total,
+        if complete {
+            WalkOutcome::Complete
+        } else {
+            WalkOutcome::Partial
+        },
+    )
 }
 
 #[cfg(unix)]
@@ -396,8 +457,10 @@ pub struct FootprintPlan {
 struct PlannedPath {
     label: &'static str,
     path: PathBuf,
-    /// `Some` when the scan already walked this path, which is the free case.
-    known: Option<u64>,
+    /// `Some(bytes, complete)` when the scan already walked this path, which is
+    /// the free case. `complete` is about the whole subtree — see
+    /// [`size_from_tree`].
+    known: Option<(u64, bool)>,
 }
 
 /// Read what the tree knows about the application at `node_id`.
@@ -449,7 +512,10 @@ pub fn plan(
         node_id: node_id.raw(),
         name,
         bundle_bytes: node.total_bytes,
-        bundle_complete: !node.size_is_partial(),
+        // The subtree, not the node. `size_is_partial` on a directory says its
+        // own entry read cleanly, which it does while an unreadable file sits
+        // inside it — see `size_from_tree`.
+        bundle_complete: subtree_is_complete(tree, node_id),
         bundle_id: identifier,
         path,
         pending,
@@ -471,6 +537,7 @@ pub fn resolve(plan: FootprintPlan) -> AppFootprint {
         paths: vec![FootprintPath {
             path: plan.path.display().to_string(),
             total_bytes: Some(plan.bundle_bytes),
+            complete: plan.bundle_complete,
             source: FootprintSource::Scan,
         }],
     }];
@@ -493,7 +560,9 @@ pub fn resolve(plan: FootprintPlan) -> AppFootprint {
         components.push(StorageComponent {
             label: location.label.to_string(),
             total_bytes: paths.iter().filter_map(|path| path.total_bytes).sum(),
-            complete: paths.iter().all(|path| path.total_bytes.is_some()),
+            complete: paths
+                .iter()
+                .all(|path| path.total_bytes.is_some() && path.complete),
             certain: true,
             paths,
         });
@@ -513,7 +582,9 @@ pub fn resolve(plan: FootprintPlan) -> AppFootprint {
         components.push(StorageComponent {
             label: RELATED_LABEL.to_string(),
             total_bytes: related_bytes,
-            complete: related.iter().all(|path| path.total_bytes.is_some()),
+            complete: related
+                .iter()
+                .all(|path| path.total_bytes.is_some() && path.complete),
             certain: false,
             paths: related,
         });
@@ -541,24 +612,27 @@ pub fn resolve(plan: FootprintPlan) -> AppFootprint {
 
 /// Size one planned path, preferring the scan that already walked it.
 fn measure(planned: PlannedPath) -> FootprintPath {
-    if let Some(bytes) = planned.known {
+    if let Some((bytes, complete)) = planned.known {
         return FootprintPath {
             path: planned.path.display().to_string(),
             total_bytes: Some(bytes),
+            complete,
             source: FootprintSource::Scan,
         };
     }
 
-    let (bytes, complete) = walk(&planned.path);
+    // A walk that ran out of budget counted an unknown fraction, so it offers no
+    // number. A walk that merely hit a locked directory counted everything else,
+    // and that is a lower bound worth showing — flagged, not withheld.
+    let (bytes, outcome) = walk(&planned.path);
     FootprintPath {
         path: planned.path.display().to_string(),
-        // An unfinished walk is a number that would be wrong in the direction
-        // that matters, so it is not offered as one.
-        total_bytes: complete.then_some(bytes),
-        source: if complete {
-            FootprintSource::Filesystem
-        } else {
+        total_bytes: (outcome != WalkOutcome::Exhausted).then_some(bytes),
+        complete: outcome == WalkOutcome::Complete,
+        source: if outcome == WalkOutcome::Exhausted {
             FootprintSource::Unavailable
+        } else {
+            FootprintSource::Filesystem
         },
     }
 }
@@ -782,7 +856,7 @@ mod tests {
 
         assert_eq!(
             size_from_tree(&tree, Path::new("/scan/Library/Caches/com.example.desktop")),
-            Some(2048)
+            Some((2048, true))
         );
         assert_eq!(size_from_tree(&tree, Path::new("/elsewhere")), None);
         assert_eq!(size_from_tree(&tree, Path::new("/scan/Library/Logs")), None);
@@ -807,15 +881,64 @@ mod tests {
         }
     }
 
+    /// `rollup` sums bytes and propagates nothing else, so a directory whose own
+    /// entry read cleanly reports a clean flag over an unreadable descendant.
+    /// Reading the flag off the node alone would call an understated total
+    /// complete, which is the one way this number must not be wrong quietly.
+    #[test]
+    fn an_unreadable_descendant_makes_the_scanned_size_a_lower_bound() {
+        let mut tree = Tree::new("/scan");
+        let root = tree.push(None, Node::directory("scan"));
+        let library = tree.push(Some(root), Node::directory("Library"));
+        let caches = tree.push(Some(library), Node::directory("Caches"));
+        let app = tree.push(Some(caches), Node::directory("com.example.desktop"));
+        tree.push(Some(app), Node::file("blob", 2048));
+        let mut locked = Node::directory("locked");
+        locked.read_error = true;
+        tree.push(Some(app), locked);
+        tree.rollup();
+
+        let path = Path::new("/scan/Library/Caches/com.example.desktop");
+        // The directory's own node is clean: the flag being read has to be the
+        // subtree's, not this one's.
+        assert!(!tree.get(app).expect("the node exists").size_is_partial());
+        assert_eq!(size_from_tree(&tree, path), Some((2048, false)));
+    }
+
+    /// The same fault one level up: the bundle is the node the user clicked, and
+    /// an unreadable file inside it does not touch the directory's own flag.
+    #[test]
+    fn an_unreadable_file_in_the_bundle_is_carried_into_the_footprint() {
+        let home = scratch("partial-bundle");
+        let apps = home.join("Applications");
+        let mut tree = Tree::new(&apps);
+        let root = tree.push(None, Node::directory("Applications"));
+        let bundle = tree.push(Some(root), Node::directory("Example.app"));
+        tree.push(Some(bundle), Node::file("binary", 1024));
+        let mut unreadable = Node::file("secret", 0);
+        unreadable.read_error = true;
+        tree.push(Some(bundle), unreadable);
+        tree.rollup();
+
+        let footprint = resolve(plan(2, bundle, &tree, &home).expect("the node is in the tree"));
+        let application = &footprint.components[0];
+
+        assert!(!application.complete, "the bundle was not read in full");
+        assert!(!application.paths[0].complete);
+        // Still counted, and still reported: a lower bound beats no number.
+        assert_eq!(application.total_bytes, 1024);
+        assert_eq!(footprint.unmeasured_paths, 0);
+    }
+
     #[test]
     fn a_walk_counts_a_directory_tree() {
         let home = scratch("walk");
         write(&home.join("a").join("one"), 4096);
         write(&home.join("a").join("nested").join("two"), 4096);
 
-        let (bytes, complete) = walk(&home.join("a"));
+        let (bytes, outcome) = walk(&home.join("a"));
 
-        assert!(complete);
+        assert_eq!(outcome, WalkOutcome::Complete);
         assert!(bytes >= 8192, "counted {bytes}");
     }
 
@@ -823,7 +946,7 @@ mod tests {
     fn a_walk_of_nothing_is_zero_rather_than_an_error() {
         let home = scratch("missing");
 
-        assert_eq!(walk(&home.join("absent")), (0, true));
+        assert_eq!(walk(&home.join("absent")), (0, WalkOutcome::Complete));
     }
 
     /// The whole assembly, against a home directory this test built: the bundle

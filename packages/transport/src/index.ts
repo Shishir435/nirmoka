@@ -750,6 +750,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
               {
                 path: "/Applications/Example.app",
                 totalBytes: 268_435_456,
+                complete: true,
                 source: "scan",
               },
             ],
@@ -763,6 +764,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
               {
                 path: "~/Library/Containers/com.example.desktop",
                 totalBytes: 1_073_741_824,
+                complete: true,
                 source: "filesystem",
               },
             ],
@@ -776,6 +778,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
               {
                 path: "~/Library/Caches/com.example.desktop",
                 totalBytes: 134_217_728,
+                complete: true,
                 source: "filesystem",
               },
             ],
@@ -791,6 +794,7 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
               {
                 path: "~/Library/Application Support/Example",
                 totalBytes: 268_435_456,
+                complete: true,
                 source: "filesystem",
               },
             ],

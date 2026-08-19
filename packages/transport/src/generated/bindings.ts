@@ -208,7 +208,14 @@ export type FootprintPath = { path: string,
 /**
  * `null` when the size is not known. See [`FootprintSource`].
  */
-totalBytes: number | null, source: FootprintSource, };
+totalBytes: number | null, 
+/**
+ * False when part of this path could not be read — a locked subdirectory,
+ * or an entry a scan recorded as unreadable or excluded. `total_bytes` is
+ * then a lower bound rather than a wrong number, and the window says "at
+ * least" rather than dropping it.
+ */
+complete: boolean, source: FootprintSource, };
 
 /**
  * Where a size came from, carried beside the number rather than implied by it.
@@ -410,8 +417,8 @@ export type StorageComponent = { label: string,
  */
 totalBytes: number, 
 /**
- * False when a path under this component could not be sized, which makes
- * the total a lower bound.
+ * False when a path here could not be sized, or was only read in part.
+ * The total is then a lower bound.
  */
 complete: boolean, 
 /**

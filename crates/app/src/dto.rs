@@ -935,6 +935,11 @@ pub struct FootprintPath {
     /// `null` when the size is not known. See [`FootprintSource`].
     #[ts(type = "number | null")]
     pub total_bytes: Option<u64>,
+    /// False when part of this path could not be read — a locked subdirectory,
+    /// or an entry a scan recorded as unreadable or excluded. `total_bytes` is
+    /// then a lower bound rather than a wrong number, and the window says "at
+    /// least" rather than dropping it.
+    pub complete: bool,
     pub source: FootprintSource,
 }
 
@@ -955,8 +960,8 @@ pub struct StorageComponent {
     /// The sum of the paths whose size is known.
     #[ts(type = "number")]
     pub total_bytes: u64,
-    /// False when a path under this component could not be sized, which makes
-    /// the total a lower bound.
+    /// False when a path here could not be sized, or was only read in part.
+    /// The total is then a lower bound.
     pub complete: bool,
     /// True when every path here carries the application's bundle identifier.
     ///
