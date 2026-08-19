@@ -53,7 +53,9 @@ export function AppShell({
 
             44px tall, not 56, and the frame's buttons are positioned to match
             rather than the other way round. `trafficLightPosition` in
-            `tauri.conf.json` sets their centre to this row's; shrinking the
+            `tauri.conf.json` sets them level with the text beside them —
+            measured against a screenshot, because the offset macOS applies is
+            not a number this window can read back. Shrinking the
             header to chase wherever macOS put them was solving it with the one
             number this window does not own. That config is read when the window
             is created, so a running dev server has to be restarted before a
@@ -67,11 +69,11 @@ export function AppShell({
         >
           <div className="flex min-w-0 items-center">
             {back ? (
-              // No negative margin: the inset ends exactly where the frame's
-              // last button ends, so pulling the glyph back onto it leaves the
-              // chevron touching the zoom button. The button's own padding is
-              // the gap.
-              <Button variant="ghost" size="sm" onClick={back.onBack}>
+              // `ml-2` rather than nothing: the inset ends exactly where the
+              // frame's last button ends, so a control starting at it has its
+              // hover fill running up against the zoom button. The gap is for
+              // the fill, not the glyph.
+              <Button variant="ghost" size="sm" className="ml-2" onClick={back.onBack}>
                 <ChevronLeft /> {back.label}
               </Button>
             ) : null}

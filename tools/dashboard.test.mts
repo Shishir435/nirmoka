@@ -144,10 +144,16 @@ test("a scan larger than the volume reports drops the volume frame", () => {
   );
 });
 
-test("a scan that exactly fills the volume keeps it as the frame", () => {
+test("a scan that exactly fills the volume is framed the same as any other", () => {
+  // This asserted `barTotal === 1000` while the bar was framed against
+  // capacity. ADR 0031 frames it against the scan instead, so the two now
+  // coincide by arithmetic rather than by the bar changing what it measures —
+  // and `barVolume` survives because the caption still compares the two.
   const exact = { ...breakdown({ volume: true }), scannedBytes: 400 };
+
   assert.notEqual(barVolume(exact), null);
-  assert.equal(barTotal(exact), 1000);
+  assert.equal(barTotal(exact), 400);
+  assert.equal(unscannedBytes(exact), 0, "nothing was left unlooked at");
 });
 
 test("every category keeps a slice, including the empty ones", () => {
