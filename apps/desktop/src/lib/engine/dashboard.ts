@@ -3,6 +3,7 @@ import type {
   CategoryConsumer,
   StorageCategory,
   VolumeInfo,
+  CleanupProgress,
 } from "@nirmoka/transport";
 
 /**
@@ -185,4 +186,52 @@ function byLargest(left: RankedConsumer, right: RankedConsumer): number {
     right.consumer.totalBytes - left.consumer.totalBytes ||
     left.consumer.path.localeCompare(right.consumer.path)
   );
+}
+
+/**
+ * What a running cleanup preview has said so far.
+ *
+ * Mole narrates for two and a half minutes, several lines a second. Only the
+ * shape of it is worth keeping: which group it is on, how many it has finished,
+ * and the line it is on right now.
+ */
+export interface Narration {
+  /** The heading the backend is working through. */
+  category: string | null;
+  /** The line it is on, as it wrote it. */
+  item: string | null;
+  /** Headings seen. Not a percentage: the total is unknown until it ends. */
+  categoriesSeen: number;
+  /** What the last *finished* category came to, in the backend's own text. */
+  lastTotal: string | null;
+}
+
+export const EMPTY_NARRATION: Narration = {
+  category: null,
+  item: null,
+  categoriesSeen: 0,
+  lastTotal: null,
+};
+
+/**
+ * Fold one reported line into what is on screen.
+ *
+ * A new heading clears the item and the previous total, because both belonged
+ * to the group that just ended — carrying them over would attribute one
+ * category's figure to the next one.
+ */
+export function absorb(current: Narration, progress: CleanupProgress): Narration {
+  switch (progress.kind) {
+    case "category":
+      return {
+        category: progress.text,
+        item: null,
+        categoriesSeen: current.categoriesSeen + 1,
+        lastTotal: null,
+      };
+    case "item":
+      return { ...current, item: progress.text };
+    case "categoryTotal":
+      return { ...current, lastTotal: progress.text };
+  }
 }

@@ -37,7 +37,7 @@ use directories::BaseDirs;
 use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::{
     Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupCompletion,
-    CleanupExecution, CleanupItem, CleanupPreview, CleanupSystemScope, Detection,
+    CleanupExecution, CleanupItem, CleanupPreview, CleanupProgress, CleanupSystemScope, Detection,
     InstalledApplication, ScanOptions, ScanSummary, SystemStatus, UninstallApp,
     UninstallCompletion, UninstallExecution, UninstallItem, UninstallItemScope, UninstallPreview,
     WireSink,
@@ -185,7 +185,11 @@ impl Adapter for MoleAdapter {
         applications_from(&binary, cancel)
     }
 
-    fn cleanup_preview(&self, cancel: &CancelToken) -> Result<CleanupPreview, AdapterError> {
+    fn cleanup_preview(
+        &self,
+        cancel: &CancelToken,
+        on_progress: &mut dyn FnMut(CleanupProgress),
+    ) -> Result<CleanupPreview, AdapterError> {
         let (binary, version) = supported_binary(self.detect()?)?;
         let home = BaseDirs::new()
             .ok_or_else(|| AdapterError::OperationFailed {
@@ -200,6 +204,7 @@ impl Adapter for MoleAdapter {
             &home.join(".config").join("mole").join("clean-list.txt"),
             &version,
             cancel,
+            on_progress,
         )
     }
 
@@ -290,13 +295,46 @@ fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, Adap
     json_from_command(binary, &["status", "--json"], "system status", cancel)
 }
 
+/// Which of Mole's narration lines is worth showing, and as what.
+///
+/// The shapes, from `mo clean --dry-run` 1.48.1:
+///
+/// ```text
+/// ➤ User essentials
+///   → User app cache · 81 items, 14.33GB dry
+///   ✓ Trash · already empty
+///   ↳ Category total · 15.08GB
+/// ```
+///
+/// `↳` also prefixes the protected paths listed before the run starts, so the
+/// total is matched on its label rather than on its marker.
+fn classify_progress(line: &str) -> Option<CleanupProgress<'_>> {
+    let trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("➤ ") {
+        let name = rest.trim();
+        return (!name.is_empty()).then_some(CleanupProgress::Category(name));
+    }
+    if let Some(rest) = trimmed.strip_prefix("↳ Category total · ") {
+        let total = rest.trim();
+        return (!total.is_empty()).then_some(CleanupProgress::CategoryTotal(total));
+    }
+    for marker in ["→ ", "✓ "] {
+        if let Some(rest) = trimmed.strip_prefix(marker) {
+            let item = rest.trim();
+            return (!item.is_empty()).then_some(CleanupProgress::Item(item));
+        }
+    }
+    None
+}
+
 fn cleanup_preview_from(
     binary: &Path,
     preview_path: &Path,
     backend_version: &str,
     cancel: &CancelToken,
+    on_progress: &mut dyn FnMut(CleanupProgress),
 ) -> Result<CleanupPreview, AdapterError> {
-    use std::io::Read;
+    use std::io::{BufRead, BufReader};
 
     let operation = "cleanup preview";
     let mut command = process::command(binary);
@@ -307,6 +345,10 @@ fn cleanup_preview_from(
             binary: BINARY,
             source,
         })?;
+    // Read a line at a time rather than to the end. The whole output is still
+    // wanted — the parser below works on it — but a dry run takes minutes, and
+    // waiting for the last byte before saying anything is what made the window
+    // look hung. Each line is reported as it arrives and then kept.
     let mut stdout = String::new();
     let read_result = process
         .take_stdout()
@@ -315,14 +357,21 @@ fn cleanup_preview_from(
             operation,
             reason: "backend stdout was unavailable".to_string(),
         })
-        .and_then(|mut reader| {
-            reader
-                .read_to_string(&mut stdout)
-                .map_err(|source| AdapterError::OperationFailed {
+        .and_then(|reader| {
+            for line in BufReader::new(reader).lines() {
+                let line = line.map_err(|source| AdapterError::OperationFailed {
                     backend: "mole",
                     operation,
                     reason: source.to_string(),
-                })
+                })?;
+                let plain = strip_ansi(&line);
+                if let Some(progress) = classify_progress(&plain) {
+                    on_progress(progress);
+                }
+                stdout.push_str(&line);
+                stdout.push('\n');
+            }
+            Ok(())
         });
     let outcome = process.finish().map_err(|source| AdapterError::Spawn {
         binary: BINARY,
@@ -2491,8 +2540,17 @@ printf '%s' 'System caches need sudo'
         let preview_path = script.with_extension("preview");
         std::fs::write(&preview_path, CLEAN_PREVIEW).unwrap();
 
-        let preview = cleanup_preview_from(&script, &preview_path, "1.48.1", &CancelToken::new())
-            .expect("cleanup preview");
+        // The narration is collected here so the test asserts it as well as the
+        // preview: a stream nobody reads is a stream nobody notices breaking.
+        let mut narrated: Vec<String> = Vec::new();
+        let preview = cleanup_preview_from(
+            &script,
+            &preview_path,
+            "1.48.1",
+            &CancelToken::new(),
+            &mut |progress| narrated.push(format!("{progress:?}")),
+        )
+        .expect("cleanup preview");
         let _ = std::fs::remove_file(script);
         let _ = std::fs::remove_file(preview_path);
 
@@ -2673,7 +2731,13 @@ exit 3
         let worker_script = script.clone();
         let worker_preview = preview_path.clone();
         let worker = thread::spawn(move || {
-            cleanup_preview_from(&worker_script, &worker_preview, "1.48.1", &worker_cancel)
+            cleanup_preview_from(
+                &worker_script,
+                &worker_preview,
+                "1.48.1",
+                &worker_cancel,
+                &mut |_| {},
+            )
         });
         thread::sleep(Duration::from_millis(100));
         cancel.cancel();

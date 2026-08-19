@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EMPTY_NARRATION,
+  absorb,
   applyFootprint,
   applyIcon,
   barTotal,
@@ -36,6 +38,8 @@ const consumer = (
   isDir: extra.isDir ?? true,
   parentId: extra.parentId ?? null,
 });
+
+const line = (kind: "category" | "item" | "categoryTotal", text: string) => ({ kind, text });
 
 const ranked = (c: ReturnType<typeof consumer>) => ({
   consumer: c,
@@ -286,4 +290,43 @@ test("nothing to show is an empty list, not a crash", () => {
   const bare = { ...breakdown(), categories: [] };
   assert.deepEqual(rankConsumers(bare), []);
   assert.deepEqual(usageSlices(bare, display), []);
+});
+
+test("narration keeps the shape of a two-minute dry run, not its whole text", () => {
+  let n = EMPTY_NARRATION;
+  assert.deepEqual(n, { category: null, item: null, categoriesSeen: 0, lastTotal: null });
+
+  n = absorb(n, line("category", "User essentials"));
+  assert.equal(n.category, "User essentials");
+  assert.equal(n.categoriesSeen, 1);
+
+  n = absorb(n, line("item", "User app cache · 81 items, 14.33GB dry"));
+  assert.equal(n.item, "User app cache · 81 items, 14.33GB dry");
+
+  n = absorb(n, line("item", "Trash · already empty"));
+  assert.equal(n.item, "Trash · already empty", "the latest line wins");
+
+  n = absorb(n, line("categoryTotal", "15.08GB"));
+  assert.equal(n.lastTotal, "15.08GB");
+});
+
+test("a new heading drops what belonged to the one that ended", () => {
+  // Carrying the total over would report one category's figure against the
+  // next, and carrying the item over would show a line from the wrong group.
+  const after = absorb(
+    {
+      category: "User essentials",
+      item: "Trash · already empty",
+      categoriesSeen: 1,
+      lastTotal: "15.08GB",
+    },
+    { kind: "category", text: "App caches" },
+  );
+
+  assert.deepEqual(after, {
+    category: "App caches",
+    item: null,
+    categoriesSeen: 2,
+    lastTotal: null,
+  });
 });

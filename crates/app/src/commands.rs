@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
@@ -92,10 +92,21 @@ pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
     Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
 }
 
+/// Narration from a running cleanup preview.
+///
+/// Named like the scan events in `scan.rs`, because it is the same idea: work
+/// that outlives a single reply, reporting as it goes.
+pub const EVENT_CLEANUP_PROGRESS: &str = "cleanup://progress";
+
 /// One fresh backend-owned cleanup discovery. This never removes anything.
+///
+/// `on_progress` receives the backend's narration as it arrives. The dry run
+/// takes minutes, so what it says while it works is the difference between a
+/// window that is busy and a window that looks broken.
 pub fn cleanup_preview_of(
     state: &AppState,
     cancel: &CancelToken,
+    on_progress: &mut dyn FnMut(dto::CleanupProgress),
 ) -> Result<dto::CleanupPreview, String> {
     let choice = state
         .resolve(Ability::CleanupPreview)
@@ -104,7 +115,9 @@ pub fn cleanup_preview_of(
     let instead_of = choice.instead_of;
     let preview = choice
         .adapter
-        .cleanup_preview(cancel)
+        .cleanup_preview(cancel, &mut |progress| {
+            on_progress(dto::CleanupProgress::from_adapter(progress))
+        })
         .map_err(|error| error.to_string())?;
 
     state
@@ -1133,8 +1146,17 @@ pub async fn cleanup_preview(
 ) -> Result<dto::CleanupPreview, String> {
     let (preview_id, cancel) = state.cleanup().start_preview()?;
     let worker_app = app.clone();
+    let emitter = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        cleanup_preview_of(worker_app.state::<AppState>().inner(), &cancel)
+        cleanup_preview_of(
+            worker_app.state::<AppState>().inner(),
+            &cancel,
+            // A failed emit means the window is gone, which the preview will
+            // notice when it tries to return. Same treatment as scan progress.
+            &mut |progress| {
+                let _ = emitter.emit(EVENT_CLEANUP_PROGRESS, progress);
+            },
+        )
     })
     .await;
 

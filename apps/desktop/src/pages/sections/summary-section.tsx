@@ -21,6 +21,9 @@ import {
   openTarget,
   rankConsumers,
   usageSlices,
+  EMPTY_NARRATION,
+  absorb,
+  type Narration,
   type RankedConsumer,
 } from "@/lib/engine/dashboard";
 import { useApp } from "@/lib/app-context";
@@ -316,6 +319,7 @@ function ReclaimableBanner() {
     { kind: "idle" } | { kind: "checking" } | { kind: "known"; total: string } | { kind: "none" }
   >({ kind: "idle" });
   const [elapsed, setElapsed] = useState(0);
+  const [narration, setNarration] = useState<Narration>(EMPTY_NARRATION);
 
   // Measured at 2m26s against Mole 1.48.1 on a full disk. A spinner with no
   // clock reads as a hang at that length, and the button that would stop it has
@@ -327,19 +331,28 @@ function ReclaimableBanner() {
     return () => clearInterval(tick);
   }, [state.kind]);
 
-  const check = () => {
+  // Subscribed before the preview is asked for: registering is a round trip
+  // into Rust, and a run that started first would narrate into nothing.
+  const check = async () => {
+    setNarration(EMPTY_NARRATION);
     setState({ kind: "checking" });
-    transport.cleanupPreview().then(
-      (preview) =>
-        setState(
-          preview.potentialCleanup
-            ? { kind: "known", total: preview.potentialCleanup }
-            : { kind: "none" },
-        ),
+    const unsubscribe = await transport.onCleanupProgress((progress) =>
+      setNarration((current) => absorb(current, progress)),
+    );
+    try {
+      const preview = await transport.cleanupPreview();
+      setState(
+        preview.potentialCleanup
+          ? { kind: "known", total: preview.potentialCleanup }
+          : { kind: "none" },
+      );
+    } catch {
       // Includes the cancellation below: a stopped run has no figure, and the
       // banner goes back to offering one rather than reporting a failure.
-      () => setState({ kind: "idle" }),
-    );
+      setState({ kind: "idle" });
+    } finally {
+      unsubscribe();
+    }
   };
 
   const stop = () => {
@@ -350,56 +363,71 @@ function ReclaimableBanner() {
   if (state.kind === "none") return null;
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-success/20 bg-success/10 px-4 py-3.5">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-success shadow-xs">
-        <Sparkles className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        {state.kind === "known" ? (
-          <>
-            <p className="text-sm font-medium">{state.total} can be reclaimed</p>
-            <p className="text-xs text-muted-foreground">
-              Mole&apos;s own figure, from its dry run. Review it before anything is removed.
-            </p>
-          </>
-        ) : state.kind === "checking" ? (
-          <>
-            <p className="text-sm font-medium">
-              Checking what can be reclaimed · {formatElapsed(elapsed)}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Mole is walking the disk, which takes a few minutes. Nothing is being removed.
-            </p>
-          </>
+    <div className="rounded-xl border border-success/20 bg-success/10 px-4 py-3.5">
+      <div className="flex items-center gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-success shadow-xs">
+          <Sparkles className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          {state.kind === "known" ? (
+            <>
+              <p className="text-sm font-medium">{state.total} can be reclaimed</p>
+              <p className="text-xs text-muted-foreground">
+                Mole&apos;s own figure, from its dry run. Review it before anything is removed.
+              </p>
+            </>
+          ) : state.kind === "checking" ? (
+            <>
+              <p className="text-sm font-medium">
+                Checking what can be reclaimed · {formatElapsed(elapsed)}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {narration.category
+                  ? `${narration.category} · group ${narration.categoriesSeen}${
+                      narration.lastTotal ? ` · came to ${narration.lastTotal}` : ""
+                    }`
+                  : "Mole is walking the disk. Nothing is being removed."}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Check what can be reclaimed</p>
+              <p className="text-xs text-muted-foreground">
+                Runs Mole&apos;s dry run, which takes a few minutes. Nothing is removed, and the
+                figure is Mole&apos;s rather than an estimate of ours.
+              </p>
+            </>
+          )}
+        </div>
+        {state.kind === "checking" ? (
+          <Button variant="outline" size="sm" onClick={stop}>
+            <Square /> Stop
+          </Button>
         ) : (
-          <>
-            <p className="text-sm font-medium">Check what can be reclaimed</p>
-            <p className="text-xs text-muted-foreground">
-              Runs Mole&apos;s dry run, which takes a few minutes. Nothing is removed, and the
-              figure is Mole&apos;s rather than an estimate of ours.
-            </p>
-          </>
+          <Button
+            variant={state.kind === "known" ? "default" : "outline"}
+            size="sm"
+            onClick={
+              state.kind === "known"
+                ? () => {
+                    window.location.hash = "/clean";
+                  }
+                : () => void check()
+            }
+          >
+            {state.kind === "known" ? "Review" : "Check"}
+          </Button>
         )}
       </div>
-      {state.kind === "checking" ? (
-        <Button variant="outline" size="sm" onClick={stop}>
-          <Square /> Stop
-        </Button>
-      ) : (
-        <Button
-          variant={state.kind === "known" ? "default" : "outline"}
-          size="sm"
-          onClick={
-            state.kind === "known"
-              ? () => {
-                  window.location.hash = "/clean";
-                }
-              : check
-          }
-        >
-          {state.kind === "known" ? "Review" : "Check"}
-        </Button>
-      )}
+
+      {/* The line the backend is on. Fixed height and truncated: Mole reports
+          several a second and names of wildly different lengths, and letting one
+          wrap would move every pixel below it. */}
+      {state.kind === "checking" && narration.item ? (
+        <p className="mt-2.5 h-4 truncate pl-12 font-mono text-[11px] text-muted-foreground">
+          {narration.item}
+        </p>
+      ) : null}
     </div>
   );
 }

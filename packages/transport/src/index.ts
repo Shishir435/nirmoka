@@ -21,6 +21,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppFootprint,
   Backend,
+  CleanupProgress,
   CategoryBreakdown,
   BackendSelection,
   ApplicationInventory,
@@ -60,6 +61,7 @@ const EVENT = {
   progress: "scan://progress",
   finished: "scan://finished",
   failed: "scan://failed",
+  cleanupProgress: "cleanup://progress",
 } as const;
 
 /**
@@ -318,6 +320,15 @@ export interface Transport {
    * disabled until then.
    */
   onScanProgress(handler: (progress: ScanProgress) => void): Promise<Unsubscribe>;
+
+  /**
+   * What a running cleanup preview is doing, in the backend's own words.
+   *
+   * Mole's dry run takes minutes — measured at 2m26s on a full disk — so it
+   * narrates as it walks. Subscribing before calling `cleanupPreview` is what
+   * turns that wait into something a person can watch.
+   */
+  onCleanupProgress(handler: (progress: CleanupProgress) => void): Promise<Unsubscribe>;
   onScanFinished(handler: (summary: ScanSummary) => void): Promise<Unsubscribe>;
   onScanFailed(handler: (failure: ScanFailure) => void): Promise<Unsubscribe>;
 }
@@ -389,6 +400,7 @@ export function tauriTransport(): Transport {
     applicationIconAt: (path) => invoke<string | null>("application_icon_at", { path }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
+    onCleanupProgress: (handler) => subscribe(EVENT.cleanupProgress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
     onScanFailed: (handler) => subscribe(EVENT.failed, handler),
   };
@@ -1124,6 +1136,11 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     },
 
     async onScanProgress() {
+      return () => {};
+    },
+
+    // The mock's preview returns at once, so there is nothing to narrate.
+    async onCleanupProgress() {
       return () => {};
     },
 
