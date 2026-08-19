@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  CircleDashed,
   Code2,
   FileText,
   MoreHorizontal,
@@ -62,14 +63,16 @@ export const CATEGORY_DISPLAY: Record<StorageCategory, CategoryDisplay> = {
   },
 };
 
-/** Free space is not a category — nothing is using it — but it shares the bar. */
-export const FREE_SPACE_COLOR = "var(--muted)";
-
 /**
- * Space in use that this scan did not look at.
+ * Free space, which is not a category — nothing is using it.
  *
- * Visibly darker than free space on purpose: these bytes are occupied, and a
- * slice that read as free would overstate the room available by however much
- * of the disk went unscanned.
+ * It has no slice in the bar, because the bar divides what was scanned. It has
+ * a card, because "how much room is left" is the question the window is opened
+ * with and the design puts it in the grid beside the five.
  */
-export const UNSCANNED_COLOR = "var(--muted-foreground)";
+export const FREE_SPACE_DISPLAY: CategoryDisplay = {
+  label: "Free Space",
+  hint: "Room left on this volume",
+  icon: CircleDashed,
+  color: "var(--chart-5)",
+};

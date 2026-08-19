@@ -4,6 +4,27 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// What a cleanup preview reports while it is still running.
+///
+/// A dry run walks the disk and takes minutes, and the backend narrates that
+/// walk. These are the parts of the narration worth showing: enough for a
+/// window to say what is happening now, in the backend's own words, without
+/// inventing a percentage nobody can compute.
+///
+/// Deliberately borrowed rather than owned. The adapter reads a line, hands it
+/// over, and moves on; nothing here is retained, and a caller that wants to
+/// keep a value copies it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupProgress<'a> {
+    /// A new heading: the group of things the backend has started on.
+    Category(&'a str),
+    /// One entry within the current category, as the backend described it.
+    Item(&'a str),
+    /// What the category just finished came to. The backend's own text — see
+    /// ADR 0030, and `CleanupItem::reported_size` for why it stays text.
+    CategoryTotal(&'a str),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanupPreview {
     /// Exact backend version that produced this review. Execution must reject

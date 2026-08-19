@@ -1,7 +1,11 @@
 # ADR 0026: The window has three destinations
 
-- Status: accepted
+- Status: superseded in part by [ADR 0031](0031-the-window-has-one-destination.md)
 - Date: 2026-08-06
+
+> ADR 0031 removes the sidebar this ADR introduced: the dashboard becomes the only destination, and
+> Clean and Activity are reached from what they act on. Everything below about _why_ five tabs were
+> filters rather than places still holds, and is why there was one destination left to find.
 
 ## Context
 

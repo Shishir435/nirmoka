@@ -203,6 +203,52 @@ pub struct CleanupPreview {
     pub warnings: Vec<String>,
 }
 
+/// What a cleanup preview is doing, while it does it.
+///
+/// The backend's own words, carried through unchanged — see ADR 0030. `kind`
+/// says which of its three kinds of line this was, so the window can lay them
+/// out without parsing text a backend is free to reword.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CleanupProgress {
+    pub kind: CleanupProgressKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum CleanupProgressKind {
+    /// A heading: the group the backend has started on.
+    Category,
+    /// One entry inside the current category.
+    Item,
+    /// What the category just finished came to, as the backend reported it.
+    CategoryTotal,
+}
+
+impl CleanupProgress {
+    pub fn from_adapter(progress: nirmoka_adapter::CleanupProgress<'_>) -> Self {
+        use nirmoka_adapter::CleanupProgress as Source;
+        let (kind, text) = match progress {
+            Source::Category(text) => (CleanupProgressKind::Category, text),
+            Source::Item(text) => (CleanupProgressKind::Item, text),
+            Source::CategoryTotal(text) => (CleanupProgressKind::CategoryTotal, text),
+        };
+        Self {
+            kind,
+            text: text.to_string(),
+        }
+    }
+}
+
 /// Latest Rust-held cleanup review, bound to a short-lived one-time token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

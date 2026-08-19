@@ -216,6 +216,17 @@ export type CleanupPreparation = { confirmationToken: number, backend: string, b
  */
 export type CleanupPreview = { backend: string, backendInsteadOf: string | null, backendVersion: string, generatedAt: string, categories: Array<CleanupCategory>, potentialCleanup: string | null, totalItems: number, systemScope: CleanupSystemScope, warnings: Array<string>, };
 
+/**
+ * What a cleanup preview is doing, while it does it.
+ *
+ * The backend's own words, carried through unchanged — see ADR 0030. `kind`
+ * says which of its three kinds of line this was, so the window can lay them
+ * out without parsing text a backend is free to reword.
+ */
+export type CleanupProgress = { kind: CleanupProgressKind, text: string, };
+
+export type CleanupProgressKind = "category" | "item" | "categoryTotal";
+
 export type CleanupSystemScope = "included" | "userOnly" | "unknown";
 
 export type CpuStatus = { usage: number, load1: number, load5: number, load15: number, coreCount: number, logicalCpu: number, };

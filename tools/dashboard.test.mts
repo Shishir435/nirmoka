@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EMPTY_NARRATION,
+  absorb,
   applyFootprint,
   applyIcon,
   barTotal,
@@ -9,6 +11,7 @@ import {
   isBundle,
   openTarget,
   rankConsumers,
+  unscannedBytes,
   usageSlices,
 } from "../apps/desktop/src/lib/engine/dashboard.ts";
 
@@ -35,6 +38,8 @@ const consumer = (
   isDir: extra.isDir ?? true,
   parentId: extra.parentId ?? null,
 });
+
+const line = (kind: "category" | "item" | "categoryTotal", text: string) => ({ kind, text });
 
 const ranked = (c: ReturnType<typeof consumer>) => ({
   consumer: c,
@@ -74,61 +79,46 @@ const breakdown = (options: { volume?: boolean } = {}) => ({
   ],
 });
 
-test("free space joins the bar so it describes the volume, not the scan", () => {
-  const slices = usageSlices(
-    breakdown({ volume: true }),
-    display,
-    "free-colour",
-    "unscanned-colour",
+test("the bar divides the scan, so a subtree scan stays legible", () => {
+  // 400 in use on a 1000 volume, 300 of it scanned. Framed against capacity the
+  // five categories shared 30% of the bar and the rest was grey; framed against
+  // the scan they fill it, which is what makes the chart worth drawing.
+  const slices = usageSlices(breakdown({ volume: true }), display);
+
+  assert.deepEqual(
+    slices.map((slice) => slice.key),
+    ["apps", "personalFiles", "development", "system", "other"],
   );
-
-  assert.deepEqual(slices.at(-1), { key: "free", label: "Free", bytes: 600, color: "free-colour" });
-  assert.equal(barTotal(breakdown({ volume: true })), 1000);
-});
-
-test("space in use that was not scanned is its own slice, not bare track", () => {
-  // 400 in use, 300 of it scanned. The missing 100 is occupied, and leaving it
-  // as track would draw it in the same colour as free space.
-  const slices = usageSlices(
-    breakdown({ volume: true }),
-    display,
-    "free-colour",
-    "unscanned-colour",
-  );
-  const unscanned = slices.find((slice) => slice.key === "unscanned");
-
-  assert.deepEqual(unscanned, {
-    key: "unscanned",
-    label: "Not scanned",
-    bytes: 100,
-    color: "unscanned-colour",
-  });
-  // Nothing shows through: the slices are exactly the volume.
+  assert.equal(barTotal(breakdown({ volume: true })), 300);
   assert.equal(
     slices.reduce((sum, slice) => sum + slice.bytes, 0),
     barTotal(breakdown({ volume: true })),
+    "the slices are exactly the bar",
   );
 });
 
-test("a scan covering the whole volume has no unscanned slice", () => {
-  const whole = {
-    ...breakdown({ volume: true }),
-    scannedBytes: 400,
-  };
-
-  assert.ok(
-    !usageSlices(whole, display, "free-colour", "unscanned-colour").some(
-      (s) => s.key === "unscanned",
-    ),
-  );
+test("capacity is stated rather than drawn", () => {
+  // The 100 in use that the scan did not reach is a sentence, not a slice.
+  assert.equal(unscannedBytes(breakdown({ volume: true })), 100);
+  assert.equal(unscannedBytes({ ...breakdown({ volume: true }), scannedBytes: 400 }), 0);
+  // No capacity, nothing to subtract from.
+  assert.equal(unscannedBytes(breakdown()), 0);
 });
 
-test("without capacity the bar is the scan alone", () => {
-  const slices = usageSlices(breakdown(), display, "free-colour", "unscanned-colour");
+test("a scan that crossed onto another filesystem states nothing", () => {
+  // Scanned more than this volume holds in use, so the remainder would be
+  // negative and the two numbers are not about the same disk.
+  const crossed = { ...breakdown({ volume: true }), scannedBytes: 900 };
+
+  assert.equal(unscannedBytes(crossed), 0);
+  // The bar still divides the scan, so it is unaffected.
+  assert.equal(barTotal(crossed), 900);
+});
+
+test("without capacity the bar is unchanged, because it never used it", () => {
+  const slices = usageSlices(breakdown(), display);
 
   assert.equal(slices.length, 5);
-  assert.ok(!slices.some((slice) => slice.key === "free"));
-  // The widths then divide the scan, so they still fill the bar.
   assert.equal(barTotal(breakdown()), 300);
 });
 
@@ -154,14 +144,20 @@ test("a scan larger than the volume reports drops the volume frame", () => {
   );
 });
 
-test("a scan that exactly fills the volume keeps it as the frame", () => {
+test("a scan that exactly fills the volume is framed the same as any other", () => {
+  // This asserted `barTotal === 1000` while the bar was framed against
+  // capacity. ADR 0031 frames it against the scan instead, so the two now
+  // coincide by arithmetic rather than by the bar changing what it measures —
+  // and `barVolume` survives because the caption still compares the two.
   const exact = { ...breakdown({ volume: true }), scannedBytes: 400 };
+
   assert.notEqual(barVolume(exact), null);
-  assert.equal(barTotal(exact), 1000);
+  assert.equal(barTotal(exact), 400);
+  assert.equal(unscannedBytes(exact), 0, "nothing was left unlooked at");
 });
 
 test("every category keeps a slice, including the empty ones", () => {
-  const slices = usageSlices(breakdown(), display, "free-colour", "unscanned-colour");
+  const slices = usageSlices(breakdown(), display);
 
   assert.deepEqual(
     slices.map((slice) => slice.key),
@@ -299,5 +295,44 @@ test("nothing to show is an empty list, not a crash", () => {
 
   const bare = { ...breakdown(), categories: [] };
   assert.deepEqual(rankConsumers(bare), []);
-  assert.deepEqual(usageSlices(bare, display, "free-colour", "unscanned-colour"), []);
+  assert.deepEqual(usageSlices(bare, display), []);
+});
+
+test("narration keeps the shape of a two-minute dry run, not its whole text", () => {
+  let n = EMPTY_NARRATION;
+  assert.deepEqual(n, { category: null, item: null, categoriesSeen: 0, lastTotal: null });
+
+  n = absorb(n, line("category", "User essentials"));
+  assert.equal(n.category, "User essentials");
+  assert.equal(n.categoriesSeen, 1);
+
+  n = absorb(n, line("item", "User app cache · 81 items, 14.33GB dry"));
+  assert.equal(n.item, "User app cache · 81 items, 14.33GB dry");
+
+  n = absorb(n, line("item", "Trash · already empty"));
+  assert.equal(n.item, "Trash · already empty", "the latest line wins");
+
+  n = absorb(n, line("categoryTotal", "15.08GB"));
+  assert.equal(n.lastTotal, "15.08GB");
+});
+
+test("a new heading drops what belonged to the one that ended", () => {
+  // Carrying the total over would report one category's figure against the
+  // next, and carrying the item over would show a line from the wrong group.
+  const after = absorb(
+    {
+      category: "User essentials",
+      item: "Trash · already empty",
+      categoriesSeen: 1,
+      lastTotal: "15.08GB",
+    },
+    { kind: "category", text: "App caches" },
+  );
+
+  assert.deepEqual(after, {
+    category: "App caches",
+    item: null,
+    categoriesSeen: 2,
+    lastTotal: null,
+  });
 });

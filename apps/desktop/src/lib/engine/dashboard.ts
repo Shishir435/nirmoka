@@ -3,6 +3,7 @@ import type {
   CategoryConsumer,
   StorageCategory,
   VolumeInfo,
+  CleanupProgress,
 } from "@nirmoka/transport";
 
 /**
@@ -37,19 +38,18 @@ export function isBundle(consumer: CategoryConsumer): boolean {
 /**
  * The volume the bar is drawn against, or `null` to draw the scan alone.
  *
- * The window scans one filesystem — `crates/app/src/scan.rs` asks for that
- * precisely so this arithmetic holds — so the scanned bytes are this volume's
- * bytes and the difference from its used bytes is what was never looked at.
+ * A scan is not guaranteed to live on one filesystem. Scanning `/` walks into
+ * `/Volumes`, and a mounted disk or network share under home does the same, so
+ * the scanned bytes can exceed everything this filesystem holds. Framing that
+ * scan against this volume's capacity would draw category slices, free space,
+ * and a clamped-to-zero unscanned slice that together add up to more than the
+ * bar: the widths stop being shares of anything, and the last slices are
+ * clipped off the end.
  *
- * This is the check for the case where they still disagree: a snapshot counted
- * by the walk but not by `df`, a backend reporting apparent sizes, a volume read
- * before a scan that outgrew it. Then the categories, the free space, and a
- * clamped-to-zero unscanned slice add up to more than the bar — the widths stop
- * being shares of anything and the last slices are clipped off the end.
- *
- * Where the two numbers cannot both be true, the volume is not the frame. The
- * bar falls back to the scan, which is still a true statement about what was
- * measured — see the "degrade, don't lie" rule.
+ * Where the two numbers cannot both be true, they are not compared at all. The
+ * bar divides the scan regardless — see [`usageSlices`] — so what this now
+ * guards is the caption and the free-space card, which would otherwise report a
+ * negative remainder as though part of the disk had gone missing.
  */
 export function barVolume(breakdown: CategoryBreakdown): VolumeInfo | null {
   const volume = breakdown.volume;
@@ -58,51 +58,52 @@ export function barVolume(breakdown: CategoryBreakdown): VolumeInfo | null {
 }
 
 /**
- * The slices of the volume bar, in the order they are drawn.
+ * The slices of the bar, in the order they are drawn.
  *
- * Free space is a slice because the bar is about the volume, not about the
- * scan: a chart of used space alone cannot answer "how much room is left".
- * Where capacity could not be read — or could not contain the scan, see
- * [`barVolume`] — there is no free slice and the bar is the scan alone, which
- * is still true about what was measured.
+ * The bar divides **what was scanned**, not the volume. Framing it against
+ * capacity was tried and is worse everywhere the two differ: a scan of
+ * `~/Downloads` on a 253 GiB disk drew every category as a hairline beside
+ * 233 GiB of grey, so the one chart on the screen said nothing about what the
+ * user had just asked for.
  *
- * A scan of one directory leaves a third quantity — space that is in use and
- * was not looked at. It gets its own slice rather than being left as bare
- * track, because bare track is the same colour as free space and the bar would
- * then show occupied disk as room to spare. The slices always add up to the
- * volume, so nothing shows through.
+ * Capacity is a real number and it is still shown — as Used and Free in the
+ * header, as its own card in the grid, and as a sentence naming how much of the
+ * disk this scan covered. It is simply not the scale, because the categories
+ * are not shares of it. On a whole-disk scan the two coincide, which is the
+ * case the design draws.
+ *
+ * This also retires the free and not-scanned slices. Both existed to make a
+ * volume-framed bar add up, and [`barVolume`]'s cross-filesystem guard exists
+ * for the same reason — it now guards the caption instead, which is the only
+ * place the two numbers still meet.
  */
 export function usageSlices(
   breakdown: CategoryBreakdown,
   display: Record<StorageCategory, { label: string; color: string }>,
-  freeColor: string,
-  unscannedColor: string,
 ): UsageSlice[] {
-  const categories = breakdown.categories.map((category) => ({
+  return breakdown.categories.map((category) => ({
     key: category.category as string,
     label: display[category.category].label,
     bytes: category.totalBytes,
     color: display[category.category].color,
   }));
-
-  const volume = barVolume(breakdown);
-  if (!volume) return categories;
-
-  // Non-negative by `barVolume`'s test, so the slices sum to the capacity.
-  const unscanned = volume.usedBytes - breakdown.scannedBytes;
-  return [
-    ...categories,
-    ...(unscanned > 0
-      ? [{ key: "unscanned", label: "Not scanned", bytes: unscanned, color: unscannedColor }]
-      : []),
-    { key: "free", label: "Free", bytes: volume.freeBytes, color: freeColor },
-  ];
 }
 
 /** What the bar's widths are a fraction of. */
 export function barTotal(breakdown: CategoryBreakdown): number {
+  return breakdown.scannedBytes;
+}
+
+/**
+ * How much of the volume's used space this scan did not look at.
+ *
+ * Zero where there is nothing to say: capacity unreadable, the whole disk
+ * scanned, or a scan that crossed onto another filesystem and so cannot be
+ * subtracted from this one — see [`barVolume`].
+ */
+export function unscannedBytes(breakdown: CategoryBreakdown): number {
   const volume = barVolume(breakdown);
-  return volume ? volume.totalBytes : breakdown.scannedBytes;
+  return volume ? volume.usedBytes - breakdown.scannedBytes : 0;
 }
 
 /**
@@ -185,4 +186,52 @@ function byLargest(left: RankedConsumer, right: RankedConsumer): number {
     right.consumer.totalBytes - left.consumer.totalBytes ||
     left.consumer.path.localeCompare(right.consumer.path)
   );
+}
+
+/**
+ * What a running cleanup preview has said so far.
+ *
+ * Mole narrates for two and a half minutes, several lines a second. Only the
+ * shape of it is worth keeping: which group it is on, how many it has finished,
+ * and the line it is on right now.
+ */
+export interface Narration {
+  /** The heading the backend is working through. */
+  category: string | null;
+  /** The line it is on, as it wrote it. */
+  item: string | null;
+  /** Headings seen. Not a percentage: the total is unknown until it ends. */
+  categoriesSeen: number;
+  /** What the last *finished* category came to, in the backend's own text. */
+  lastTotal: string | null;
+}
+
+export const EMPTY_NARRATION: Narration = {
+  category: null,
+  item: null,
+  categoriesSeen: 0,
+  lastTotal: null,
+};
+
+/**
+ * Fold one reported line into what is on screen.
+ *
+ * A new heading clears the item and the previous total, because both belonged
+ * to the group that just ended — carrying them over would attribute one
+ * category's figure to the next one.
+ */
+export function absorb(current: Narration, progress: CleanupProgress): Narration {
+  switch (progress.kind) {
+    case "category":
+      return {
+        category: progress.text,
+        item: null,
+        categoriesSeen: current.categoriesSeen + 1,
+        lastTotal: null,
+      };
+    case "item":
+      return { ...current, item: progress.text };
+    case "categoryTotal":
+      return { ...current, lastTotal: progress.text };
+  }
 }

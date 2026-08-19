@@ -31,7 +31,7 @@ pub use applications::InstalledApplication;
 pub use capabilities::Capabilities;
 pub use cleanup::{
     CleanupCategory, CleanupCompletion, CleanupExecution, CleanupItem, CleanupPreview,
-    CleanupSystemScope,
+    CleanupProgress, CleanupSystemScope,
 };
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
@@ -95,7 +95,18 @@ pub trait Adapter: Send + Sync {
     }
 
     /// Discover the backend's cleanup candidates without removing anything.
-    fn cleanup_preview(&self, _cancel: &CancelToken) -> Result<CleanupPreview, AdapterError> {
+    ///
+    /// `on_progress` is called as the backend reports its way through the work.
+    /// A dry run against a full disk takes minutes — measured at 2m26s for Mole
+    /// 1.48.1 — and a window that can only say "working" for that long is
+    /// indistinguishable from one that has hung. Implementors that have nothing
+    /// to report simply never call it; the preview is still the return value,
+    /// and nothing here is a substitute for it.
+    fn cleanup_preview(
+        &self,
+        _cancel: &CancelToken,
+        _on_progress: &mut dyn FnMut(CleanupProgress),
+    ) -> Result<CleanupPreview, AdapterError> {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "cleanup preview",

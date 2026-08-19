@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Sort } from "@nirmoka/transport";
 
-import { PageHeader } from "@/components/shared";
 import { StartScreen } from "@/components/start-screen";
 import { Button } from "@/components/ui/button";
 import { TreeView } from "@/components/tree-view";
@@ -39,8 +38,9 @@ export function StoragePage({
   view,
   onView,
 }: {
-  view: StorageView;
-  onView: (view: StorageView) => void;
+  /** `null` is the dashboard. A view is the browser beneath it — see ADR 0031. */
+  view: StorageView | null;
+  onView: (view: StorageView | null) => void;
 }) {
   const { transport, scan } = useApp();
   const [history, setHistory] = useState<SpaceHistory>(EMPTY_HISTORY);
@@ -59,24 +59,30 @@ export function StoragePage({
   };
 
   // Before a scan there is no tree to view, no summary to head, and no reason to
-  // ask Mole about system status. Rendering the tabs, the title, and a collapsed
-  // backend section over an empty state described a page that was not there —
-  // three view switches over three empty states. Capacity is the one thing that
-  // can be shown without a backend, so that is the whole screen.
+  // ask Mole about system status. Capacity is the one thing that can be shown
+  // without a backend, so that is the whole screen.
   if (!summary) return <StartScreen />;
+
+  // The dashboard is the destination. Everything it lists is a way into the
+  // tree it came from, and that tree is a screen of its own rather than a
+  // section stacked underneath — ADR 0031.
+  if (view === null) {
+    return (
+      <SummarySection
+        summary={summary}
+        onOpen={(nodeId) => {
+          open(nodeId);
+          onView("folders");
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Storage"
-        subtitle="Everything below comes from the scan in the bar above"
-      />
-
-      <SummarySection summary={summary} onOpen={open} />
-
       {/* The rule spans the content width; the row inside it is pulled left by
-          the buttons' own padding, so "Folders" starts under "Storage" rather
-          than a button's worth of padding inside it. */}
+          the buttons' own padding, so "Folders" starts under the content edge
+          rather than a button's worth of padding inside it. */}
       <div className="border-b pb-2">
         <div className="-ml-3 flex flex-wrap items-center gap-1" role="tablist">
           {STORAGE_VIEWS.map((candidate) => (
@@ -95,10 +101,7 @@ export function StoragePage({
       </div>
 
       {/* Applications keeps its second source — Mole reports what is installed
-          whether or not anything has been scanned — but it no longer carries the
-          no-scan case on its own. `/Applications` is a one-click target on the
-          start screen, which reaches the version of this view whose rows can
-          actually be acted on. */}
+          whether or not anything has been scanned. */}
       {view === "applications" ? (
         <ApplicationsSection />
       ) : view === "folders" ? (

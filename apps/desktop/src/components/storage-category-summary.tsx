@@ -1,26 +1,33 @@
 import type { CategorySummary } from "@nirmoka/transport";
 
-import { CATEGORY_DISPLAY } from "@/lib/category-display";
+import { CATEGORY_DISPLAY, type CategoryDisplay } from "@/lib/category-display";
 import { formatBytes } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 
 /**
  * One category, as a card in the grid.
  *
- * The percentage is of the scanned size rather than of the volume, and says so,
- * because the two differ whenever the scan was not the whole disk — a scan of
- * `~/Downloads` is 100% personal files and a rounding error of the volume.
+ * The percentage is of the scanned size rather than of the volume, and says
+ * which, because the two differ whenever the scan was not the whole disk — a
+ * scan of `~/Downloads` is 100% personal files and a rounding error of the
+ * volume. Free space is the one tile measured against the volume, since that is
+ * the only thing it can be a share of.
  */
 export function StorageCategorySummary({
   summary,
   scannedBytes,
+  display: override,
+  shareOf = "scan",
   onOpen,
 }: {
   summary: CategorySummary;
   scannedBytes: number;
+  /** For the one tile that is not a category: free space. */
+  display?: CategoryDisplay;
+  shareOf?: "scan" | "volume";
   onOpen?: () => void;
 }) {
-  const display = CATEGORY_DISPLAY[summary.category];
+  const display = override ?? CATEGORY_DISPLAY[summary.category];
   const Icon = display.icon;
   const percent = scannedBytes === 0 ? 0 : Math.round(summary.share * 100);
   const interactive = Boolean(onOpen) && summary.totalBytes > 0;
@@ -40,7 +47,9 @@ export function StorageCategorySummary({
       <p className="mt-3 text-xl font-semibold tracking-tight tabular-nums">
         {formatBytes(summary.totalBytes)}
       </p>
-      <p className="mt-0.5 text-xs text-muted-foreground">{percent}% of scanned</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {percent}% of {shareOf === "volume" ? "this volume" : "what was scanned"}
+      </p>
 
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div

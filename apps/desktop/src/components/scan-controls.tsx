@@ -2,61 +2,104 @@ import { ScanLine, Square } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
 import { canStartScan, scanStatusLine } from "@/lib/engine/scan-machine";
+import { START_TARGETS } from "@/lib/engine/start-targets";
 import { formatCount } from "@/lib/format";
 
 /**
- * The scan bar, in the shell header. Rust holds exactly one scan at a time, so a
- * second copy of these controls implied a second scan — see ADR 0026.
+ * Scanning, as one control in the header.
  *
- * Deliberately one row and nothing else. Anything a scan has to say arrives in
- * `ScanStatusStrip` below the header rule, so this row keeps a fixed height and
- * stays level with the brand block across the sidebar border. A status line
- * inside it would move the rule every time a scan started.
+ * This was a path field and a button occupying the full width of the window,
+ * which made an empty text input the largest object on screen and asked the
+ * user to type a directory before anything had been shown to them. A scan has
+ * one question — which directory — and it has four common answers, so the
+ * control is a button and the answers are behind it. See ADR 0031.
+ *
+ * The label follows the state rather than the route: a window with a scan in it
+ * offers to run another, and the design says "Scan Again" for that.
  */
-export function ScanBar() {
+export function ScanControl() {
   const { selection, listenersReady, scan, startScan, cancelScan } = useApp();
-  const [path, setPath] = useState("~");
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState("~");
   const canScan = canStartScan({ scanner: selection?.scanner, listenersReady, state: scan });
 
-  // Only when there is something to stop or something to re-run. Before a scan —
-  // and after one that was cancelled or failed — the start screen owns choosing a
-  // directory, and this row was an empty text field the width of the window
-  // beside a second primary button doing the same job as the one below it: the
-  // duplication ADR 0026 removed, reintroduced one level down. What went wrong is
-  // reported by `ScanStatusStrip`, which needs no control of its own.
-  if (scan.status !== "scanning" && scan.status !== "done") return null;
+  if (scan.status === "scanning") {
+    return (
+      <Button variant="destructive" size="sm" onClick={() => void cancelScan()}>
+        <Square /> Stop
+      </Button>
+    );
+  }
+
+  const begin = (path: string) => {
+    if (!canScan || !path.trim()) return;
+    setOpen(false);
+    void startScan(path);
+  };
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      <input
-        aria-label="Directory to scan"
-        value={path}
-        onChange={(event) => setPath(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && canScan) {
-            void startScan(path);
-          }
-        }}
-        disabled={scan.status === "scanning"}
-        placeholder="Directory to scan"
-        spellCheck={false}
-        // Bounded rather than flex-1. A path is short and a scan root is
-        // shorter; stretching the field to the full window width made an empty
-        // input the largest object on the screen.
-        className="h-9 w-full max-w-96 min-w-48 rounded-md border bg-background px-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/20 disabled:opacity-50"
-      />
-      {scan.status === "scanning" ? (
-        <Button variant="destructive" onClick={() => void cancelScan()}>
-          <Square /> Stop
-        </Button>
-      ) : (
-        <Button disabled={!canScan || !path.trim()} onClick={() => void startScan(path)}>
-          <ScanLine /> {scan.status === "done" ? "Rescan" : "Scan"}
-        </Button>
-      )}
-    </div>
+    <>
+      {/* Outline rather than filled: the design gives Scan the same weight as
+          the two controls beside it, and a primary button in the title bar was
+          the loudest object on every screen. */}
+      <Button variant="outline" size="sm" disabled={!canScan} onClick={() => setOpen(true)}>
+        <ScanLine /> {scan.status === "done" ? "Scan Again" : "Scan"}
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>What should Nirmoka look at?</DialogTitle>
+            <DialogDescription>
+              Scanning only reads. Nothing is removed without a separate confirmation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-2">
+            {START_TARGETS.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                onClick={() => begin(target.path)}
+                className="rounded-xl border p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/60"
+              >
+                <p className="text-sm font-medium">{target.label}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{target.hint}</p>
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label htmlFor="scan-path" className="text-xs font-medium text-muted-foreground">
+              Or another folder
+            </label>
+            <div className="mt-1.5 flex gap-2">
+              <input
+                id="scan-path"
+                value={custom}
+                onChange={(event) => setCustom(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && begin(custom)}
+                placeholder="~/Projects"
+                spellCheck={false}
+                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/20"
+              />
+              <Button onClick={() => begin(custom)} disabled={!custom.trim()}>
+                Scan
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

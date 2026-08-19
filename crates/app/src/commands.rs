@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
@@ -92,10 +92,21 @@ pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
     Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
 }
 
+/// Narration from a running cleanup preview.
+///
+/// Named like the scan events in `scan.rs`, because it is the same idea: work
+/// that outlives a single reply, reporting as it goes.
+pub const EVENT_CLEANUP_PROGRESS: &str = "cleanup://progress";
+
 /// One fresh backend-owned cleanup discovery. This never removes anything.
+///
+/// `on_progress` receives the backend's narration as it arrives. The dry run
+/// takes minutes, so what it says while it works is the difference between a
+/// window that is busy and a window that looks broken.
 pub fn cleanup_preview_of(
     state: &AppState,
     cancel: &CancelToken,
+    on_progress: &mut dyn FnMut(dto::CleanupProgress),
 ) -> Result<dto::CleanupPreview, String> {
     let choice = state
         .resolve(Ability::CleanupPreview)
@@ -104,7 +115,9 @@ pub fn cleanup_preview_of(
     let instead_of = choice.instead_of;
     let preview = choice
         .adapter
-        .cleanup_preview(cancel)
+        .cleanup_preview(cancel, &mut |progress| {
+            on_progress(dto::CleanupProgress::from_adapter(progress))
+        })
         .map_err(|error| error.to_string())?;
 
     state
@@ -1027,6 +1040,50 @@ pub async fn application_icon(
     .map_err(|error| format!("the icon worker failed: {error}"))
 }
 
+/// The desktop's own folder icon, for rows that are directories.
+///
+/// One call serves every folder row, so it takes no argument: the icon does not
+/// depend on which directory it stands for. `null` where the platform has no
+/// such file, and the window draws its own.
+#[tauri::command]
+pub async fn folder_icon() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::icons::generic_folder(crate::icons::DEFAULT_WIDTH)
+    })
+    .await
+    .map_err(|error| format!("the icon worker failed: {error}"))
+}
+
+/// An installed application's icon, by path.
+///
+/// The node-id form above cannot serve this list: Mole's inventory reports a
+/// path and no scan may have run, so there is no node to name. Taking a path
+/// from the window is the thing `reveal_in_file_manager` deliberately avoids —
+/// and the reasoning does not carry here, because that rule exists so the
+/// window never assembles an argument to a *destructive* command. This reads a
+/// file and returns pixels. The path is one Rust itself reported, it is
+/// canonicalised before use, and anything that is not an existing `.app`
+/// directory is refused rather than read.
+#[tauri::command]
+pub async fn application_icon_at(path: String) -> Result<Option<String>, String> {
+    let requested = crate::path::expand_home(&path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let Ok(bundle) = std::fs::canonicalize(&requested) else {
+            return None;
+        };
+        if !bundle.is_dir()
+            || !bundle
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+        {
+            return None;
+        }
+        crate::icons::data_url(&bundle, crate::icons::DEFAULT_WIDTH)
+    })
+    .await
+    .map_err(|error| format!("the icon worker failed: {error}"))
+}
+
 /// Launch the selected application.
 ///
 /// Runs on a worker thread for the same reason Quick Look does: the launcher
@@ -1043,32 +1100,57 @@ pub async fn open_application(
         .map_err(|error| format!("the open worker failed: {error}"))?
 }
 
+/// Runs on a worker thread.
+///
+/// This walks the whole tree, and a home directory is millions of nodes. As a
+/// synchronous command it held the main thread for as long as that took, which
+/// is the window freezing every time the Applications view is opened — the
+/// scan is in Rust precisely so that work like this does not happen where the
+/// webview can feel it.
 #[tauri::command]
-pub fn application_inventory(
-    state: State<'_, AppState>,
+pub async fn application_inventory(
+    app: AppHandle,
     scan_id: ScanId,
 ) -> Result<dto::ApplicationInventory, String> {
-    application_inventory_of(&state, scan_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        application_inventory_of(app.state::<AppState>().inner(), scan_id)
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread: this is `mo uninstall --list`, a subprocess that
+/// enumerates every installed application before it answers.
 #[tauri::command]
-pub fn installed_application_inventory(
-    state: State<'_, AppState>,
+pub async fn installed_application_inventory(
+    app: AppHandle,
 ) -> Result<dto::InstalledApplicationInventory, String> {
-    installed_application_inventory_of(&state)
+    tauri::async_runtime::spawn_blocking(move || {
+        installed_application_inventory_of(app.state::<AppState>().inner())
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread, for the same reason as `application_inventory`.
 #[tauri::command]
-pub fn developer_inventory(
-    state: State<'_, AppState>,
+pub async fn developer_inventory(
+    app: AppHandle,
     scan_id: ScanId,
 ) -> Result<dto::DeveloperInventory, String> {
-    developer_inventory_of(&state, scan_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        developer_inventory_of(app.state::<AppState>().inner(), scan_id)
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread: `mo status` shells out to read hardware sensors.
 #[tauri::command]
-pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, String> {
-    system_status_of(&state)
+pub async fn system_status(app: AppHandle) -> Result<dto::SystemStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || system_status_of(app.state::<AppState>().inner()))
+        .await
+        .map_err(|error| format!("the status worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1078,13 +1160,37 @@ pub async fn cleanup_preview(
 ) -> Result<dto::CleanupPreview, String> {
     let (preview_id, cancel) = state.cleanup().start_preview()?;
     let worker_app = app.clone();
+    let emitter = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        cleanup_preview_of(worker_app.state::<AppState>().inner(), &cancel)
+        cleanup_preview_of(
+            worker_app.state::<AppState>().inner(),
+            &cancel,
+            // A failed emit means the window is gone, which the preview will
+            // notice when it tries to return. Same treatment as scan progress.
+            &mut |progress| {
+                let _ = emitter.emit(EVENT_CLEANUP_PROGRESS, progress);
+            },
+        )
     })
     .await;
 
     state.cleanup().finish_preview(preview_id);
     result.map_err(|error| format!("cleanup preview worker failed: {error}"))?
+}
+
+/// The review Rust is already holding, without running another.
+///
+/// A dry run costs minutes. Any screen that wants to show one should be able to
+/// ask whether there is one first, or the second screen a user visits offers to
+/// spend those minutes again on a question already answered.
+#[tauri::command]
+pub fn latest_cleanup_preview(state: State<'_, AppState>) -> Option<dto::CleanupPreview> {
+    let held = state.cleanup().reviewed(Instant::now())?;
+    Some(dto::CleanupPreview::from_adapter(
+        held.backend.clone(),
+        held.backend_instead_of.clone(),
+        held.preview,
+    ))
 }
 
 #[tauri::command]

@@ -23,6 +23,38 @@ import { formatBytes, formatCount } from "@/lib/format";
  * The scan tree filtered to `.app` bundles, beside Mole's own inventory when a
  * scan cannot supply one. A view of the scan rather than a tab — see ADR 0026.
  */
+/**
+ * Icons for a list of bundles, by path.
+ *
+ * Mole's inventory has no scan behind it, so there is no node id to ask with —
+ * see `applicationIconAt`. Decoration throughout: a bundle whose icon cannot be
+ * read keeps the lettered tile, and nothing here can fail the list.
+ */
+function useApplicationIcons(paths: string[]) {
+  const { transport } = useApp();
+  const [icons, setIcons] = useState<Record<string, string>>({});
+  const key = paths.join("\u0000");
+
+  useEffect(() => {
+    let live = true;
+    for (const path of key.split("\u0000").filter(Boolean)) {
+      transport
+        .applicationIconAt(path)
+        .then((icon) => {
+          if (live && icon) setIcons((current) => ({ ...current, [path]: icon }));
+        })
+        .catch(() => {
+          // Decoration.
+        });
+    }
+    return () => {
+      live = false;
+    };
+  }, [key, transport]);
+
+  return icons;
+}
+
 export function ApplicationsSection() {
   const { transport, scan, backends, features } = useApp();
   const offer = uninstallOffer(backends);
@@ -121,6 +153,10 @@ export function ApplicationsSection() {
     const found = allRows.filter((app) => app.name.toLowerCase().includes(search.toLowerCase()));
     return orderable && !largestFirst ? [...found].reverse() : found;
   }, [allRows, largestFirst, orderable, search]);
+  // Bounded: the list is searchable, and without a cap a long one would read a
+  // file per row on every keystroke. What is on screen is what gets an icon.
+  const iconPaths = useMemo(() => rows.slice(0, 40).map((app) => app.path), [rows]);
+  const icons = useApplicationIcons(iconPaths);
   // Only the scan knows byte counts. Mole publishes a rounded string per
   // application, and adding those up would be arithmetic on labels.
   const scannedBytes = installed
@@ -267,6 +303,7 @@ export function ApplicationsSection() {
                     <ApplicationRow
                       key={app.key}
                       app={app}
+                      icon={icons[app.path]}
                       trashLabel={trashLabel}
                       trashed={app.nodeId !== null && trash.trashedIds.includes(app.nodeId)}
                       busy={trash.preparing || trash.running || trash.preparation !== null}
@@ -381,6 +418,7 @@ interface ApplicationRowModel {
 
 function ApplicationRow({
   app,
+  icon,
   trashLabel,
   trashed,
   busy,
@@ -391,6 +429,8 @@ function ApplicationRow({
   onUninstall,
 }: {
   app: ApplicationRowModel;
+  /** A `data:` URL, or undefined where the bundle has no readable icon. */
+  icon?: string;
   trashLabel: string;
   trashed: boolean;
   busy: boolean;
@@ -409,9 +449,16 @@ function ApplicationRow({
 
   return (
     <div className="flex items-center gap-3 py-3 text-sm">
-      <span className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-        {app.name.slice(0, 1).toUpperCase()}
-      </span>
+      {/* The application's own icon where it has one. The lettered tile is the
+          fallback, not the design: a list of coloured initials is what a window
+          shows when it cannot read what it is listing. */}
+      {icon ? (
+        <img src={icon} alt="" className="size-9 shrink-0 rounded-lg" />
+      ) : (
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
+          {app.name.slice(0, 1).toUpperCase()}
+        </span>
+      )}
       <span className="min-w-0 flex-1">
         <span
           className={`block font-medium ${trashed ? "text-muted-foreground line-through" : ""}`}
