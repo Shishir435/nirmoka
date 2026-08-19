@@ -109,8 +109,9 @@ export function barTotal(breakdown: CategoryBreakdown): number {
  * Deliberately not truncated. An application's bundle is a fraction of its
  * footprint — Docker's is under 2 GB against a footprint of tens — so trimming
  * to the visible rows before the footprints arrive would drop the very
- * applications that belong at the top. Rust has already capped each category's
- * consumers, so this list is short; the caller trims once the numbers are real.
+ * applications that belong at the top. Rust caps ordinary consumers and exempts
+ * application bundles for that reason, so this list is a handful of directories
+ * plus the installed applications; the caller trims once the numbers are real.
  *
  * Every category contributes, so the list mixes applications and directories
  * the way the disk does. Ties break on the path, because two entries of the
