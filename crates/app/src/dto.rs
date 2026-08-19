@@ -904,6 +904,101 @@ impl InstalledApplicationInventory {
     }
 }
 
+/// What kind of thing is using the disk.
+///
+/// Five buckets that partition a scan: every byte lands in exactly one, so the
+/// totals sum to the scanned size and the stacked bar on the dashboard adds up.
+/// `Other` is the honest default rather than a dumping ground — a scan of a
+/// directory that is none of these is entirely Other, and says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum StorageCategory {
+    Apps,
+    PersonalFiles,
+    Development,
+    System,
+    Other,
+}
+
+impl StorageCategory {
+    /// Every category, in the order the dashboard shows them.
+    ///
+    /// Declared once here so the breakdown always reports all five, including
+    /// the ones a given scan found nothing for: a category card that vanishes
+    /// when it reaches zero is a layout that moves for no reason.
+    pub const ALL: [StorageCategory; 5] = [
+        StorageCategory::Apps,
+        StorageCategory::PersonalFiles,
+        StorageCategory::Development,
+        StorageCategory::System,
+        StorageCategory::Other,
+    ];
+}
+
+/// One entry accounting for a meaningful share of a category.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CategoryConsumer {
+    /// Node id in the scan that produced this breakdown, so a click can open it.
+    pub id: u32,
+    pub name: String,
+    pub path: String,
+    /// Bytes this entry accounts for *in its own category*, which is not always
+    /// its size on disk: `~/Documents` reports its personal files, while the
+    /// `node_modules` inside it are counted under Development.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    pub size_is_partial: bool,
+}
+
+/// One category's total and the entries that make it up.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CategorySummary {
+    pub category: StorageCategory,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// Fraction of the scanned size, 0..1, for bar rendering.
+    pub share: f64,
+    pub consumers: Vec<CategoryConsumer>,
+}
+
+/// The whole scan, sorted into kinds.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct CategoryBreakdown {
+    #[ts(type = "number")]
+    pub scan_id: u64,
+    pub root_path: String,
+    /// The sum of every category, which is the scan's own total. Deliberately
+    /// not disk capacity: bytes reached by a scan are not what a volume holds,
+    /// which is what `volume` is for.
+    #[ts(type = "number")]
+    pub scanned_bytes: u64,
+    /// Capacity of the volume the scan root sits on, when it could be read.
+    /// `null` rather than invented numbers if `df` failed — the dashboard shows
+    /// the categories and omits the capacity bar.
+    pub volume: Option<VolumeInfo>,
+    /// Always all five, in `StorageCategory::ALL` order, zeroes included.
+    pub categories: Vec<CategorySummary>,
+}
+
 /// Where a size came from, carried beside the number rather than implied by it.
 ///
 /// A footprint mixes two ways of knowing: the scan already walked part of it,

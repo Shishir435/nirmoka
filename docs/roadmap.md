@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 14 — attribution.** Step 11 shipped as 0.1.1: `brew install
+**Current step: 15 — categories, icons.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
 first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18
@@ -500,14 +500,17 @@ types`, bindings committed
 What the dashboard needs beyond a scan: a classification, and something to look at. The scan tree
 sorts by size and knows nothing about kind.
 
-- [ ] `crates/app/src/categories.rs`. Apps, Personal Files, Development, System, Other, classified
+- [x] `crates/app/src/categories.rs`. Apps, Personal Files, Development, System, Other, classified
       by path, deterministic, unit-tested against path strings
-- [ ] `category_breakdown(scanId)` — per-category totals, top consumers per category, volume free
+- [x] `category_breakdown(scanId)` — per-category totals, top consumers per category, volume free
       space from the existing `volume_info`
-- [ ] App icons. Read the `.icns` in `Contents/Resources`, return the largest embedded PNG. No new
-      crate if the container parses; `sips` is the fallback and a subprocess for an icon is a poor
-      trade
-- [ ] Icons are decoration. Every row renders without one
+- [x] App icons. Read the `.icns` in `Contents/Resources`, no new crate: the container is a flat
+      chunk list and the modern chunks hold PNG bytes verbatim. Chosen by fit rather than "largest"
+      — the smallest icon at least as wide as the row — and capped by encoded bytes rather than by
+      width, because the constraint is the IPC payload. 20 of 22 bundles installed here yield one;
+      an asset-catalog bundle yields none, which is the decoration case
+- [x] Icons are decoration. Every row renders without one, `applicationIcon` returns null rather
+      than failing, and the mock returns null so the fallback is what dev sees
 
 ## Step 16 — Dashboard
 
