@@ -159,7 +159,16 @@ id: number, name: string, path: string,
  * its size on disk: `~/Documents` reports its personal files, while the
  * `node_modules` inside it are counted under Development.
  */
-totalBytes: number, sizeIsPartial: boolean, };
+totalBytes: number, 
+/**
+ * True when any byte counted into `total_bytes` came from an entry the
+ * scan could not read in full, which makes the number a lower bound.
+ *
+ * This is about the bytes attributed here, not about the entry's whole
+ * subtree: a `node_modules` under `~/Documents` is counted as Development,
+ * so its unreadable files are that row's problem rather than this one's.
+ */
+sizeIsPartial: boolean, };
 
 /**
  * One category's total and the entries that make it up.

@@ -166,7 +166,14 @@ pub fn breakdown(
     // Bytes attributed to the node that claimed them, which is what makes a
     // consumer's size the part it actually accounts for: `~/Documents` reports
     // its personal bytes, not the `node_modules` that were counted elsewhere.
-    let mut claimed: HashMap<NodeId, u64> = HashMap::new();
+    //
+    // The flag beside them is whether every one of those bytes was read in
+    // full. It is not the claiming node's own `size_is_partial`, which says
+    // only that its directory entry read cleanly, and it is not its whole
+    // subtree's either — the `node_modules` below it belongs to another
+    // consumer, and its errors are that consumer's to report. What is
+    // accumulated here is exactly what is attributed here.
+    let mut claimed: HashMap<NodeId, (u64, bool)> = HashMap::new();
 
     let Some(root) = tree.root() else {
         return empty(scan_id, tree, volume);
@@ -190,7 +197,9 @@ pub fn breakdown(
 
         *totals.entry(category).or_default() += node.own_bytes;
         if let Some(owner) = owner {
-            *claimed.entry(owner).or_default() += node.own_bytes;
+            let entry = claimed.entry(owner).or_insert((0, true));
+            entry.0 += node.own_bytes;
+            entry.1 &= !node.size_is_partial();
         }
 
         pending.extend(
@@ -203,7 +212,7 @@ pub fn breakdown(
     // A consumer is reported under the category it claimed, so the same pass
     // that totalled the bytes decides where the row belongs.
     let mut consumers: HashMap<StorageCategory, Vec<CategoryConsumer>> = HashMap::new();
-    for (id, bytes) in claimed {
+    for (id, (bytes, complete)) in claimed {
         let (Ok(node), Ok(path)) = (tree.get(id), tree.path_of(id)) else {
             continue;
         };
@@ -218,7 +227,7 @@ pub fn breakdown(
                 name: node.name.clone(),
                 path: path.display().to_string(),
                 total_bytes: bytes,
-                size_is_partial: node.size_is_partial(),
+                size_is_partial: !complete,
             });
     }
 
@@ -465,6 +474,74 @@ mod tests {
             .expect("development is reported");
         assert_eq!(development.consumers[0].name, "node_modules");
         assert_eq!(development.consumers[0].total_bytes, 8_000);
+    }
+
+    /// A consumer's bytes come from its whole run of non-claiming descendants,
+    /// so its completeness has to come from the same set. Reading the flag off
+    /// the claiming node alone reports an understated total as exact, which is
+    /// the one direction a size on this screen must not be wrong in quietly.
+    #[test]
+    fn an_unreadable_descendant_makes_its_consumer_a_lower_bound() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        let downloads = tree.push(Some(root), Node::directory("Downloads"));
+        tree.push(Some(downloads), Node::file("installer.dmg", 4_000));
+        let mut locked = Node::directory("locked");
+        locked.read_error = true;
+        tree.push(Some(downloads), locked);
+        tree.rollup();
+
+        // The claiming node itself read cleanly, so its own flag says nothing.
+        assert!(!tree
+            .get(downloads)
+            .expect("the node exists")
+            .size_is_partial());
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let consumer = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::PersonalFiles)
+            .expect("personal files are reported")
+            .consumers
+            .iter()
+            .find(|consumer| consumer.name == "Downloads")
+            .expect("Downloads is a consumer");
+
+        assert!(consumer.size_is_partial, "the total is a lower bound");
+        assert_eq!(consumer.total_bytes, 4_000);
+    }
+
+    /// The other half of the same rule: an error under a subtree that claimed a
+    /// different category belongs to that category's row, not to this one.
+    #[test]
+    fn an_error_under_another_categorys_claim_stays_with_that_category() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        let documents = tree.push(Some(root), Node::directory("Documents"));
+        tree.push(Some(documents), Node::file("notes.md", 1_000));
+        let modules = tree.push(Some(documents), Node::directory("node_modules"));
+        let mut locked = Node::file("dep.js", 8_000);
+        locked.read_error = true;
+        tree.push(Some(modules), locked);
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let consumer_of = |category: StorageCategory, name: &str| {
+            breakdown
+                .categories
+                .iter()
+                .find(|summary| summary.category == category)
+                .expect("the category is reported")
+                .consumers
+                .iter()
+                .find(|consumer| consumer.name == name)
+                .cloned()
+                .expect("the consumer is reported")
+        };
+
+        assert!(consumer_of(StorageCategory::Development, "node_modules").size_is_partial);
+        assert!(!consumer_of(StorageCategory::PersonalFiles, "Documents").size_is_partial);
     }
 
     /// Every category is always reported, so the dashboard's cards do not move
