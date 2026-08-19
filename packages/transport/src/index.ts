@@ -299,6 +299,15 @@ export interface Transport {
   applicationIcon(scanId: number, nodeId: number): Promise<string | null>;
 
   /**
+   * An installed application's icon by path, for lists that have no scan behind
+   * them — Mole reports what is installed whether or not anything was scanned.
+   *
+   * Read-only, and the path is one Rust reported in the first place. Null for
+   * anything that is not a readable `.app`.
+   */
+  applicationIconAt(path: string): Promise<string | null>;
+
+  /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
    *
@@ -377,6 +386,7 @@ export function tauriTransport(): Transport {
     openApplication: (scanId, nodeId) => invoke<void>("open_application", { scanId, nodeId }),
     applicationIcon: (scanId, nodeId) =>
       invoke<string | null>("application_icon", { scanId, nodeId }),
+    applicationIconAt: (path) => invoke<string | null>("application_icon_at", { path }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -1102,6 +1112,10 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     // No icon in the mock: the dashboard has to render its fallback, and a
     // placeholder here would hide the case where a bundle has none.
     async applicationIcon() {
+      return null;
+    },
+
+    async applicationIconAt() {
       return null;
     },
 

@@ -1027,6 +1027,36 @@ pub async fn application_icon(
     .map_err(|error| format!("the icon worker failed: {error}"))
 }
 
+/// An installed application's icon, by path.
+///
+/// The node-id form above cannot serve this list: Mole's inventory reports a
+/// path and no scan may have run, so there is no node to name. Taking a path
+/// from the window is the thing `reveal_in_file_manager` deliberately avoids —
+/// and the reasoning does not carry here, because that rule exists so the
+/// window never assembles an argument to a *destructive* command. This reads a
+/// file and returns pixels. The path is one Rust itself reported, it is
+/// canonicalised before use, and anything that is not an existing `.app`
+/// directory is refused rather than read.
+#[tauri::command]
+pub async fn application_icon_at(path: String) -> Result<Option<String>, String> {
+    let requested = crate::path::expand_home(&path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let Ok(bundle) = std::fs::canonicalize(&requested) else {
+            return None;
+        };
+        if !bundle.is_dir()
+            || !bundle
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+        {
+            return None;
+        }
+        crate::icons::data_url(&bundle, crate::icons::DEFAULT_WIDTH)
+    })
+    .await
+    .map_err(|error| format!("the icon worker failed: {error}"))
+}
+
 /// Launch the selected application.
 ///
 /// Runs on a worker thread for the same reason Quick Look does: the launcher

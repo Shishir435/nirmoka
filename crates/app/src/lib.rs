@@ -57,6 +57,7 @@ pub fn run() {
             commands::category_breakdown,
             commands::app_footprint,
             commands::application_icon,
+            commands::application_icon_at,
             commands::open_application,
             commands::application_inventory,
             commands::installed_application_inventory,
