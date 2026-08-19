@@ -912,6 +912,62 @@ pub async fn quick_look(
         .map_err(|error| format!("Quick Look worker failed: {error}"))?
 }
 
+/// The whole scan sorted into kinds, with the volume it sits on.
+///
+/// Classification is a pass over the tree, so it runs under the lock like every
+/// other tree query. The volume read is a `df` subprocess and happens first,
+/// outside it — capacity is not a fact about the tree and holding a scan of two
+/// million nodes locked while a subprocess starts would be a stall for nothing.
+#[tauri::command]
+pub async fn category_breakdown(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+) -> Result<dto::CategoryBreakdown, String> {
+    let root = {
+        let scan = state.scan();
+        let result = scan
+            .result
+            .as_ref()
+            .ok_or_else(|| "no scan has completed yet".to_string())?;
+        if result.id != scan_id {
+            return Err(format!(
+                "scan {scan_id} has been replaced by scan {}",
+                result.id
+            ));
+        }
+        result.tree.root_path().to_path_buf()
+    };
+
+    // Capacity is reported when it can be read and omitted when it cannot. A
+    // failed `df` is a dashboard without a capacity bar, not a failed request.
+    let volume = tauri::async_runtime::spawn_blocking(move || crate::volume::info(&root))
+        .await
+        .map_err(|error| format!("the volume worker failed: {error}"))?
+        .ok();
+
+    let scan = state.scan();
+    let result = scan
+        .result
+        .as_ref()
+        .ok_or_else(|| "no scan has completed yet".to_string())?;
+    // Re-checked after the await: a rescan can land while `df` runs, and
+    // classifying the replacement under the old id would answer a question
+    // about a tree the caller never saw.
+    if result.id != scan_id {
+        return Err(format!(
+            "scan {scan_id} has been replaced by scan {}",
+            result.id
+        ));
+    }
+    let home = crate::path::expand_home("~");
+    Ok(crate::categories::breakdown(
+        result.id,
+        &result.tree,
+        &home,
+        volume,
+    ))
+}
+
 /// What one application costs, assembled in two phases.
 ///
 /// The lock is held for the tree read and released before anything is walked —
@@ -947,6 +1003,28 @@ pub async fn app_footprint(
     tauri::async_runtime::spawn_blocking(move || crate::attribution::resolve(plan))
         .await
         .map_err(|error| format!("the footprint worker failed: {error}"))
+}
+
+/// An application bundle's icon, as a `data:` URL.
+///
+/// `null` rather than an error when the bundle keeps its artwork somewhere this
+/// cannot read — an asset catalog, or nothing at all. Icons are decoration and
+/// a row renders without one, so a missing icon is not a failed request.
+///
+/// Runs on a worker thread: this reads a file off disk, and the dashboard asks
+/// for several at once.
+#[tauri::command]
+pub async fn application_icon(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<Option<String>, String> {
+    let path = node_path_of(&state, scan_id, node_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::icons::data_url(&path, crate::icons::DEFAULT_WIDTH)
+    })
+    .await
+    .map_err(|error| format!("the icon worker failed: {error}"))
 }
 
 /// Launch the selected application.

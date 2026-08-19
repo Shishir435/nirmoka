@@ -21,6 +21,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppFootprint,
   Backend,
+  CategoryBreakdown,
   BackendSelection,
   ApplicationInventory,
   Capabilities,
@@ -181,6 +182,15 @@ export interface Transport {
   applicationInventory(scanId: number): Promise<ApplicationInventory>;
 
   /**
+   * The whole scan sorted into kinds, with the volume it sits on.
+   *
+   * Every category is always present, zeroes included, so the dashboard's cards
+   * do not move about between scans. `volume` is null where capacity could not
+   * be read.
+   */
+  categoryBreakdown(scanId: number): Promise<CategoryBreakdown>;
+
+  /**
    * What one application costs: the bundle, plus everything under `~/Library`
    * carrying its bundle identifier.
    *
@@ -281,6 +291,14 @@ export interface Transport {
   openApplication(scanId: number, nodeId: number): Promise<void>;
 
   /**
+   * This row's application icon as a `data:` URL, or null where there is none.
+   *
+   * Decoration: a row renders without one, so callers show the fallback rather
+   * than treating null as a failure.
+   */
+  applicationIcon(scanId: number, nodeId: number): Promise<string | null>;
+
+  /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
    *
@@ -332,6 +350,7 @@ export function tauriTransport(): Transport {
     volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
+    categoryBreakdown: (scanId) => invoke<CategoryBreakdown>("category_breakdown", { scanId }),
     appFootprint: (scanId, nodeId) => invoke<AppFootprint>("app_footprint", { scanId, nodeId }),
     installedApplicationInventory: () =>
       invoke<InstalledApplicationInventory>("installed_application_inventory"),
@@ -356,6 +375,8 @@ export function tauriTransport(): Transport {
       invoke<void>("reveal_in_file_manager", { scanId, nodeId }),
     quickLook: (scanId, nodeId) => invoke<void>("quick_look", { scanId, nodeId }),
     openApplication: (scanId, nodeId) => invoke<void>("open_application", { scanId, nodeId }),
+    applicationIcon: (scanId, nodeId) =>
+      invoke<string | null>("application_icon", { scanId, nodeId }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -726,6 +747,40 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return { scanId: summary.scanId, total: 0, rows: [] };
     },
 
+    // Shaped like a real breakdown: all five categories, zeroes included, and
+    // totals that add up to scannedBytes — the property the stacked bar needs.
+    async categoryBreakdown(scanId) {
+      const total = summary.totalBytes;
+      const slices: Array<[CategoryBreakdown["categories"][number]["category"], number]> = [
+        ["apps", Math.round(total * 0.38)],
+        ["personalFiles", Math.round(total * 0.21)],
+        ["development", Math.round(total * 0.16)],
+        ["system", Math.round(total * 0.1)],
+        ["other", 0],
+      ];
+      const assigned = slices.reduce((sum, [, bytes]) => sum + bytes, 0);
+      slices[4]![1] = Math.max(0, total - assigned);
+
+      return {
+        scanId,
+        rootPath: summary.rootPath,
+        scannedBytes: total,
+        volume: {
+          name: "Macintosh HD",
+          mountPoint: "/",
+          totalBytes: total * 2,
+          usedBytes: total,
+          freeBytes: total,
+        },
+        categories: slices.map(([category, totalBytes]) => ({
+          category,
+          totalBytes,
+          share: total === 0 ? 0 : totalBytes / total,
+          consumers: [],
+        })),
+      };
+    },
+
     // Shaped the way a real footprint is: the bundle sized by the scan, the
     // Library paths walked on demand, and components named by location rather
     // than by anything the application keeps there — ADR 0028.
@@ -1043,6 +1098,12 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     },
 
     async openApplication() {},
+
+    // No icon in the mock: the dashboard has to render its fallback, and a
+    // placeholder here would hide the case where a bundle has none.
+    async applicationIcon() {
+      return null;
+    },
 
     async quickLook() {
       throw new Error("mock transport cannot open Quick Look");

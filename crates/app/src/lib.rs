@@ -11,10 +11,12 @@
 #![forbid(unsafe_code)]
 
 pub mod attribution;
+pub mod categories;
 pub mod cleanup;
 pub mod commands;
 pub mod deletion;
 pub mod dto;
+pub mod icons;
 pub mod inventory;
 pub mod path;
 pub mod reveal;
@@ -52,7 +54,9 @@ pub fn run() {
             commands::platform_features,
             commands::reveal_in_file_manager,
             commands::quick_look,
+            commands::category_breakdown,
             commands::app_footprint,
+            commands::application_icon,
             commands::open_application,
             commands::application_inventory,
             commands::installed_application_inventory,

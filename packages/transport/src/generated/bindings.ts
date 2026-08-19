@@ -125,6 +125,60 @@ export type BatteryStatus = { percent: number, status: string, timeLeft: string,
  */
 export type Capabilities = { scan: boolean, delete: boolean, trash: boolean, undo: boolean, dryRun: boolean, cleanupCategories: boolean, appInventory: boolean, uninstallApps: boolean, systemStatus: boolean, };
 
+/**
+ * The whole scan, sorted into kinds.
+ */
+export type CategoryBreakdown = { scanId: number, rootPath: string, 
+/**
+ * The sum of every category, which is the scan's own total. Deliberately
+ * not disk capacity: bytes reached by a scan are not what a volume holds,
+ * which is what `volume` is for.
+ */
+scannedBytes: number, 
+/**
+ * Capacity of the volume the scan root sits on, when it could be read.
+ * `null` rather than invented numbers if `df` failed — the dashboard shows
+ * the categories and omits the capacity bar.
+ */
+volume: VolumeInfo | null, 
+/**
+ * Always all five, in `StorageCategory::ALL` order, zeroes included.
+ */
+categories: Array<CategorySummary>, };
+
+/**
+ * One entry accounting for a meaningful share of a category.
+ */
+export type CategoryConsumer = { 
+/**
+ * Node id in the scan that produced this breakdown, so a click can open it.
+ */
+id: number, name: string, path: string, 
+/**
+ * Bytes this entry accounts for *in its own category*, which is not always
+ * its size on disk: `~/Documents` reports its personal files, while the
+ * `node_modules` inside it are counted under Development.
+ */
+totalBytes: number, 
+/**
+ * True when any byte counted into `total_bytes` came from an entry the
+ * scan could not read in full, which makes the number a lower bound.
+ *
+ * This is about the bytes attributed here, not about the entry's whole
+ * subtree: a `node_modules` under `~/Documents` is counted as Development,
+ * so its unreadable files are that row's problem rather than this one's.
+ */
+sizeIsPartial: boolean, };
+
+/**
+ * One category's total and the entries that make it up.
+ */
+export type CategorySummary = { category: StorageCategory, totalBytes: number, 
+/**
+ * Fraction of the scanned size, 0..1, for bar rendering.
+ */
+share: number, consumers: Array<CategoryConsumer>, };
+
 export type CleanupCategory = { name: string, items: Array<CleanupItem>, };
 
 export type CleanupCompletion = "finished" | "partial" | "cancelled" | "failed";
@@ -402,6 +456,16 @@ readErrors: number, excluded: number, hardlinksDeduplicated: number, hardlinkByt
  * the slice and call it a sort.
  */
 export type Sort = "largestFirst" | "smallestFirst" | "nameAscending" | "nameDescending";
+
+/**
+ * What kind of thing is using the disk.
+ *
+ * Five buckets that partition a scan: every byte lands in exactly one, so the
+ * totals sum to the scanned size and the stacked bar on the dashboard adds up.
+ * `Other` is the honest default rather than a dumping ground — a scan of a
+ * directory that is none of these is entirely Other, and says so.
+ */
+export type StorageCategory = "apps" | "personalFiles" | "development" | "system" | "other";
 
 /**
  * A group of paths reported under one name — Caches, Containers, Logs.
