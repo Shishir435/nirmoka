@@ -125,6 +125,26 @@ impl CleanupState {
         });
     }
 
+    /// The review already held, if it is still current.
+    ///
+    /// A dry run takes minutes, and it was possible to spend them on one screen
+    /// and then find another offering to spend them again: the preview was
+    /// remembered here and nothing could read it back. Same freshness rule as
+    /// [`Self::prepare`], because a review too old to act on is too old to show
+    /// as though it could be acted on.
+    pub fn reviewed(&self, now: Instant) -> Option<PendingCleanup> {
+        let reviewed = self.latest.as_ref()?;
+        let age = now.checked_duration_since(reviewed.observed_at)?;
+        if age >= PREVIEW_LIFETIME {
+            return None;
+        }
+        Some(PendingCleanup {
+            backend: reviewed.backend.clone(),
+            backend_instead_of: reviewed.backend_instead_of.clone(),
+            preview: reviewed.preview.clone(),
+        })
+    }
+
     pub fn prepare(&mut self, now: Instant) -> Option<CleanupPreparation> {
         let reviewed = self.latest.as_ref()?;
         let age = now.checked_duration_since(reviewed.observed_at)?;
@@ -277,5 +297,44 @@ mod tests {
         state.finish_preview(id);
         assert!(!state.cancel_preview());
         assert!(state.start_preview().is_ok());
+    }
+
+    /// The bug this exists for: a review was produced, remembered, and then
+    /// unreachable, so the next screen offered to spend another two minutes
+    /// answering the same question.
+    #[test]
+    fn a_held_review_can_be_read_back_without_running_another() {
+        let mut state = CleanupState::default();
+        let now = Instant::now();
+        state.remember("mole", None, preview("2026-08-20", 12), now);
+
+        let held = state.reviewed(now).expect("the review is still current");
+
+        assert_eq!(held.backend, "mole");
+        assert_eq!(held.preview.total_items, 12);
+        // Reading it does not consume it: preparing to run still works after.
+        assert!(state.reviewed(now).is_some());
+        assert!(state.prepare(now).is_some());
+    }
+
+    /// Same freshness rule as `prepare`. A review too old to act on must not be
+    /// shown as though it could be.
+    #[test]
+    fn a_stale_review_is_not_offered() {
+        let mut state = CleanupState::default();
+        let now = Instant::now();
+        state.remember("mole", None, preview("2026-08-20", 12), now);
+
+        let later = now + PREVIEW_LIFETIME;
+
+        assert!(state.reviewed(later).is_none());
+        assert!(state.prepare(later).is_none());
+    }
+
+    #[test]
+    fn nothing_held_is_nothing_offered() {
+        let state = CleanupState::default();
+
+        assert!(state.reviewed(Instant::now()).is_none());
     }
 }

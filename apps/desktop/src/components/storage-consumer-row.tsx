@@ -28,6 +28,7 @@ export function StorageConsumerRow({
   largestBytes,
   measure = "size",
   icon,
+  folderIcon,
   onOpen,
 }: {
   consumer: CategoryConsumer;
@@ -37,6 +38,8 @@ export function StorageConsumerRow({
   measure?: ConsumerMeasure;
   /** A `data:` URL from `applicationIcon`, or null. Decoration. */
   icon?: string | null;
+  /** The desktop's folder icon, used when this row has none of its own. */
+  folderIcon?: string | null;
   onOpen?: () => void;
 }) {
   const display = CATEGORY_DISPLAY[category];
@@ -50,8 +53,14 @@ export function StorageConsumerRow({
       title={consumer.path}
       className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors enabled:hover:bg-accent/60 disabled:cursor-default"
     >
+      {/* The application's own icon, then the desktop's folder icon, then a
+          drawn one. A list of real icons beside outline glyphs looked
+          half-finished, and the platform ships the icon it draws for a folder
+          in the same format bundles use. */}
       {icon ? (
         <img src={icon} alt="" className="size-8 shrink-0 rounded-md" />
+      ) : folderIcon ? (
+        <img src={folderIcon} alt="" className="size-8 shrink-0" />
       ) : (
         <span
           className="grid size-8 shrink-0 place-items-center rounded-md bg-muted"

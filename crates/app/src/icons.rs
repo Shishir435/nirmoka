@@ -33,6 +33,29 @@ pub const DEFAULT_WIDTH: u32 = 128;
 const ICNS_MAGIC: &[u8] = b"icns";
 const PNG_MAGIC: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
+/// The desktop's own folder icon, for rows that are directories.
+///
+/// A list mixing applications and folders looked half-finished with real icons
+/// beside outline glyphs. macOS ships its folder icon as an `.icns` in exactly
+/// the format bundles use, so the parser above reads it with no special case.
+///
+/// `None` off macOS, and `None` if the file is not where it has always been.
+/// Decoration either way: the window keeps its drawn fallback.
+pub fn generic_folder(target: u32) -> Option<String> {
+    if std::env::consts::OS != "macos" {
+        return None;
+    }
+    // A system path rather than a user one. This is the platform-facing crate,
+    // and `directories` has no entry for "the icon the Finder draws".
+    const GENERIC_FOLDER: &str =
+        "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericFolderIcon.icns";
+
+    let png = select_png(&std::fs::read(GENERIC_FOLDER).ok()?, target)?;
+    let mut url = String::from("data:image/png;base64,");
+    url.push_str(&base64(&png));
+    Some(url)
+}
+
 /// An application's icon as a `data:` URL, sized for a list row.
 ///
 /// `target` is a request, not a guarantee: the smallest icon at least that wide
@@ -49,10 +72,14 @@ pub fn data_url(app_path: &Path, target: u32) -> Option<String> {
 
 /// The raw PNG bytes of the closest icon to `target`.
 pub fn icon_png(app_path: &Path, target: u32) -> Option<Vec<u8>> {
-    let bytes = std::fs::read(icon_file(app_path)?).ok()?;
+    select_png(&std::fs::read(icon_file(app_path)?).ok()?, target)
+}
+
+/// The closest icon inside an `.icns` container that is small enough to send.
+fn select_png(container: &[u8], target: u32) -> Option<Vec<u8>> {
     let mut best: Option<(u32, &[u8])> = None;
 
-    for (width, png) in embedded_pngs(&bytes) {
+    for (width, png) in embedded_pngs(container) {
         if png.len() > MAX_BYTES {
             continue;
         }
@@ -350,6 +377,25 @@ mod tests {
         assert!(icon_png(&scratch.join("Huge.app"), DEFAULT_WIDTH).is_some());
 
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// The folder icon is a real `.icns` in the same format bundles use, which
+    /// is why it needs no special case. Guarded rather than skipped elsewhere:
+    /// the fallback is what a non-macOS window draws.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_desktops_own_folder_icon_is_readable() {
+        let url = generic_folder(DEFAULT_WIDTH).expect("macOS ships a folder icon");
+
+        assert!(url.starts_with("data:image/png;base64,"), "{}", &url[..40]);
+        // Small enough to sit in a list without being sent as a megabyte.
+        assert!(url.len() < 64 * 1024, "{} bytes", url.len());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn a_platform_without_a_named_folder_icon_reports_none() {
+        assert_eq!(generic_folder(DEFAULT_WIDTH), None);
     }
 
     #[test]

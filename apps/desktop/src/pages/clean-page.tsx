@@ -64,6 +64,25 @@ export function CleanPage() {
 
   useEffect(loadHistory, [loadHistory]);
 
+  // Adopt whatever Rust is already holding. A dry run takes minutes, and this
+  // page used to open on "No cleanup preview yet" straight after one had been
+  // produced elsewhere — offering to spend those minutes again on a question
+  // that had just been answered. Rust holds one review; this asks for it.
+  useEffect(() => {
+    let live = true;
+    transport.latestCleanupPreview().then(
+      (held) => {
+        if (live && held) dispatch({ type: "previewArrived", preview: held });
+      },
+      () => {
+        // Nothing held is the ordinary case, not a failure to report.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [transport]);
+
   const loadPreview = () => {
     dispatch({ type: "previewStarted" });
     setPage(0);

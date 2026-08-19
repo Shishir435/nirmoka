@@ -218,6 +218,15 @@ export interface Transport {
   cleanupPreview(): Promise<CleanupPreview>;
 
   /** Cancel the active cleanup discovery, if one is running. */
+
+  /**
+   * The review Rust is already holding, or null when there is none current.
+   *
+   * A dry run costs minutes, so a screen asks what is held before offering to
+   * run another. Previews expire, which is why this can be null right after one
+   * was produced.
+   */
+  latestCleanupPreview(): Promise<CleanupPreview | null>;
   cancelCleanupPreview(): Promise<boolean>;
 
   /** Bind latest Rust-held cleanup preview to a short-lived one-time token. */
@@ -310,6 +319,15 @@ export interface Transport {
   applicationIconAt(path: string): Promise<string | null>;
 
   /**
+   * The desktop's own folder icon, for rows that are directories.
+   *
+   * Takes no argument because the icon does not depend on which directory it
+   * stands for: one call serves every folder row. Null where the platform has
+   * no such file, and the caller draws its own.
+   */
+  folderIcon(): Promise<string | null>;
+
+  /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
    * arrives.
    *
@@ -377,6 +395,7 @@ export function tauriTransport(): Transport {
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
     systemStatus: () => invoke<SystemStatus>("system_status"),
     cleanupPreview: () => invoke<CleanupPreview>("cleanup_preview"),
+    latestCleanupPreview: () => invoke<CleanupPreview | null>("latest_cleanup_preview"),
     cancelCleanupPreview: () => invoke<boolean>("cancel_cleanup_preview"),
     prepareCleanup: () => invoke<CleanupPreparation>("prepare_cleanup"),
     confirmCleanup: (confirmationToken) =>
@@ -398,6 +417,7 @@ export function tauriTransport(): Transport {
     applicationIcon: (scanId, nodeId) =>
       invoke<string | null>("application_icon", { scanId, nodeId }),
     applicationIconAt: (path) => invoke<string | null>("application_icon_at", { path }),
+    folderIcon: () => invoke<string | null>("folder_icon"),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onCleanupProgress: (handler) => subscribe(EVENT.cleanupProgress, handler),
@@ -1024,6 +1044,12 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return false;
     },
 
+    // Nothing is held between calls in the mock, so a screen that asks first
+    // sees the same empty state a fresh install would.
+    async latestCleanupPreview() {
+      return null;
+    },
+
     async prepareCleanup() {
       throw new Error("mock transport never prepares destructive cleanup operations");
     },
@@ -1128,6 +1154,10 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     },
 
     async applicationIconAt() {
+      return null;
+    },
+
+    async folderIcon() {
       return null;
     },
 

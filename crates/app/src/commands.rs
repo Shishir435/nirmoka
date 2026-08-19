@@ -1040,6 +1040,20 @@ pub async fn application_icon(
     .map_err(|error| format!("the icon worker failed: {error}"))
 }
 
+/// The desktop's own folder icon, for rows that are directories.
+///
+/// One call serves every folder row, so it takes no argument: the icon does not
+/// depend on which directory it stands for. `null` where the platform has no
+/// such file, and the window draws its own.
+#[tauri::command]
+pub async fn folder_icon() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::icons::generic_folder(crate::icons::DEFAULT_WIDTH)
+    })
+    .await
+    .map_err(|error| format!("the icon worker failed: {error}"))
+}
+
 /// An installed application's icon, by path.
 ///
 /// The node-id form above cannot serve this list: Mole's inventory reports a
@@ -1162,6 +1176,21 @@ pub async fn cleanup_preview(
 
     state.cleanup().finish_preview(preview_id);
     result.map_err(|error| format!("cleanup preview worker failed: {error}"))?
+}
+
+/// The review Rust is already holding, without running another.
+///
+/// A dry run costs minutes. Any screen that wants to show one should be able to
+/// ask whether there is one first, or the second screen a user visits offers to
+/// spend those minutes again on a question already answered.
+#[tauri::command]
+pub fn latest_cleanup_preview(state: State<'_, AppState>) -> Option<dto::CleanupPreview> {
+    let held = state.cleanup().reviewed(Instant::now())?;
+    Some(dto::CleanupPreview::from_adapter(
+        held.backend.clone(),
+        held.backend_instead_of.clone(),
+        held.preview,
+    ))
 }
 
 #[tauri::command]

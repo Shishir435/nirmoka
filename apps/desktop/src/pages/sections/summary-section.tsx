@@ -77,6 +77,7 @@ export function SummarySection({
   }, [summary.scanId, transport]);
 
   const consumers = useTopConsumers(breakdown, summary.scanId);
+  const folderIcon = useFolderIcon();
 
   const slices = useMemo(
     () => (breakdown ? usageSlices(breakdown, CATEGORY_DISPLAY) : []),
@@ -223,6 +224,7 @@ export function SummarySection({
                     largestBytes={largest}
                     measure={entry.measure}
                     icon={entry.icon}
+                    folderIcon={folderIcon}
                     onOpen={onOpen ? () => onOpen(openTarget(entry)) : undefined}
                   />
                 ))}
@@ -242,6 +244,32 @@ export function SummarySection({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The desktop's folder icon, fetched once for the whole list.
+ *
+ * It does not depend on which directory it stands for, so asking per row would
+ * be the same file read six times.
+ */
+function useFolderIcon() {
+  const { transport } = useApp();
+  const [icon, setIcon] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    transport.folderIcon().then(
+      (value) => live && setIcon(value),
+      () => {
+        // Decoration. The drawn fallback stands.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [transport]);
+
+  return icon;
 }
 
 /**
