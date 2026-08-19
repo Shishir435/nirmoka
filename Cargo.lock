@@ -1938,6 +1938,7 @@ dependencies = [
  "nirmoka-adapter-ncdu",
  "nirmoka-adapter-rip",
  "nirmoka-core",
+ "plist",
  "serde",
  "serde_json",
  "tauri",

@@ -26,6 +26,7 @@ nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 nirmoka-adapter-rip = { workspace = true }
 directories = { workspace = true }
+plist = { workspace = true }
 serde = { workspace = true }
 # Promoted from dev-dependencies by the settings file: the backend choice is
 # stored as JSON, so reading it is production code rather than test scaffolding.

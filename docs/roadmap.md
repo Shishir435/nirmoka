@@ -3,10 +3,13 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 13 — three destinations.** Step 11 shipped as 0.1.1: `brew install
+**Current step: 14 — attribution.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
-first person to use it said the seven tabs were confusing, which step 13 answers. **0.2.0 ships both.**
+first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18
+build the approved two-surface design on top of that nav: a dashboard that classifies the disk, and
+an inspector that shows what one application actually costs. **0.2.0 ships all of it**, so the
+window a user opens is the product rather than a tree browser with a cleanup tab.
 Releases are unsigned until there is an Apple Developer account, which is why the install path is a
 Homebrew formula rather than a download —
 [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
@@ -469,6 +472,82 @@ command added, none widened, no `Capabilities` flag moved. See
       selected-path deletion, which is ADR 0017's gate and not a mode
 - [ ] `pnpm tauri dev` and use all three destinations. Scan, trash a row, check it appears in
       Activity, and open an old `#/overview` link
+
+---
+
+## Step 14 — Attribution
+
+The product's central claim is that it shows what an application actually costs. Nothing in the
+codebase can compute that yet: the tree knows `Docker.app is 1.8 GB` and Mole knows the string
+`"410.9MB"`, and the 45 GB between them is `~/Library`. Everything in steps 16 to 18 reads this.
+See [ADR 0028](adr/0028-an-applications-footprint-is-what-the-filesystem-says.md).
+
+- [x] `crates/app/src/attribution.rs`. `CFBundleIdentifier` out of `Contents/Info.plist` for
+      scan-derived bundles; Mole already publishes `bundle_id` for what it can address
+- [x] Fixed list of `~/Library` locations keyed by bundle id — Application Support, Caches,
+      Containers, Preferences, Saved Application State, HTTPStorages, WebKit, Logs. Existence
+      checked before a path is reported. Nothing matched on an app's name
+- [x] Size from the scan tree first, filesystem walk second. Unavailable is reported as unavailable
+      and never as zero, because a footprint that silently omits an unscanned 20 GB is worse than
+      one that says it does not know
+- [x] `app_footprint(scanId, nodeId)` command, `AppFootprintDto` and `StorageComponentDto`, `pnpm
+types`, bindings committed
+- [x] `open_application(path)`, and last-used via `mdls`. Both are small and both are on the
+      Inspector's sidebar
+
+## Step 15 — Categories, icons
+
+What the dashboard needs beyond a scan: a classification, and something to look at. The scan tree
+sorts by size and knows nothing about kind.
+
+- [ ] `crates/app/src/categories.rs`. Apps, Personal Files, Development, System, Other, classified
+      by path, deterministic, unit-tested against path strings
+- [ ] `category_breakdown(scanId)` — per-category totals, top consumers per category, volume free
+      space from the existing `volume_info`
+- [ ] App icons. Read the `.icns` in `Contents/Resources`, return the largest embedded PNG. No new
+      crate if the container parses; `sips` is the fallback and a subprocess for an icon is a poor
+      trade
+- [ ] Icons are decoration. Every row renders without one
+
+## Step 16 — Dashboard
+
+Screen 1. Volume header with the stacked usage bar, the category grid, biggest space users, and the
+reclaimable banner reading the cleanup preview total.
+
+- [ ] `storage-usage-bar.tsx`, `storage-category-summary.tsx`, `storage-consumer-row.tsx`
+- [ ] `summary-section.tsx` rewritten against `category_breakdown`. The donut goes; a stacked bar
+      answers "what is on this disk" in one glance and the donut answered "what did the scan see"
+- [ ] Biggest space users mixes applications and directories, because the disk does. An application
+      row carries its footprint, a directory row carries its size, and the two are labelled
+- [ ] The reclaimable banner shows Mole's total or does not render. No estimate of our own
+
+## Step 17 — Inspector
+
+Screens 2 and 5. The footprint of one application, and the drill-down under it.
+
+- [ ] `inspector-page.tsx`, `app-header.tsx`, `app-footprint-summary.tsx`, `storage-component-row.tsx`
+- [ ] Component rows are named by location: Application, Containers, Caches, Application Support,
+      Logs, Preferences. `Docker.raw` is one row at its real size — ADR 0028
+- [ ] The reclaimable panel is Mole's cleanup items whose path prefix matches this bundle id.
+      Arithmetic on published data, no rules of our own — ADR 0030
+- [ ] Drill-down reuses `useDirectory` and the existing `rows()` window. `breadcrumb.tsx`,
+      `file-details-panel.tsx`, and a tree variant that does not re-solve virtualization
+- [ ] Navigation state extends `route.ts` and stays a pure function under test, redirects included
+
+## Step 18 — Cleanup and uninstall review
+
+Screens 3 and 4, and the release.
+
+- [ ] Cleanup rows carry Mole's category name, path, size, item count. No per-item safety badge and
+      no rationale line — ADR 0030
+- [ ] One banner states what is true of the run: Mole selected the paths, Nirmoka added none, files
+      go to the Trash
+- [ ] The uninstall sheet groups `mo uninstall --dry-run` paths by `~/Library` location under an
+      honest total, and offers Cancel or Uninstall. No keep-user-data radio, because no flag backs
+      it — ADR 0029
+- [ ] What Mole will not remove is stated where the design puts the radio, quoted from the dry run
+- [ ] `pnpm tauri dev` through the whole path: scan, dashboard, inspect an app, drill in, review a
+      cleanup, preview an uninstall, cancel it
 - [ ] 0.2.0, tagged, with the tap updated
 
 ---

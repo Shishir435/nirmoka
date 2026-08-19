@@ -43,6 +43,14 @@ trash = { version = "5", default-features = false, features = ["coinit_apartment
 # mirror of a Rust struct drifts silently; that is the whole problem here.
 ts-rs = "12"
 
+# Reads `Contents/Info.plist` for `CFBundleIdentifier`, which is the key every
+# application footprint is assembled from — see ADR 0028. A bundle's Info.plist
+# is binary as often as it is XML, so hand-parsing would mean implementing
+# Apple's bplist00 container; `defaults read` would mean a subprocess per app,
+# on a dashboard that lists forty of them. Shell-only, like tauri: nothing but
+# crates/app has an application bundle to read.
+plist = "1"
+
 # Finds the user's home directory. Invariant 3: home, cache, and config
 # directories come from here, never from a `~/Library` or `/Users/` literal —
 # a literal is a path that only exists on the machine it was written on.

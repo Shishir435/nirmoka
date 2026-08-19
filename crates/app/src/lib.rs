@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attribution;
 pub mod cleanup;
 pub mod commands;
 pub mod deletion;
@@ -51,6 +52,8 @@ pub fn run() {
             commands::platform_features,
             commands::reveal_in_file_manager,
             commands::quick_look,
+            commands::app_footprint,
+            commands::open_application,
             commands::application_inventory,
             commands::installed_application_inventory,
             commands::developer_inventory,

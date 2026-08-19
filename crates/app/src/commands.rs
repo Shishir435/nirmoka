@@ -912,6 +912,59 @@ pub async fn quick_look(
         .map_err(|error| format!("Quick Look worker failed: {error}"))?
 }
 
+/// What one application costs, assembled in two phases.
+///
+/// The lock is held for the tree read and released before anything is walked —
+/// see `attribution::FootprintPlan`. A footprint of an application whose caches
+/// are not in the scanned set is several seconds of directory walking, and the
+/// window stays answerable throughout.
+#[tauri::command]
+pub async fn app_footprint(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<dto::AppFootprint, String> {
+    let plan = {
+        let scan = state.scan();
+        let result = scan
+            .result
+            .as_ref()
+            .ok_or_else(|| "no scan has completed yet".to_string())?;
+        if result.id != scan_id {
+            return Err(format!(
+                "scan {scan_id} has been replaced by scan {}; select the item again",
+                result.id
+            ));
+        }
+        let node = result
+            .tree
+            .node_id(node_id)
+            .map_err(|error| error.to_string())?;
+        let home = crate::path::expand_home("~");
+        crate::attribution::plan(result.id, node, &result.tree, &home)?
+    };
+
+    tauri::async_runtime::spawn_blocking(move || crate::attribution::resolve(plan))
+        .await
+        .map_err(|error| format!("the footprint worker failed: {error}"))
+}
+
+/// Launch the selected application.
+///
+/// Runs on a worker thread for the same reason Quick Look does: the launcher
+/// can block while the desktop decides what to do.
+#[tauri::command]
+pub async fn open_application(
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+    node_id: u32,
+) -> Result<(), String> {
+    let path = node_path_of(&state, scan_id, node_id)?;
+    tauri::async_runtime::spawn_blocking(move || crate::reveal::open_application(&path))
+        .await
+        .map_err(|error| format!("the open worker failed: {error}"))?
+}
+
 #[tauri::command]
 pub fn application_inventory(
     state: State<'_, AppState>,

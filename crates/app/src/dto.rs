@@ -904,6 +904,111 @@ impl InstalledApplicationInventory {
     }
 }
 
+/// Where a size came from, carried beside the number rather than implied by it.
+///
+/// A footprint mixes two ways of knowing: the scan already walked part of it,
+/// and the rest was walked on demand. `Unavailable` is the third answer and is
+/// not zero — a cache directory the walk could not finish is unknown, and
+/// showing it as empty would understate exactly the thing the user opened this
+/// screen to find.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum FootprintSource {
+    Scan,
+    Filesystem,
+    Unavailable,
+}
+
+/// One path belonging to an application, and what it cost to find out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct FootprintPath {
+    pub path: String,
+    /// `null` when the size is not known. See [`FootprintSource`].
+    #[ts(type = "number | null")]
+    pub total_bytes: Option<u64>,
+    pub source: FootprintSource,
+}
+
+/// A group of paths reported under one name — Caches, Containers, Logs.
+///
+/// The label names a location macOS defines, never a concept the application
+/// keeps there: `Docker.raw` is one path under Containers at its real size, and
+/// the images and volumes inside it are Docker's vocabulary for the contents of
+/// a file this program can only see the outside of. See ADR 0028.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct StorageComponent {
+    pub label: String,
+    /// The sum of the paths whose size is known.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// False when a path under this component could not be sized, which makes
+    /// the total a lower bound.
+    pub complete: bool,
+    /// True when every path here carries the application's bundle identifier.
+    ///
+    /// False for the one component matched by vendor name instead — Chrome's
+    /// 6 GB lives in `~/Library/Application Support/Google`, which no
+    /// identifier finds and which may also hold a sibling application's data.
+    /// It is excluded from `AppFootprint::total_bytes` and the window marks it,
+    /// because a guess folded into a total stops looking like one. See ADR 0028.
+    pub certain: bool,
+    pub paths: Vec<FootprintPath>,
+}
+
+/// What one application costs: the bundle, plus everything under `~/Library`
+/// carrying its bundle identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct AppFootprint {
+    #[ts(type = "number")]
+    pub scan_id: u64,
+    pub node_id: u32,
+    /// Without the `.app` suffix, which is a filesystem detail and not the name
+    /// anyone calls the application.
+    pub name: String,
+    pub path: String,
+    /// `null` when `Contents/Info.plist` could not be read or holds no
+    /// identifier. The footprint is then the bundle alone, and that is the
+    /// honest total rather than a failure.
+    pub bundle_id: Option<String>,
+    /// The sum of the components attributed by bundle identifier. Excludes
+    /// anything matched by vendor name — see `related_bytes`.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// Bytes in vendor-named directories that probably belong to this
+    /// application. Zero when none were found. Deliberately a second number
+    /// rather than part of the first.
+    #[ts(type = "number")]
+    pub related_bytes: u64,
+    /// How many existing paths could not be sized. Greater than zero means
+    /// `total_bytes` is a lower bound, and the window says so.
+    pub unmeasured_paths: u32,
+    /// Epoch milliseconds, from Spotlight. `null` where Spotlight has no answer
+    /// — indexing off, a volume it does not index, or a platform that is not
+    /// macOS. The window omits the line rather than claiming "never".
+    #[ts(type = "number | null")]
+    pub last_used_ms: Option<i64>,
+    pub components: Vec<StorageComponent>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(

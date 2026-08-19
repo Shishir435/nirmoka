@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type {
+  AppFootprint,
   Backend,
   BackendSelection,
   ApplicationInventory,
@@ -179,6 +180,19 @@ export interface Transport {
   /** Application bundles evidenced by the completed Rust-side scan tree. */
   applicationInventory(scanId: number): Promise<ApplicationInventory>;
 
+  /**
+   * What one application costs: the bundle, plus everything under `~/Library`
+   * carrying its bundle identifier.
+   *
+   * Takes the scan-and-node pair for the same reason reveal does — Rust
+   * resolves the path from the tree that issued the id. Slower than the other
+   * queries when the application's caches were outside the scanned set, because
+   * those are walked on demand.
+   *
+   * @see docs/adr/0028-an-applications-footprint-is-what-the-filesystem-says.md
+   */
+  appFootprint(scanId: number, nodeId: number): Promise<AppFootprint>;
+
   /** Backend-produced applications with stable uninstall identifiers. */
   installedApplicationInventory(): Promise<InstalledApplicationInventory>;
 
@@ -263,6 +277,8 @@ export interface Transport {
   /** Show this row in Quick Look. Rejects where the platform has none. */
   quickLook(scanId: number, nodeId: number): Promise<void>;
 
+  /** Launch this row as an application, through the desktop's own launcher. */
+  openApplication(scanId: number, nodeId: number): Promise<void>;
 
   /**
    * Subscriptions resolve when the listener is REGISTERED, not when an event
@@ -316,6 +332,7 @@ export function tauriTransport(): Transport {
     volumeInfo: (path) => invoke<VolumeInfo>("volume_info", { path }),
     applicationInventory: (scanId) =>
       invoke<ApplicationInventory>("application_inventory", { scanId }),
+    appFootprint: (scanId, nodeId) => invoke<AppFootprint>("app_footprint", { scanId, nodeId }),
     installedApplicationInventory: () =>
       invoke<InstalledApplicationInventory>("installed_application_inventory"),
     developerInventory: (scanId) => invoke<DeveloperInventory>("developer_inventory", { scanId }),
@@ -338,6 +355,7 @@ export function tauriTransport(): Transport {
     revealInFileManager: (scanId, nodeId) =>
       invoke<void>("reveal_in_file_manager", { scanId, nodeId }),
     quickLook: (scanId, nodeId) => invoke<void>("quick_look", { scanId, nodeId }),
+    openApplication: (scanId, nodeId) => invoke<void>("open_application", { scanId, nodeId }),
 
     onScanProgress: (handler) => subscribe(EVENT.progress, handler),
     onScanFinished: (handler) => subscribe(EVENT.finished, handler),
@@ -708,6 +726,79 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
       return { scanId: summary.scanId, total: 0, rows: [] };
     },
 
+    // Shaped the way a real footprint is: the bundle sized by the scan, the
+    // Library paths walked on demand, and components named by location rather
+    // than by anything the application keeps there — ADR 0028.
+    async appFootprint(scanId, nodeId) {
+      return {
+        scanId,
+        nodeId,
+        name: "Example",
+        path: "/Applications/Example.app",
+        bundleId: "com.example.desktop",
+        totalBytes: 1_476_395_008,
+        relatedBytes: 268_435_456,
+        unmeasuredPaths: 0,
+        lastUsedMs: null,
+        components: [
+          {
+            label: "Application",
+            totalBytes: 268_435_456,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "/Applications/Example.app",
+                totalBytes: 268_435_456,
+                source: "scan",
+              },
+            ],
+          },
+          {
+            label: "Containers",
+            totalBytes: 1_073_741_824,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "~/Library/Containers/com.example.desktop",
+                totalBytes: 1_073_741_824,
+                source: "filesystem",
+              },
+            ],
+          },
+          {
+            label: "Caches",
+            totalBytes: 134_217_728,
+            complete: true,
+            certain: true,
+            paths: [
+              {
+                path: "~/Library/Caches/com.example.desktop",
+                totalBytes: 134_217_728,
+                source: "filesystem",
+              },
+            ],
+          },
+          // Matched by vendor name, not by identifier: excluded from
+          // totalBytes and marked uncertain. See ADR 0028.
+          {
+            label: "Possibly related",
+            totalBytes: 268_435_456,
+            complete: true,
+            certain: false,
+            paths: [
+              {
+                path: "~/Library/Application Support/Example",
+                totalBytes: 268_435_456,
+                source: "filesystem",
+              },
+            ],
+          },
+        ],
+      };
+    },
+
     async installedApplicationInventory() {
       return {
         backend: "mole",
@@ -946,6 +1037,8 @@ export function createMockTransport(overrides: Partial<Transport> = {}): Transpo
     async revealInFileManager() {
       throw new Error("mock transport cannot reach a file manager");
     },
+
+    async openApplication() {},
 
     async quickLook() {
       throw new Error("mock transport cannot open Quick Look");
