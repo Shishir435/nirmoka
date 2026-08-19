@@ -1,12 +1,10 @@
 import type { ReactNode } from "react";
 import { ArrowRight, CheckCircle2, Info, LockKeyhole, ShieldCheck } from "lucide-react";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip } from "recharts";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { formatBytes } from "@/lib/format";
 
 export function PageHeader({
   title,
@@ -99,65 +97,6 @@ export function SafetyBanner({
           Learn More
         </Button>
       )}
-    </div>
-  );
-}
-
-export function DonutChart({
-  data,
-  center,
-  sublabel = "Used",
-}: {
-  data: { name: string; value: number; color: string }[];
-  center: string;
-  sublabel?: string;
-}) {
-  return (
-    <div
-      className="relative h-48 w-48 shrink-0"
-      role="img"
-      aria-label={`${center} ${sublabel}. ${data.map((d) => `${d.name} ${formatBytes(d.value)}`).join(", ")}`}
-    >
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie
-            data={data}
-            dataKey="value"
-            nameKey="name"
-            innerRadius={55}
-            outerRadius={76}
-            paddingAngle={1.5}
-            stroke="transparent"
-            isAnimationActive={false}
-          >
-            {data.map((item) => (
-              <Cell key={item.name} fill={item.color} />
-            ))}
-          </Pie>
-          <ChartTooltip
-            formatter={(value) => [formatBytes(Number(value)), "Size"]}
-            contentStyle={{ borderRadius: 10, borderColor: "var(--border)", fontSize: 12 }}
-          />
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="pointer-events-none absolute inset-0 grid place-content-center text-center">
-        <strong className="text-base">{center}</strong>
-        <span className="text-xs text-muted-foreground">{sublabel}</span>
-      </div>
-    </div>
-  );
-}
-
-export function ChartLegend({ data }: { data: { name: string; value: number; color: string }[] }) {
-  return (
-    <div className="min-w-48 space-y-2.5">
-      {data.map((item) => (
-        <div key={item.name} className="flex items-center gap-2 text-xs">
-          <span className="size-2 rounded-sm" style={{ background: item.color }} />
-          <span className="flex-1 text-muted-foreground">{item.name}</span>
-          <span className="font-medium tabular-nums">{formatBytes(item.value)}</span>
-        </div>
-      ))}
     </div>
   );
 }

@@ -72,7 +72,7 @@ export function StoragePage({
         subtitle="Everything below comes from the scan in the bar above"
       />
 
-      <SummarySection summary={summary} />
+      <SummarySection summary={summary} onOpen={open} />
 
       {/* The rule spans the content width; the row inside it is pulled left by
           the buttons' own padding, so "Folders" starts under "Storage" rather
