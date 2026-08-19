@@ -1073,32 +1073,57 @@ pub async fn open_application(
         .map_err(|error| format!("the open worker failed: {error}"))?
 }
 
+/// Runs on a worker thread.
+///
+/// This walks the whole tree, and a home directory is millions of nodes. As a
+/// synchronous command it held the main thread for as long as that took, which
+/// is the window freezing every time the Applications view is opened — the
+/// scan is in Rust precisely so that work like this does not happen where the
+/// webview can feel it.
 #[tauri::command]
-pub fn application_inventory(
-    state: State<'_, AppState>,
+pub async fn application_inventory(
+    app: AppHandle,
     scan_id: ScanId,
 ) -> Result<dto::ApplicationInventory, String> {
-    application_inventory_of(&state, scan_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        application_inventory_of(app.state::<AppState>().inner(), scan_id)
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread: this is `mo uninstall --list`, a subprocess that
+/// enumerates every installed application before it answers.
 #[tauri::command]
-pub fn installed_application_inventory(
-    state: State<'_, AppState>,
+pub async fn installed_application_inventory(
+    app: AppHandle,
 ) -> Result<dto::InstalledApplicationInventory, String> {
-    installed_application_inventory_of(&state)
+    tauri::async_runtime::spawn_blocking(move || {
+        installed_application_inventory_of(app.state::<AppState>().inner())
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread, for the same reason as `application_inventory`.
 #[tauri::command]
-pub fn developer_inventory(
-    state: State<'_, AppState>,
+pub async fn developer_inventory(
+    app: AppHandle,
     scan_id: ScanId,
 ) -> Result<dto::DeveloperInventory, String> {
-    developer_inventory_of(&state, scan_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        developer_inventory_of(app.state::<AppState>().inner(), scan_id)
+    })
+    .await
+    .map_err(|error| format!("the inventory worker failed: {error}"))?
 }
 
+/// Runs on a worker thread: `mo status` shells out to read hardware sensors.
 #[tauri::command]
-pub fn system_status(state: State<'_, AppState>) -> Result<dto::SystemStatus, String> {
-    system_status_of(&state)
+pub async fn system_status(app: AppHandle) -> Result<dto::SystemStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || system_status_of(app.state::<AppState>().inner()))
+        .await
+        .map_err(|error| format!("the status worker failed: {error}"))?
 }
 
 #[tauri::command]
