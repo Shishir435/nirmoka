@@ -20,7 +20,11 @@ export interface UsageSlice {
  *
  * Slices below a pixel or so are dropped rather than rendered as a hairline —
  * a sliver too small to see but wide enough to catch a tooltip is a target
- * nobody can hit.
+ * nobody can hit. What survives is then measured against what survived, not
+ * against the volume: the track behind the bar is the same colour as free
+ * space, so a dropped sliver of occupied disk would show through as room to
+ * spare. The distortion is under half a percent, which is the threshold; the
+ * bytes are still named in the legend and the label.
  */
 export function StorageUsageBar({
   slices,
@@ -32,6 +36,7 @@ export function StorageUsageBar({
   className?: string;
 }) {
   const visible = slices.filter((slice) => total > 0 && slice.bytes / total >= 0.005);
+  const shown = visible.reduce((sum, slice) => sum + slice.bytes, 0);
 
   return (
     <div
@@ -46,8 +51,8 @@ export function StorageUsageBar({
           style={{
             background: slice.color,
             // Percentages rather than flex-grow: a slice's width is its share
-            // of the volume, and flex would redistribute the rounding.
-            width: `${(slice.bytes / total) * 100}%`,
+            // of the slices drawn, and flex would redistribute the rounding.
+            width: `${(slice.bytes / shown) * 100}%`,
           }}
         />
       ))}

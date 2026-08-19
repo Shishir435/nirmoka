@@ -5,6 +5,7 @@ import {
   applyFootprint,
   applyIcon,
   barTotal,
+  barVolume,
   isBundle,
   openTarget,
   rankConsumers,
@@ -129,6 +130,34 @@ test("without capacity the bar is the scan alone", () => {
   assert.ok(!slices.some((slice) => slice.key === "free"));
   // The widths then divide the scan, so they still fill the bar.
   assert.equal(barTotal(breakdown()), 300);
+});
+
+test("a scan larger than the volume reports drops the volume frame", () => {
+  // The window scans one filesystem, so this is measurements disagreeing — a
+  // snapshot the walk counted and df did not, or apparent sizes. Keeping the
+  // volume would draw categories plus free space past the end of the bar.
+  const disagreeing = {
+    ...breakdown({ volume: true }),
+    scannedBytes: 500,
+  };
+
+  assert.equal(barVolume(disagreeing), null);
+  assert.equal(barTotal(disagreeing), 500, "the bar is the scan");
+
+  const slices = usageSlices(disagreeing, display, "free-colour", "unscanned-colour");
+  assert.ok(!slices.some((slice) => slice.key === "free"));
+  assert.ok(!slices.some((slice) => slice.key === "unscanned"));
+  assert.equal(
+    slices.reduce((sum, slice) => sum + slice.bytes, 0),
+    300,
+    "the slices are the categories, nothing invented to fill the bar",
+  );
+});
+
+test("a scan that exactly fills the volume keeps it as the frame", () => {
+  const exact = { ...breakdown({ volume: true }), scannedBytes: 400 };
+  assert.notEqual(barVolume(exact), null);
+  assert.equal(barTotal(exact), 1000);
 });
 
 test("every category keeps a slice, including the empty ones", () => {

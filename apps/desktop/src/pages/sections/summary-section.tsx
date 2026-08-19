@@ -150,14 +150,14 @@ export function SummarySection({
           {/* The scan and the volume are different numbers whenever the scan was
               not the whole disk, and saying so is cheaper than a user working
               out why the bar does not fill. A scan larger than the volume is the
-              other direction of the same problem: it crossed onto another
-              filesystem, the bar is the scan, and that is worth stating rather
+              other direction of the same problem — the two measurements
+              disagree, so the bar is the scan — and that is worth stating rather
               than leaving as a chart that quietly changed what it measures. */}
           {volume && !framed ? (
             <p className="mt-4 text-xs text-muted-foreground">
               This scan measured {formatBytes(breakdown.scannedBytes)}, more than {volume.name}{" "}
-              holds, so it reached onto another volume. The bar shows the scan rather than this
-              volume's capacity.
+              reports in use. The two disagree, so the bar shows the scan rather than this volume's
+              capacity.
             </p>
           ) : framed && breakdown.scannedBytes < framed.usedBytes ? (
             <p className="mt-4 text-xs text-muted-foreground">

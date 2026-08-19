@@ -37,13 +37,15 @@ export function isBundle(consumer: CategoryConsumer): boolean {
 /**
  * The volume the bar is drawn against, or `null` to draw the scan alone.
  *
- * A scan is not guaranteed to live on one filesystem. Scanning `/` walks into
- * `/Volumes`, and a mounted disk or network share under home does the same, so
- * the scanned bytes can exceed everything this filesystem holds. Framing that
- * scan against this volume's capacity would draw category slices, free space,
- * and a clamped-to-zero unscanned slice that together add up to more than the
- * bar: the widths stop being shares of anything, and the last slices are
- * clipped off the end.
+ * The window scans one filesystem — `crates/app/src/scan.rs` asks for that
+ * precisely so this arithmetic holds — so the scanned bytes are this volume's
+ * bytes and the difference from its used bytes is what was never looked at.
+ *
+ * This is the check for the case where they still disagree: a snapshot counted
+ * by the walk but not by `df`, a backend reporting apparent sizes, a volume read
+ * before a scan that outgrew it. Then the categories, the free space, and a
+ * clamped-to-zero unscanned slice add up to more than the bar — the widths stop
+ * being shares of anything and the last slices are clipped off the end.
  *
  * Where the two numbers cannot both be true, the volume is not the frame. The
  * bar falls back to the scan, which is still a true statement about what was
