@@ -15,6 +15,7 @@
  */
 
 import type {
+  UninstallItem,
   UninstallOperation,
   UninstallPreparation,
   UninstallPreview,
@@ -208,6 +209,79 @@ export function canUninstall(state: UninstallState, name: string | null): name i
  * Two numbers rather than one total, because they are different promises and a
  * combined count would overstate the first.
  */
+/**
+ * The plan's paths, grouped by the location they sit in.
+ *
+ * The same vocabulary `attribution.rs` uses for a footprint — Application,
+ * Containers, Caches, Application Support, Logs, Preferences — so the screen
+ * that says what an application costs and the screen that says what removing it
+ * touches name the same places the same way. A flat list of thirty paths is a
+ * transcript; these are the parts of the application being removed.
+ *
+ * Order is fixed rather than by size, so the same application reads the same
+ * way twice, and `Other` is last because it is the group with no location.
+ */
+const PLAN_GROUPS = [
+  "Application",
+  "Containers",
+  "Application Support",
+  "Caches",
+  "Logs",
+  "Preferences",
+  "Other",
+] as const;
+
+export type PlanGroupLabel = (typeof PLAN_GROUPS)[number];
+
+export interface PlanGroup {
+  label: PlanGroupLabel;
+  items: UninstallItem[];
+}
+
+/** Which group a path belongs to, from where it sits rather than what it is. */
+export function groupOf(displayPath: string): PlanGroupLabel {
+  const path = displayPath.toLowerCase();
+  if (path.startsWith("/applications/") || path.endsWith(".app")) return "Application";
+  if (path.includes("/library/containers/") || path.includes("/library/application scripts/")) {
+    return "Containers";
+  }
+  if (path.includes("/library/application support/")) return "Application Support";
+  if (
+    path.includes("/library/caches/") ||
+    path.includes("/library/httpstorages/") ||
+    path.includes("/library/webkit/")
+  ) {
+    return "Caches";
+  }
+  if (path.includes("/library/logs/")) return "Logs";
+  if (
+    path.includes("/library/preferences/") ||
+    path.includes("/library/saved application state/")
+  ) {
+    return "Preferences";
+  }
+  return "Other";
+}
+
+/** Group a plan's paths, dropping groups nothing fell into. */
+export function groupPlan(items: UninstallItem[]): PlanGroup[] {
+  return PLAN_GROUPS.map((label) => ({
+    label,
+    items: items.filter((item) => groupOf(item.displayPath) === label),
+  })).filter((group) => group.items.length > 0);
+}
+
+/**
+ * What the backend says it will leave behind.
+ *
+ * Shown where the approved design puts a "keep user data" choice, because no
+ * flag backs that choice and this is the true answer to the question it asks —
+ * see ADR 0029. Quoted from the dry run rather than described.
+ */
+export function survivingItems(items: UninstallItem[]): UninstallItem[] {
+  return items.filter((item) => item.scope !== "removed");
+}
+
 export function planCounts(preview: UninstallPreview) {
   const items = preview.apps.flatMap((app) => app.items);
   return {

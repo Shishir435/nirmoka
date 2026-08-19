@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 16.5 — the window is the dashboard.** Step 11 shipped as 0.1.1: `brew install
+**Current step: 17 — inspector.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
 first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18
@@ -564,27 +564,29 @@ navigation on any of its five screens, so the rail goes and the dashboard become
 
 Screens 2 and 5. The footprint of one application, and the drill-down under it.
 
-- [ ] `inspector-page.tsx`, `app-header.tsx`, `app-footprint-summary.tsx`, `storage-component-row.tsx`
-- [ ] Component rows are named by location: Application, Containers, Caches, Application Support,
+- [x] `inspector-page.tsx`, `app-header.tsx`, `app-footprint-summary.tsx`, `storage-component-row.tsx`
+- [x] Component rows are named by location: Application, Containers, Caches, Application Support,
       Logs, Preferences. `Docker.raw` is one row at its real size — ADR 0028
-- [ ] The reclaimable panel is Mole's cleanup items whose path prefix matches this bundle id.
+- [x] The reclaimable panel is Mole's cleanup items whose path prefix matches this bundle id.
       Arithmetic on published data, no rules of our own — ADR 0030
 - [ ] Drill-down reuses `useDirectory` and the existing `rows()` window. `breadcrumb.tsx`,
       `file-details-panel.tsx`, and a tree variant that does not re-solve virtualization
-- [ ] Navigation state extends `route.ts` and stays a pure function under test, redirects included
+- [x] Navigation state extends `route.ts` and stays a pure function under test, redirects included.
+      `#/storage/app/12` is an application; a malformed id is the dashboard rather than an Inspector
+      with nothing in it. `inspector.ts` holds the attribution, 8 tests
 
 ## Step 18 — Cleanup and uninstall review
 
 Screens 3 and 4, and the release.
 
-- [ ] Cleanup rows carry Mole's category name, path, size, item count. No per-item safety badge and
+- [x] Cleanup rows carry Mole's category name, path, size, item count. No per-item safety badge and
       no rationale line — ADR 0030
-- [ ] One banner states what is true of the run: Mole selected the paths, Nirmoka added none, files
+- [x] One banner states what is true of the run: Mole selected the paths, Nirmoka added none, files
       go to the Trash
-- [ ] The uninstall sheet groups `mo uninstall --dry-run` paths by `~/Library` location under an
+- [x] The uninstall sheet groups `mo uninstall --dry-run` paths by `~/Library` location under an
       honest total, and offers Cancel or Uninstall. No keep-user-data radio, because no flag backs
       it — ADR 0029
-- [ ] What Mole will not remove is stated where the design puts the radio, quoted from the dry run
+- [x] What Mole will not remove is stated where the design puts the radio, quoted from the dry run
 - [ ] `pnpm tauri dev` through the whole path: scan, dashboard, inspect an app, drill in, review a
       cleanup, preview an uninstall, cancel it
 - [ ] 0.2.0, tagged, with the tap updated

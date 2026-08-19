@@ -54,10 +54,13 @@ const FOOTPRINT_CONCURRENCY = 2;
 export function SummarySection({
   summary,
   onOpen,
+  onInspect,
 }: {
   summary: ScanSummary;
   /** `null` opens the scan root, which is how the browser addresses it. */
   onOpen?: (nodeId: number | null) => void;
+  /** Opens an application's footprint rather than the directory it is. */
+  onInspect?: (nodeId: number) => void;
 }) {
   const { transport } = useApp();
   const [breakdown, setBreakdown] = useState<CategoryBreakdown | null>(null);
@@ -225,7 +228,16 @@ export function SummarySection({
                     measure={entry.measure}
                     icon={entry.icon}
                     folderIcon={folderIcon}
-                    onOpen={onOpen ? () => onOpen(openTarget(entry)) : undefined}
+                    // An application opens its footprint; a directory opens its
+                    // contents. Sending a bundle to the browser would show the
+                    // 1.8 GB it is rather than the tens of GB it costs.
+                    onOpen={
+                      isBundle(entry.consumer) && onInspect
+                        ? () => onInspect(entry.consumer.id)
+                        : onOpen
+                          ? () => onOpen(openTarget(entry))
+                          : undefined
+                    }
                   />
                 ))}
               </div>

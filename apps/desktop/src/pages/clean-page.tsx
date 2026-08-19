@@ -374,13 +374,19 @@ export function CleanPage() {
         </p>
       )}
 
+      {/* One banner, three facts, each checkable. No per-item badge and no
+          rationale line: Mole publishes neither, and writing them here would be
+          Nirmoka vouching for a removal it did not select. See ADR 0030. */}
       <SafetyBanner>
         <p className="text-sm font-medium">Mole decides what is removed</p>
-        <p className="text-xs text-muted-foreground">
-          Running a cleanup calls Mole’s own command with no paths or categories from this window.
-          Mole re-discovers candidates and applies its own protection rules; Nirmoka does not copy
-          or recreate them, and cannot remove a path Mole did not choose.
-        </p>
+        <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+          <li>Mole selected every path listed here, applying its own protection rules.</li>
+          <li>
+            Nirmoka added none of them, and passes it no paths or categories — it re-discovers
+            candidates when it runs.
+          </li>
+          <li>What it removes goes to the Trash, so the Finder’s Put Back is the undo.</li>
+        </ul>
       </SafetyBanner>
     </div>
   );

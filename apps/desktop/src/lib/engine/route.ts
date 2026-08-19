@@ -28,10 +28,20 @@ export interface Location {
    * looking, so leaving for Clean and coming back should not reset it.
    */
   view: StorageView | null;
+  /**
+   * The application being inspected, by node id, or `null` for none.
+   *
+   * Ids belong to the scan that issued them — see `state.rs` — so a link
+   * carrying one is only meaningful while that scan is loaded. The Inspector
+   * checks, and falls back to the dashboard rather than opening whatever now
+   * sits at that index. Kept in the location anyway so that back leaves the
+   * Inspector rather than the window.
+   */
+  inspect: number | null;
 }
 
 /** The dashboard, which is the window's one destination. */
-export const DEFAULT_LOCATION: Location = { route: "storage", view: null };
+export const DEFAULT_LOCATION: Location = { route: "storage", view: null, inspect: null };
 
 export const STORAGE_VIEWS: readonly StorageView[] = ["folders", "developer", "applications"];
 
@@ -43,12 +53,15 @@ export const STORAGE_VIEWS: readonly StorageView[] = ["folders", "developer", "a
 const RETIRED: Record<string, Location> = {
   // The Overview page's content is the dashboard now, so it lands there rather
   // than in the browser that absorbed it under ADR 0026.
-  overview: { route: "storage", view: null },
-  space: { route: "storage", view: "folders" },
-  status: { route: "storage", view: null },
-  developer: { route: "storage", view: "developer" },
-  applications: { route: "storage", view: "applications" },
+  overview: { route: "storage", view: null, inspect: null },
+  space: { route: "storage", view: "folders", inspect: null },
+  status: { route: "storage", view: null, inspect: null },
+  developer: { route: "storage", view: "developer", inspect: null },
+  applications: { route: "storage", view: "applications", inspect: null },
 };
+
+/** The segment that introduces an inspected application: `#/storage/app/12`. */
+const INSPECT_SEGMENT = "app";
 
 const ROUTES: readonly Route[] = ["storage", "clean", "activity", "help"];
 
@@ -66,12 +79,23 @@ function isView(value: string): value is StorageView {
  * while it shows.
  */
 export function locationFromHash(hash: string): Location | "onboarding" {
-  const [first = "", second = ""] = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  const [first = "", second = "", third = ""] = hash
+    .replace(/^#\/?/, "")
+    .split("/")
+    .filter(Boolean);
   if (first === "onboarding") return "onboarding";
   const retired = RETIRED[first];
   if (retired) return retired;
   if (!isRoute(first)) return DEFAULT_LOCATION;
-  return { route: first, view: isView(second) ? second : null };
+  if (first === "storage" && second === INSPECT_SEGMENT) {
+    // Digits only, and at least one. `Number("")` is 0, so a bare
+    // `#/storage/app` would otherwise open the Inspector on node zero — the
+    // scan root — rather than naming no application at all.
+    return /^\d+$/.test(third)
+      ? { route: "storage", view: null, inspect: Number(third) }
+      : DEFAULT_LOCATION;
+  }
+  return { route: first, view: isView(second) ? second : null, inspect: null };
 }
 
 /**
@@ -102,6 +126,9 @@ export function firstLocation(hash: string, onboarded: boolean): Location | "onb
  * now, which is why the suffix is no longer suppressed as a default.
  */
 export function hashForLocation(location: Location): string {
+  if (location.route === "storage" && location.inspect !== null) {
+    return `#/storage/${INSPECT_SEGMENT}/${location.inspect}`;
+  }
   const suffix = location.route === "storage" && location.view ? `/${location.view}` : "";
   return `#/${location.route}${suffix}`;
 }
