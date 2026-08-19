@@ -226,6 +226,13 @@ pub fn breakdown(
                 id: id.raw(),
                 name: node.name.clone(),
                 path: path.display().to_string(),
+                is_dir: node.is_dir(),
+                // The window addresses the scan root as `null`, so the root's
+                // own id would name a location it does not recognise.
+                parent_id: tree
+                    .parent_of(id)
+                    .filter(|parent| Some(*parent) != tree.root())
+                    .map(|parent| parent.raw()),
                 total_bytes: bytes,
                 size_is_partial: !complete,
             });
@@ -542,6 +549,39 @@ mod tests {
 
         assert!(consumer_of(StorageCategory::Development, "node_modules").size_is_partial);
         assert!(!consumer_of(StorageCategory::PersonalFiles, "Documents").size_is_partial);
+    }
+
+    /// A file can be the biggest thing in a category, and browsing "into" it
+    /// would show an empty directory. Each consumer therefore carries where to
+    /// open, and a direct child of the root opens the root, which the window
+    /// addresses as null rather than by id.
+    #[test]
+    fn a_file_consumer_reports_the_directory_that_holds_it() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        tree.push(Some(root), Node::file("scratch.iso", 9_000));
+        let downloads = tree.push(Some(root), Node::directory("Downloads"));
+        tree.push(Some(downloads), Node::file("installer.dmg", 4_000));
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let other = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Other)
+            .expect("other is reported");
+
+        let file = &other.consumers[0];
+        assert_eq!(file.name, "scratch.iso");
+        assert!(!file.is_dir);
+        assert_eq!(file.parent_id, None, "its parent is the scan root");
+
+        let personal = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::PersonalFiles)
+            .expect("personal files are reported");
+        assert!(personal.consumers[0].is_dir);
     }
 
     /// Every category is always reported, so the dashboard's cards do not move

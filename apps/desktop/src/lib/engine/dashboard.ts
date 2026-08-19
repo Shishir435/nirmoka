@@ -36,11 +36,18 @@ export function isBundle(consumer: CategoryConsumer): boolean {
  * scan: a chart of used space alone cannot answer "how much room is left".
  * Where capacity could not be read there is no free slice and the bar is the
  * scan alone, which is still true about what was measured.
+ *
+ * A scan of one directory leaves a third quantity — space that is in use and
+ * was not looked at. It gets its own slice rather than being left as bare
+ * track, because bare track is the same colour as free space and the bar would
+ * then show occupied disk as room to spare. The slices always add up to the
+ * volume, so nothing shows through.
  */
 export function usageSlices(
   breakdown: CategoryBreakdown,
   display: Record<StorageCategory, { label: string; color: string }>,
   freeColor: string,
+  unscannedColor: string,
 ): UsageSlice[] {
   const categories = breakdown.categories.map((category) => ({
     key: category.category as string,
@@ -49,10 +56,16 @@ export function usageSlices(
     color: display[category.category].color,
   }));
 
-  if (!breakdown.volume) return categories;
+  const volume = breakdown.volume;
+  if (!volume) return categories;
+
+  const unscanned = Math.max(0, volume.usedBytes - breakdown.scannedBytes);
   return [
     ...categories,
-    { key: "free", label: "Free", bytes: breakdown.volume.freeBytes, color: freeColor },
+    ...(unscanned > 0
+      ? [{ key: "unscanned", label: "Not scanned", bytes: unscanned, color: unscannedColor }]
+      : []),
+    { key: "free", label: "Free", bytes: volume.freeBytes, color: freeColor },
   ];
 }
 
@@ -62,16 +75,19 @@ export function barTotal(breakdown: CategoryBreakdown): number {
 }
 
 /**
- * The biggest entries across every category.
+ * Every entry the breakdown reported, largest first.
  *
- * Every category contributes its own consumers, so the list mixes applications
- * and directories the way the disk does. Ties break on the path, because two
- * entries of the same size must not swap places between renders.
+ * Deliberately not truncated. An application's bundle is a fraction of its
+ * footprint — Docker's is under 2 GB against a footprint of tens — so trimming
+ * to the visible rows before the footprints arrive would drop the very
+ * applications that belong at the top. Rust has already capped each category's
+ * consumers, so this list is short; the caller trims once the numbers are real.
+ *
+ * Every category contributes, so the list mixes applications and directories
+ * the way the disk does. Ties break on the path, because two entries of the
+ * same size must not swap places between renders.
  */
-export function rankConsumers(
-  breakdown: CategoryBreakdown | null,
-  limit: number,
-): RankedConsumer[] {
+export function rankConsumers(breakdown: CategoryBreakdown | null): RankedConsumer[] {
   if (!breakdown) return [];
   return breakdown.categories
     .flatMap((category) =>
@@ -84,8 +100,18 @@ export function rankConsumers(
         }),
       ),
     )
-    .sort(byLargest)
-    .slice(0, limit);
+    .sort(byLargest);
+}
+
+/**
+ * Where opening this row should take the browser.
+ *
+ * A directory opens itself. A file has no contents to list, so it opens the
+ * directory holding it — `null` being the scan root, which is how the browser
+ * addresses it.
+ */
+export function openTarget(row: RankedConsumer): number | null {
+  return row.consumer.isDir ? row.consumer.id : (row.consumer.parentId ?? null);
 }
 
 /**

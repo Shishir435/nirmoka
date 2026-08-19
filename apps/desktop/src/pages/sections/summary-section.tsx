@@ -10,12 +10,13 @@ import { StorageUsageBar, StorageUsageLegend } from "@/components/storage-usage-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CATEGORY_DISPLAY, FREE_SPACE_COLOR } from "@/lib/category-display";
+import { CATEGORY_DISPLAY, FREE_SPACE_COLOR, UNSCANNED_COLOR } from "@/lib/category-display";
 import {
   applyFootprint,
   applyIcon,
   barTotal,
   isBundle,
+  openTarget,
   rankConsumers,
   usageSlices,
   type RankedConsumer,
@@ -47,7 +48,8 @@ export function SummarySection({
   onOpen,
 }: {
   summary: ScanSummary;
-  onOpen?: (nodeId: number) => void;
+  /** `null` opens the scan root, which is how the browser addresses it. */
+  onOpen?: (nodeId: number | null) => void;
 }) {
   const { transport } = useApp();
   const [breakdown, setBreakdown] = useState<CategoryBreakdown | null>(null);
@@ -69,7 +71,8 @@ export function SummarySection({
   const consumers = useTopConsumers(breakdown, summary.scanId);
 
   const slices = useMemo(
-    () => (breakdown ? usageSlices(breakdown, CATEGORY_DISPLAY, FREE_SPACE_COLOR) : []),
+    () =>
+      breakdown ? usageSlices(breakdown, CATEGORY_DISPLAY, FREE_SPACE_COLOR, UNSCANNED_COLOR) : [],
     [breakdown],
   );
 
@@ -91,7 +94,10 @@ export function SummarySection({
   }
 
   const volume = breakdown.volume;
-  const largest = consumers[0]?.consumer.totalBytes ?? 0;
+  // Trimmed here rather than in the hook, so a footprint that arrives late can
+  // still promote its row into view.
+  const visible = consumers.slice(0, TOP_CONSUMERS);
+  const largest = visible[0]?.consumer.totalBytes ?? 0;
 
   return (
     <div className="space-y-6">
@@ -161,13 +167,13 @@ export function SummarySection({
       <Card className="shadow-none">
         <CardContent className="p-5">
           <SectionTitle title="Biggest space users" />
-          {consumers.length === 0 ? (
+          {visible.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               This scan found nothing large enough to list.
             </p>
           ) : (
             <div className="-mx-2 divide-y">
-              {consumers.map((entry) => (
+              {visible.map((entry) => (
                 <StorageConsumerRow
                   key={`${entry.category}:${entry.consumer.id}`}
                   consumer={entry.consumer}
@@ -175,7 +181,7 @@ export function SummarySection({
                   largestBytes={largest}
                   measure={entry.measure}
                   icon={entry.icon}
-                  onOpen={onOpen ? () => onOpen(entry.consumer.id) : undefined}
+                  onOpen={onOpen ? () => onOpen(openTarget(entry)) : undefined}
                 />
               ))}
             </div>
@@ -206,7 +212,9 @@ function useTopConsumers(breakdown: CategoryBreakdown | null, scanId: number) {
   const { transport } = useApp();
   const [rows, setRows] = useState<RankedConsumer[]>([]);
 
-  const base = useMemo(() => rankConsumers(breakdown, TOP_CONSUMERS), [breakdown]);
+  // Every candidate, not the visible six: a footprint can lift an application
+  // from tenth place to first, and it cannot do that if it was already dropped.
+  const base = useMemo(() => rankConsumers(breakdown), [breakdown]);
 
   useEffect(() => {
     setRows(base);

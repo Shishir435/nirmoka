@@ -64,3 +64,12 @@ export const CATEGORY_DISPLAY: Record<StorageCategory, CategoryDisplay> = {
 
 /** Free space is not a category — nothing is using it — but it shares the bar. */
 export const FREE_SPACE_COLOR = "var(--muted)";
+
+/**
+ * Space in use that this scan did not look at.
+ *
+ * Visibly darker than free space on purpose: these bytes are occupied, and a
+ * slice that read as free would overstate the room available by however much
+ * of the disk went unscanned.
+ */
+export const UNSCANNED_COLOR = "var(--muted-foreground)";

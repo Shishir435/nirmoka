@@ -155,6 +155,17 @@ export type CategoryConsumer = {
  */
 id: number, name: string, path: string, 
 /**
+ * Whether this entry can be opened as a location. A file cannot: browsing
+ * to it would show an empty directory, so the window opens its parent.
+ */
+isDir: boolean, 
+/**
+ * The directory holding this entry, or `null` when that is the scan root.
+ * Only needed for a file, and reported for everything so the caller does
+ * not have to ask a second question to navigate.
+ */
+parentId: number | null, 
+/**
  * Bytes this entry accounts for *in its own category*, which is not always
  * its size on disk: `~/Documents` reports its personal files, while the
  * `node_modules` inside it are counted under Development.
