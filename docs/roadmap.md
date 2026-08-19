@@ -540,6 +540,10 @@ navigation on any of its five screens, so the rail goes and the dashboard become
 - [x] The sidebar goes. Header is window controls, the name, and three controls: Scan, Settings,
       Help. The scan strip and the page title go with it — a window whose only screen is Storage
       does not need a heading that says Storage
+- [x] The header is as tall as the frame's own buttons, 44px, so `‹ Nirmoka` sits on their line
+      rather than below it. The three controls are outline and the same weight, as the design draws
+      them; Scan was a filled primary, which made a once-per-session button the loudest thing on
+      screen. The mark is gone from beside the name — the icon is already in the Dock
 - [x] Scan becomes a control rather than a bar. The targets the start screen already offers move
       into it, so choosing what to scan is one button and a menu rather than a path field that is
       always on screen

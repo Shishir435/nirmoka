@@ -48,7 +48,10 @@ export function ScanControl() {
 
   return (
     <>
-      <Button size="sm" disabled={!canScan} onClick={() => setOpen(true)}>
+      {/* Outline rather than filled: the design gives Scan the same weight as
+          the two controls beside it, and a primary button in the title bar was
+          the loudest object on every screen. */}
+      <Button variant="outline" size="sm" disabled={!canScan} onClick={() => setOpen(true)}>
         <ScanLine /> {scan.status === "done" ? "Scan Again" : "Scan"}
       </Button>
 

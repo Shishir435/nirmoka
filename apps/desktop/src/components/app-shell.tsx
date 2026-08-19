@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronLeft, CircleHelp, HardDrive, Settings } from "lucide-react";
 
-import { NirmokaMark } from "@/components/mark";
 import { ScanControl, ScanStatusStrip } from "@/components/scan-controls";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -50,38 +49,51 @@ export function AppShell({
             Three columns rather than a flex row, so the name sits in the centre
             of the window rather than in the centre of whatever is left over.
             The outer columns are the same width, which is what keeps it there
-            when one side has a back control and the other has three buttons. */}
+            when one side has a back control and the other has three buttons.
+
+            44px tall, not 56. The frame draws its buttons at a fixed offset
+            from the top of the window, so a taller header centres its own
+            contents below them and the back control sits visibly low beside
+            them. Matching their height is what puts `‹ Nirmoka` on their line,
+            which is where the design draws it, and is why every control in here
+            is `sm` rather than default. */}
         <header
           data-tauri-drag-region
-          className="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-4"
+          className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-3"
           style={inset > 0 ? { paddingLeft: inset } : undefined}
         >
           <div className="flex min-w-0 items-center">
             {back ? (
-              <Button variant="ghost" size="sm" className="-ml-2" onClick={back.onBack}>
+              // No negative margin: the inset ends exactly where the frame's
+              // last button ends, so pulling the glyph back onto it leaves the
+              // chevron touching the zoom button. The button's own padding is
+              // the gap.
+              <Button variant="ghost" size="sm" onClick={back.onBack}>
                 <ChevronLeft /> {back.label}
               </Button>
             ) : null}
           </div>
 
           {/* The window frame no longer writes the name, so this is the only
-              place it appears. Hidden behind a back control, which names where
-              the window is instead. */}
-          <div data-tauri-drag-region className="flex items-center gap-2">
+              place it appears. The mark is not beside it: the application icon
+              already sits in the Dock and in the switcher, and repeating it here
+              is a logo in a title bar. Hidden entirely behind a back control,
+              which names where the window is instead. */}
+          <div data-tauri-drag-region className="flex items-center">
             {back ? null : (
-              <>
-                <NirmokaMark className="size-5 shrink-0 rounded-md" />
-                <span data-tauri-drag-region className="text-[13px] font-semibold">
-                  Nirmoka
-                </span>
-              </>
+              <span data-tauri-drag-region className="text-[13px] font-semibold">
+                Nirmoka
+              </span>
             )}
           </div>
 
           {/* Pulled out by the icon buttons' own padding, so the glyphs line up
               with the right edge of the content below rather than sitting a
               button's worth of padding inside it. */}
-          <div className="-mr-2 flex items-center justify-end gap-0.5">
+          {/* Three outline controls of the same weight, as the design draws
+              them. Scan was a filled primary here, which made the loudest thing
+              in the window a button you press once per session. */}
+          <div className="flex items-center justify-end gap-1.5">
             <ScanControl />
             <IconButton label="Settings" Icon={Settings} onClick={onSettings} />
             <IconButton label="Help" Icon={CircleHelp} onClick={onHelp} />
@@ -136,8 +148,8 @@ function IconButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          variant={active ? "secondary" : "ghost"}
-          size="icon"
+          variant={active ? "secondary" : "outline"}
+          size="icon-sm"
           onClick={onClick}
           aria-label={label}
         >
