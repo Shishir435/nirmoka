@@ -263,31 +263,38 @@ See [ADR 0019](adr/0019-mole-consumer-operations-before-beta.md).
 
 ### Phase 4 — application uninstall ✅
 
-Closed as **not possible against Mole 1.48.1**, on recorded evidence rather than on a guess. Every
-named `mo uninstall` — `--dry-run` included — matches the app and then blocks on
-`Proceed with uninstallation? [y/N]`, and the release exposes no non-interactive flag. The plan is
-behind the prompt, so previewing and executing are the same unreachable call. See
+Landed. First closed as impossible on recorded evidence, then reopened when the recording turned
+out to have been made with stdin _closed_: with `y` on stdin the same Mole 1.48.1 prints its
+complete leftover plan and — under `--dry-run` — modifies nothing, because the flag is set before
+any discovery and every removal below the prompt is separately gated on it. See
+[ADR 0027](adr/0027-uninstall-is-a-relayed-confirmation.md), which supersedes
 [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md).
 
 - [x] Use Mole's uninstall name as the backend identifier; display names are not commands. It
-      crosses the boundary unchanged and the window shows it, which is what makes the Terminal
-      fallback usable rather than a guess at what `mo uninstall` accepts
-- [x] ~~Preview application bundle, leftovers, sensitive/review-only items, and recovery mode~~ —
-      **not possible.** `mo uninstall --dry-run <app>` prints its plan only after the confirmation
-      prompt is answered; with stdin closed it exits 1 having printed nothing but the match.
-      Recorded in `fixtures/mole/1.48.1/uninstall-command-surface.txt`
-- [x] ~~Execute through Mole with explicit confirmation and partial-result reporting~~ —
-      **not possible.** The only way past Mole's prompt is writing to its stdin, which would mean
-      answering another tool's safety gate on the user's behalf. `uninstall_apps` is false and the
-      `Adapter` trait gains no uninstall method
-- [x] Default to Mole's recoverable Trash route; permanent removal is not a beta default. Satisfied
-      by construction: Mole trashes by default, `--permanent` is opt-in, and Nirmoka never invokes
-      uninstall at all
-- [x] Capability split so the honest answer is expressible: `app_inventory` for listing, which Mole
-      can do, separate from `uninstall_apps` for removing, which it cannot. One flag for both would
-      have hidden a working inventory or offered a removal that dies at a prompt
-- [x] A test over the recorded command surface fails if a Mole release documents a way past the
-      prompt, so the decision is re-checked on upgrade rather than remembered
+      crosses the boundary unchanged, and it is what a confirmation names
+- [x] Preview application bundle, leftovers, and review-only items from Mole's own dry run. The
+      parser refuses rather than narrows — a changed match header, a count that disagrees with the
+      list, or a missing terminal summary is `MalformedBackendOutput` — and the verbatim transcript
+      travels beside the parsed rows so a parser bug cannot become the whole story
+- [x] Execute through Mole with explicit confirmation and partial-result reporting. The plan is
+      shown first, the confirmation token is issued against that plan and nothing else, and a
+      partly failed run reports what Mole said it removed rather than what was asked
+- [x] Default to Mole's recoverable Trash route; permanent removal is not a beta default. Mole
+      trashes by default, `--permanent` is opt-in, and a test asserts on the recorded argv that
+      Nirmoka never passes it
+- [x] Never handle a password. Mole detects the absent TTY and puts up its own native
+      authorization dialog, which is the backend's own gate and stays that way
+- [x] Only an identifier the backend just published can become an argument, checked against a live
+      `mo uninstall --list` at preview and again at execution. An application renamed, updated, or
+      already removed since the review is refused rather than matched to something else
+- [x] Capability split so the honest answer stays expressible: `app_inventory` for listing,
+      `uninstall_apps` for removing, and the window requires `dry_run` as well before it offers a
+      button — a removal it cannot describe first is one it will not run
+- [x] Journal every run beside the cleanup runs, with what was approved and what the backend
+      reported. The transcript is not journalled: it names paths across a user's library
+- [x] A test over the recorded command surface fails if Trash routing stops being Mole's default,
+      so the one drift that would silently make an uninstall unrecoverable is re-checked on upgrade
+      rather than remembered
 
 ### Phase 5 — consumer navigation and accessibility ✅
 
@@ -417,8 +424,8 @@ Nothing here ships without tests.
       screen. When Mole's list is showing, the page says to scan `/Applications` instead of hiding
       an action with no explanation
 - [x] State plainly that leftovers stay: this moves the bundle and nothing else. A full uninstall
-      needs Mole, which cannot be driven past its own prompt —
-      [ADR 0021](adr/0021-application-uninstall-is-not-an-adapter-api.md)
+      needs Mole, and the page points at the Uninstall button on Mole's own list —
+      [ADR 0027](adr/0027-uninstall-is-a-relayed-confirmation.md)
 - [x] One confirmation dialog, shared with the browser. Two copies of a destructive confirmation
       drift, and the copy that drifts is the one nobody was looking at
 

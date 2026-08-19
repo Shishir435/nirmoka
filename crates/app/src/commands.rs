@@ -185,6 +185,122 @@ pub fn confirm_cleanup_in(
     Ok(dto::CleanupOperation::from_operation(&operation))
 }
 
+/// One fresh backend-owned uninstall plan for the named applications.
+///
+/// Removes nothing. The backend runs its own dry run, and what comes back is what
+/// it says it would delete — including the paths it says it would *not* touch.
+///
+/// `names` are backend identifiers the window read from the inventory, and the
+/// adapter checks every one against the live inventory before it becomes an
+/// argument. See ADR 0027.
+pub fn uninstall_preview_of(
+    state: &AppState,
+    names: &[String],
+    cancel: &CancelToken,
+) -> Result<dto::UninstallPreview, String> {
+    let choice = state
+        .resolve(Ability::UninstallApps)
+        .ok_or_else(|| "no usable backend can uninstall applications".to_string())?;
+    let backend = choice.adapter.id();
+    let preview = choice
+        .adapter
+        .uninstall_preview(names, cancel)
+        .map_err(|error| error.to_string())?;
+
+    state
+        .uninstall()
+        .remember(backend, preview.clone(), Instant::now());
+
+    Ok(dto::UninstallPreview::from_adapter(backend, preview))
+}
+
+/// Bind the latest reviewed plan to one short-lived, one-time token.
+///
+/// Neither an application name nor a path returns as an execute parameter — the
+/// token is the whole handle, exactly as for cleanup and for a selected-path
+/// deletion.
+pub fn prepare_uninstall_of(state: &AppState) -> Result<dto::UninstallPreparation, String> {
+    let preparation = state.uninstall().prepare(Instant::now()).ok_or_else(|| {
+        "no fresh non-empty uninstall plan is available; review the application again".to_string()
+    })?;
+
+    Ok(dto::UninstallPreparation::from_state(preparation))
+}
+
+/// Consume a one-time confirmation and run the backend's own uninstall.
+///
+/// This is the moment the user's approval is relayed to Mole's prompt, and the
+/// ordering is what makes that legitimate. The token exists only because a plan
+/// was produced, shown, and approved; the adapter re-validates the identifiers
+/// against the live inventory; and it never passes the flag that would make the
+/// removal unrecoverable. See ADR 0027.
+///
+/// The confirmation is spent whether or not the run succeeds, and the reviewed
+/// plan is dropped either way — afterwards every path in it is a statement about
+/// the past, and the application it named may be gone.
+///
+/// A run that started is always journalled, cancelled and failed runs included.
+/// An `Err` here is a run that never started, which is the one case that records
+/// nothing.
+pub fn confirm_uninstall_in(
+    state: &AppState,
+    confirmation_token: u64,
+    cancel: &CancelToken,
+) -> Result<dto::UninstallOperation, String> {
+    let pending = state
+        .uninstall()
+        .take(confirmation_token, Instant::now())
+        .ok_or_else(|| {
+            "this uninstall confirmation is invalid, expired, or was already used; review the \
+             application again"
+                .to_string()
+        })?;
+
+    let result = state
+        .adapter(&pending.backend)
+        .ok_or_else(|| {
+            format!(
+                "the backend that produced this uninstall review ({}) is no longer registered",
+                pending.backend
+            )
+        })
+        .and_then(|adapter| {
+            adapter
+                .execute_uninstall(
+                    &pending.preview.requested,
+                    &pending.preview.backend_version,
+                    cancel,
+                )
+                .map_err(|error| error.to_string())
+        });
+
+    state.uninstall().forget();
+
+    let execution = result?;
+    let preview = pending.preview;
+    let operation = state
+        .deletion()
+        .record_uninstall(crate::deletion::UninstallRecord {
+            backend: pending.backend,
+            reviewed_applications: preview.apps.iter().map(|app| app.name.clone()).collect(),
+            reviewed_items: preview.total_items() as u64,
+            backend_version: preview.backend_version,
+            reviewed_total: preview.reported_total,
+            execution,
+        });
+
+    Ok(dto::UninstallOperation::from_operation(&operation))
+}
+
+pub fn uninstall_log_of(state: &AppState) -> Vec<dto::UninstallOperation> {
+    state
+        .deletion()
+        .uninstalls()
+        .iter()
+        .map(dto::UninstallOperation::from_operation)
+        .collect()
+}
+
 /// The path a row names, resolved from the tree that produced it.
 ///
 /// The window sends the pair that identifies a node and never a path of its own.
@@ -756,9 +872,15 @@ pub fn trash_log(state: State<'_, AppState>) -> Vec<dto::TrashOperation> {
     trash_log_of(&state)
 }
 
+/// Capacity of the volume holding `path`.
+///
+/// The path goes through the same `~` expansion a scan root does. Before this,
+/// the only caller passed an already-resolved scan root, so a literal `~` would
+/// have reached `df` as a directory name — and the window now asks about the home
+/// directory before any scan exists to resolve it.
 #[tauri::command]
 pub fn volume_info(path: String) -> Result<dto::VolumeInfo, String> {
-    crate::volume::info(std::path::Path::new(&path))
+    crate::volume::info(&crate::path::expand_home(&path))
 }
 
 /// What this desktop can do with a selected path, and what to call it.
@@ -877,6 +999,69 @@ pub fn cancel_cleanup(state: State<'_, AppState>) -> bool {
 #[tauri::command]
 pub fn cleanup_log(state: State<'_, AppState>) -> Vec<dto::CleanupOperation> {
     cleanup_log_of(&state)
+}
+
+/// Runs on a worker thread. Mole scans every application to resolve a name, which
+/// takes seconds, and a blocked command would freeze the window it reports to.
+#[tauri::command]
+pub async fn uninstall_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    names: Vec<String>,
+) -> Result<dto::UninstallPreview, String> {
+    let (preview_id, cancel) = state.uninstall().start_preview()?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        uninstall_preview_of(worker_app.state::<AppState>().inner(), &names, &cancel)
+    })
+    .await;
+
+    state.uninstall().finish_preview(preview_id);
+    result.map_err(|error| format!("uninstall preview worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn cancel_uninstall_preview(state: State<'_, AppState>) -> bool {
+    state.uninstall().cancel_preview()
+}
+
+#[tauri::command]
+pub fn prepare_uninstall(state: State<'_, AppState>) -> Result<dto::UninstallPreparation, String> {
+    prepare_uninstall_of(&state)
+}
+
+/// Runs on a worker thread, for the same reason the cleanup run does — and here
+/// the backend may also put up its own authorization dialog, which cannot be
+/// answered while the command loop is blocked.
+#[tauri::command]
+pub async fn confirm_uninstall(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirmation_token: u64,
+) -> Result<dto::UninstallOperation, String> {
+    let cancel = state.uninstall().start_execution()?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        confirm_uninstall_in(
+            worker_app.state::<AppState>().inner(),
+            confirmation_token,
+            &cancel,
+        )
+    })
+    .await;
+
+    state.uninstall().finish_execution();
+    result.map_err(|error| format!("uninstall worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn cancel_uninstall(state: State<'_, AppState>) -> bool {
+    state.uninstall().cancel_execution()
+}
+
+#[tauri::command]
+pub fn uninstall_log(state: State<'_, AppState>) -> Vec<dto::UninstallOperation> {
+    uninstall_log_of(&state)
 }
 
 #[cfg(test)]
@@ -1170,6 +1355,288 @@ mod tests {
             error.contains("invalid, expired, or was already used"),
             "{error}"
         );
+    }
+
+    /// A stand-in for Mole's uninstall. Asserts on what crosses the boundary:
+    /// the identifiers, and the version the review was produced by.
+    struct FakeUninstaller {
+        outcome: Result<nirmoka_adapter::UninstallExecution, &'static str>,
+    }
+
+    impl FakeUninstaller {
+        fn removing(completion: nirmoka_adapter::UninstallCompletion) -> Self {
+            Self {
+                outcome: Ok(nirmoka_adapter::UninstallExecution {
+                    completion,
+                    removed: vec!["Example".to_string()],
+                    failed: Vec::new(),
+                    reported_freed: Some("83.4MB".to_string()),
+                    warnings: Vec::new(),
+                    transcript: "Removed 1 app, freed 83.4MB: Example\n".to_string(),
+                }),
+            }
+        }
+
+        fn refusing() -> Self {
+            Self {
+                outcome: Err("mo changed from reviewed version 1.48.1 to 1.49.0"),
+            }
+        }
+    }
+
+    impl nirmoka_adapter::Adapter for FakeUninstaller {
+        fn id(&self) -> &'static str {
+            "mole"
+        }
+        fn display_name(&self) -> &'static str {
+            "Mole"
+        }
+        fn supported_versions(&self) -> &'static str {
+            "1.48.x"
+        }
+        fn detect(&self) -> Result<nirmoka_adapter::Detection, nirmoka_adapter::AdapterError> {
+            Ok(nirmoka_adapter::Detection::Found {
+                path: std::path::PathBuf::from("/fixtures/mo"),
+                version: "1.48.1".to_string(),
+            })
+        }
+        fn capabilities(&self) -> nirmoka_adapter::Capabilities {
+            nirmoka_adapter::Capabilities {
+                scan: false,
+                dry_run: true,
+                app_inventory: true,
+                uninstall_apps: true,
+                ..nirmoka_adapter::Capabilities::MINIMAL
+            }
+        }
+        fn execute_uninstall(
+            &self,
+            names: &[String],
+            reviewed_version: &str,
+            _cancel: &CancelToken,
+        ) -> Result<nirmoka_adapter::UninstallExecution, nirmoka_adapter::AdapterError> {
+            assert_eq!(
+                names,
+                ["example-cask".to_string()],
+                "execution must carry the identifiers the review named, and nothing else"
+            );
+            assert_eq!(
+                reviewed_version, "1.48.1",
+                "execution must carry the version the preview was produced by"
+            );
+            self.outcome
+                .clone()
+                .map_err(|reason| nirmoka_adapter::AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation: "uninstall execution",
+                    reason: reason.to_string(),
+                })
+        }
+        fn scan(
+            &self,
+            _root: &std::path::Path,
+            _options: &nirmoka_adapter::ScanOptions,
+            _sink: &mut dyn nirmoka_adapter::WireSink,
+            _cancel: &CancelToken,
+        ) -> Result<nirmoka_adapter::ScanSummary, nirmoka_adapter::AdapterError> {
+            unreachable!("the uninstall backend never scans")
+        }
+    }
+
+    fn reviewed_uninstall() -> nirmoka_adapter::UninstallPreview {
+        nirmoka_adapter::UninstallPreview {
+            backend_version: "1.48.1".to_string(),
+            requested: vec!["example-cask".to_string()],
+            apps: vec![nirmoka_adapter::UninstallApp {
+                name: "Example".to_string(),
+                homebrew_cask: true,
+                reported_size: Some("83.4MB".to_string()),
+                items: vec![
+                    nirmoka_adapter::UninstallItem {
+                        display_path: "/Applications/Example.app".to_string(),
+                        reported_size: Some("83.2MB".to_string()),
+                        scope: nirmoka_adapter::UninstallItemScope::Removed,
+                    },
+                    nirmoka_adapter::UninstallItem {
+                        display_path: "/Library/Preferences/com.example.plist".to_string(),
+                        reported_size: None,
+                        scope: nirmoka_adapter::UninstallItemScope::ReviewOnly,
+                    },
+                ],
+            }],
+            reported_total: Some("83.4MB".to_string()),
+            warnings: Vec::new(),
+            notes: vec!["Local Network permissions can outlive app removal".to_string()],
+            transcript: "◎ Matched 1 app(s):\n".to_string(),
+        }
+    }
+
+    fn state_with_a_reviewed_uninstall(
+        uninstaller: FakeUninstaller,
+        log: Option<std::path::PathBuf>,
+    ) -> AppState {
+        let mut registry = nirmoka_adapter::Registry::new();
+        registry.register(Box::new(uninstaller));
+        let state = AppState::with_parts(
+            nirmoka_adapter::Preference::of("mole"),
+            false,
+            registry,
+            log,
+        );
+        state
+            .uninstall()
+            .remember("mole", reviewed_uninstall(), Instant::now());
+        state
+    }
+
+    /// The preparation is built from the plan Rust holds, and it names the
+    /// application in words a user reads before approving.
+    #[test]
+    fn uninstall_preparation_uses_only_the_plan_held_in_rust() {
+        let state = state_with_a_reviewed_uninstall(
+            FakeUninstaller::removing(nirmoka_adapter::UninstallCompletion::Finished),
+            None,
+        );
+
+        let preparation = prepare_uninstall_of(&state).expect("fresh plan");
+
+        assert_eq!(preparation.backend, "mole");
+        assert_eq!(preparation.backend_version, "1.48.1");
+        assert_eq!(preparation.applications, ["Example"]);
+        assert_eq!(preparation.total_items, 2);
+        assert!(preparation.has_review_only_items);
+        assert!(preparation.requires_confirmation);
+        assert!(preparation.warning.contains("Example"));
+        assert!(
+            preparation.warning.contains("Trash"),
+            "{}",
+            preparation.warning
+        );
+    }
+
+    #[test]
+    fn a_confirmed_uninstall_is_journalled_with_the_reviewed_evidence() {
+        let log = journal_path("uninstalled");
+        let state = state_with_a_reviewed_uninstall(
+            FakeUninstaller::removing(nirmoka_adapter::UninstallCompletion::Finished),
+            Some(log.clone()),
+        );
+        let token = prepare_uninstall_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let operation =
+            confirm_uninstall_in(&state, token, &CancelToken::new()).expect("uninstall ran");
+
+        assert_eq!(operation.backend, "mole");
+        assert_eq!(operation.reviewed_applications, ["Example"]);
+        assert_eq!(operation.reviewed_items, 2);
+        assert_eq!(operation.removed, ["Example"]);
+        assert_eq!(operation.completion, dto::UninstallCompletion::Finished);
+        assert_eq!(operation.log_error, None);
+
+        let journal = std::fs::read_to_string(&log).expect("the journal was written");
+        assert!(journal.contains("\"event\":\"uninstalled\""), "{journal}");
+        assert!(
+            journal.contains("\"reviewed_applications\":[\"Example\"]"),
+            "{journal}"
+        );
+        // The transcript names paths across a user's library. It stays out of a
+        // durable plaintext file.
+        assert!(
+            !journal.contains("Matched 1 app"),
+            "the transcript must not be journalled: {journal}"
+        );
+        // Read back as an operation rather than only as text.
+        assert_eq!(uninstall_log_of(&state).len(), 1);
+
+        let _ = std::fs::remove_file(log);
+    }
+
+    /// A run that never started spends the confirmation and records nothing.
+    #[test]
+    fn a_refused_uninstall_spends_the_confirmation_and_journals_nothing() {
+        let log = journal_path("uninstall-refused");
+        let state = state_with_a_reviewed_uninstall(FakeUninstaller::refusing(), Some(log.clone()));
+        let token = prepare_uninstall_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let error = confirm_uninstall_in(&state, token, &CancelToken::new())
+            .expect_err("the backend refused");
+
+        assert!(error.contains("1.49.0"), "{error}");
+        assert!(!log.exists(), "nothing ran, so nothing is journalled");
+        // The token is spent even though the run was refused, and the plan is
+        // gone — a second attempt has to review a fresh one.
+        assert!(confirm_uninstall_in(&state, token, &CancelToken::new()).is_err());
+        assert!(
+            prepare_uninstall_of(&state).is_err(),
+            "the reviewed plan is dropped after any attempt"
+        );
+    }
+
+    /// A cancelled uninstall moved files up to the moment it stopped, so it is an
+    /// outcome to record rather than an error to raise.
+    #[test]
+    fn a_cancelled_uninstall_is_still_journalled() {
+        let log = journal_path("uninstall-cancelled");
+        let state = state_with_a_reviewed_uninstall(
+            FakeUninstaller::removing(nirmoka_adapter::UninstallCompletion::Cancelled),
+            Some(log.clone()),
+        );
+        let token = prepare_uninstall_of(&state)
+            .expect("preparation")
+            .confirmation_token;
+
+        let operation = confirm_uninstall_in(&state, token, &CancelToken::new())
+            .expect("a stopped run happened");
+
+        assert_eq!(operation.completion, dto::UninstallCompletion::Cancelled);
+        assert!(std::fs::read_to_string(&log)
+            .expect("the journal was written")
+            .contains("\"completion\":\"cancelled\""));
+
+        let _ = std::fs::remove_file(log);
+    }
+
+    #[test]
+    fn uninstall_execution_needs_a_live_confirmation() {
+        let state = state_with_a_reviewed_uninstall(
+            FakeUninstaller::removing(nirmoka_adapter::UninstallCompletion::Finished),
+            None,
+        );
+
+        let error = confirm_uninstall_in(&state, 999, &CancelToken::new())
+            .expect_err("an unknown token is not a confirmation");
+
+        assert!(
+            error.contains("invalid, expired, or was already used"),
+            "{error}"
+        );
+    }
+
+    /// The whole ordering property, as one test: there is no route to a removal
+    /// that does not pass through a plan.
+    #[test]
+    fn an_uninstall_cannot_be_confirmed_without_a_reviewed_plan() {
+        let mut registry = nirmoka_adapter::Registry::new();
+        registry.register(Box::new(FakeUninstaller::removing(
+            nirmoka_adapter::UninstallCompletion::Finished,
+        )));
+        let state = AppState::with_parts(
+            nirmoka_adapter::Preference::of("mole"),
+            false,
+            registry,
+            None,
+        );
+
+        // No plan has been produced, so no token can be issued...
+        assert!(prepare_uninstall_of(&state).is_err());
+        // ...and no token is accepted.
+        for token in [0, 1, 999] {
+            assert!(confirm_uninstall_in(&state, token, &CancelToken::new()).is_err());
+        }
     }
 
     /// The window and the process must never disagree about the setting.

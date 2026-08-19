@@ -21,7 +21,9 @@ use nirmoka_adapter::{
     Capabilities as AdapterCapabilities, CleanupCompletion as AdapterCleanupCompletion,
     CleanupPreview as AdapterCleanupPreview, CleanupSystemScope as AdapterCleanupSystemScope,
     Detection as AdapterDetection, InstalledApplication as AdapterInstalledApplication,
-    SystemStatus as AdapterSystemStatus,
+    SystemStatus as AdapterSystemStatus, UninstallApp as AdapterUninstallApp,
+    UninstallCompletion as AdapterUninstallCompletion,
+    UninstallItemScope as AdapterUninstallItemScope, UninstallPreview as AdapterUninstallPreview,
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
@@ -144,6 +146,10 @@ pub struct PlatformFeatures {
     export_to = "../../../packages/transport/src/generated/bindings.ts"
 )]
 pub struct VolumeInfo {
+    /// What the desktop calls this volume — "Macintosh HD" rather than
+    /// `/System/Volumes/Data`. Resolved by the platform layer, because the name
+    /// is not in `df` output and the window has no way to look it up.
+    pub name: String,
     pub mount_point: String,
     #[ts(type = "number")]
     pub total_bytes: u64,
@@ -269,6 +275,253 @@ pub enum CleanupCompletion {
     Partial,
     Cancelled,
     Failed,
+}
+
+/// One backend-produced uninstall plan, for the window to render and the user to
+/// approve.
+///
+/// Carries the backend's own transcript beside the parsed rows. That is
+/// deliberate: the rows are what the UI draws, and the transcript is what the
+/// user is actually approving, so a parse that silently narrowed the plan stays
+/// visible instead of becoming the whole story.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallPreview {
+    pub backend: String,
+    pub backend_version: String,
+    /// The backend identifiers this plan covers, which is what a confirmation
+    /// later names. Never a display name.
+    pub requested: Vec<String>,
+    pub apps: Vec<UninstallApp>,
+    pub reported_total: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub has_review_only_items: bool,
+    pub warnings: Vec<String>,
+    pub notes: Vec<String>,
+    pub transcript: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallApp {
+    pub name: String,
+    pub homebrew_cask: bool,
+    pub reported_size: Option<String>,
+    pub items: Vec<UninstallItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallItem {
+    /// The backend's display form, tilde-abbreviated. Not a resolvable path, and
+    /// nothing in the window may treat it as one — see `nirmoka_adapter::uninstall`.
+    pub display_path: String,
+    pub reported_size: Option<String>,
+    pub scope: UninstallItemScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum UninstallItemScope {
+    Removed,
+    System,
+    ReviewOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub enum UninstallCompletion {
+    Finished,
+    Partial,
+    Cancelled,
+    Failed,
+}
+
+/// Latest Rust-held uninstall review, bound to a short-lived one-time token.
+///
+/// The token is the only thing that can start the removal. No application name
+/// and no path returns as an execute parameter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallPreparation {
+    #[ts(type = "number")]
+    pub confirmation_token: u64,
+    pub backend: String,
+    pub backend_version: String,
+    /// Display names, for the dialog's own sentence. The identifiers stay in Rust.
+    pub applications: Vec<String>,
+    pub reported_total: Option<String>,
+    #[ts(type = "number")]
+    pub total_items: u64,
+    pub has_review_only_items: bool,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub expires_in_seconds: u64,
+    pub requires_confirmation: bool,
+    pub warning: String,
+}
+
+/// One durable uninstall journal entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../../packages/transport/src/generated/bindings.ts"
+)]
+pub struct UninstallOperation {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub reviewed_applications: Vec<String>,
+    #[ts(type = "number")]
+    pub reviewed_items: u64,
+    pub reviewed_total: Option<String>,
+    pub completion: UninstallCompletion,
+    pub removed: Vec<String>,
+    pub failed: Vec<String>,
+    pub reported_freed: Option<String>,
+    pub warnings: Vec<String>,
+    #[ts(type = "number")]
+    pub executed_at_ms: u64,
+    pub log_error: Option<String>,
+}
+
+impl UninstallPreview {
+    pub fn from_adapter(backend: &str, preview: AdapterUninstallPreview) -> Self {
+        Self {
+            backend: backend.to_string(),
+            backend_version: preview.backend_version.clone(),
+            requested: preview.requested.clone(),
+            total_items: preview.total_items() as u64,
+            has_review_only_items: preview.has_review_only_items(),
+            apps: preview
+                .apps
+                .iter()
+                .map(UninstallApp::from_adapter)
+                .collect(),
+            reported_total: preview.reported_total,
+            warnings: preview.warnings,
+            notes: preview.notes,
+            transcript: preview.transcript,
+        }
+    }
+}
+
+impl UninstallApp {
+    fn from_adapter(app: &AdapterUninstallApp) -> Self {
+        Self {
+            name: app.name.clone(),
+            homebrew_cask: app.homebrew_cask,
+            reported_size: app.reported_size.clone(),
+            items: app
+                .items
+                .iter()
+                .map(|item| UninstallItem {
+                    display_path: item.display_path.clone(),
+                    reported_size: item.reported_size.clone(),
+                    scope: uninstall_item_scope(item.scope),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl UninstallPreparation {
+    pub fn from_state(preparation: crate::uninstall::UninstallPreparation) -> Self {
+        let preview = &preparation.pending.preview;
+        let applications: Vec<String> = preview.apps.iter().map(|app| app.name.clone()).collect();
+        Self {
+            confirmation_token: preparation.token,
+            backend: preparation.pending.backend.clone(),
+            backend_version: preview.backend_version.clone(),
+            reported_total: preview.reported_total.clone(),
+            total_items: preview.total_items() as u64,
+            has_review_only_items: preview.has_review_only_items(),
+            warnings: preview.warnings.clone(),
+            expires_in_seconds: preparation.expires_in.as_secs(),
+            requires_confirmation: true,
+            warning: format!(
+                "{} and the files listed above will be moved to the Trash by {}. \
+                 Recover them from the Trash if this was a mistake.",
+                sentence_list(&applications),
+                preparation.pending.backend,
+            ),
+            applications,
+        }
+    }
+}
+
+impl UninstallOperation {
+    pub fn from_operation(operation: &crate::deletion::UninstallOperation) -> Self {
+        Self {
+            id: operation.id,
+            backend: operation.backend.clone(),
+            backend_version: operation.backend_version.clone(),
+            reviewed_applications: operation.reviewed_applications.clone(),
+            reviewed_items: operation.reviewed_items,
+            reviewed_total: operation.reviewed_total.clone(),
+            completion: uninstall_completion(operation.completion),
+            removed: operation.removed.clone(),
+            failed: operation.failed.clone(),
+            reported_freed: operation.reported_freed.clone(),
+            warnings: operation.warnings.clone(),
+            executed_at_ms: operation.executed_at_ms,
+            log_error: operation.log_error.clone(),
+        }
+    }
+}
+
+fn uninstall_item_scope(scope: AdapterUninstallItemScope) -> UninstallItemScope {
+    match scope {
+        AdapterUninstallItemScope::Removed => UninstallItemScope::Removed,
+        AdapterUninstallItemScope::System => UninstallItemScope::System,
+        AdapterUninstallItemScope::ReviewOnly => UninstallItemScope::ReviewOnly,
+    }
+}
+
+fn uninstall_completion(completion: AdapterUninstallCompletion) -> UninstallCompletion {
+    match completion {
+        AdapterUninstallCompletion::Finished => UninstallCompletion::Finished,
+        AdapterUninstallCompletion::Partial => UninstallCompletion::Partial,
+        AdapterUninstallCompletion::Cancelled => UninstallCompletion::Cancelled,
+        AdapterUninstallCompletion::Failed => UninstallCompletion::Failed,
+    }
+}
+
+/// `"A"`, `"A and B"`, `"A, B and C"` — for a sentence a user reads before
+/// approving a removal, where "1 app(s)" would be the wrong register.
+fn sentence_list(names: &[String]) -> String {
+    match names {
+        [] => "No application".to_string(),
+        [only] => only.clone(),
+        [head @ .., last] => format!("{} and {last}", head.join(", ")),
+    }
 }
 
 /// One durable cleanup journal entry.

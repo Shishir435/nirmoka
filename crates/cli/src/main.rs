@@ -19,6 +19,7 @@
 
 mod backends;
 mod scan;
+mod uninstall;
 
 use clap::{Parser, Subcommand};
 use nirmoka_adapter::{Preference, Registry};
@@ -63,6 +64,9 @@ enum Command {
 
     /// Scan a directory with whichever backend is selected for scanning.
     Scan(scan::ScanArgs),
+
+    /// Read a backend's uninstall plan for an application. Never removes anything.
+    Uninstall(uninstall::UninstallArgs),
 }
 
 /// The registry, in registration order.
@@ -92,5 +96,6 @@ fn main() -> std::process::ExitCode {
     match cli.command {
         Command::Backends { json } => backends::run(json, &registry, &preference),
         Command::Scan(args) => scan::run(args, &registry, &preference),
+        Command::Uninstall(args) => uninstall::run(args, &registry, &preference),
     }
 }

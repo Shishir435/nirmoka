@@ -66,13 +66,58 @@ pub struct Outcome {
 }
 
 impl RunningProcess {
-    /// Spawn `command` with piped stdout and stderr.
+    /// Spawn `command` with piped stdout and stderr, and nothing on stdin.
     pub fn spawn(command: &mut Command, cancel: &CancelToken) -> io::Result<Self> {
+        Self::spawn_inner(command, None, cancel)
+    }
+
+    /// Spawn `command` with `input` written to its stdin, which is then closed.
+    ///
+    /// For a backend whose only way to accept a decision is a prompt it reads
+    /// from stdin. The bytes are fixed at the call site and written once: this
+    /// is not a channel, and no adapter may hold it open to converse with a
+    /// backend's interactive flow.
+    ///
+    /// **Nothing here decides what to answer.** A caller that writes a
+    /// confirmation must already hold the user's explicit approval for the exact
+    /// operation being run — see `MoleAdapter::execute_uninstall`, the only
+    /// caller, and ADR 0027 for why that approval is what makes this legitimate
+    /// rather than an adapter answering a safety prompt on a user's behalf.
+    pub fn spawn_with_input(
+        command: &mut Command,
+        input: &[u8],
+        cancel: &CancelToken,
+    ) -> io::Result<Self> {
+        Self::spawn_inner(command, Some(input.to_vec()), cancel)
+    }
+
+    fn spawn_inner(
+        command: &mut Command,
+        input: Option<Vec<u8>>,
+        cancel: &CancelToken,
+    ) -> io::Result<Self> {
         let mut child = command
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
+
+        // Written on its own thread, for the same reason stderr is drained on
+        // one: a backend that reads no stdin until after it has filled the
+        // stdout pipe would deadlock against a write on this thread. Dropping
+        // the handle at the end of the closure is what delivers EOF, and a
+        // backend waiting on a line will not proceed without it.
+        if let (Some(mut pipe), Some(input)) = (child.stdin.take(), input) {
+            thread::spawn(move || {
+                use std::io::Write;
+                let _ = pipe.write_all(&input);
+                let _ = pipe.flush();
+            });
+        }
 
         let stdout = child.stdout.take();
 

@@ -39,14 +39,21 @@ pub struct Capabilities {
     /// List installed applications with the identifier the backend's own
     /// uninstall command accepts.
     ///
-    /// Separate from [`Capabilities::uninstall_apps`] because Mole 1.48.1 can do
-    /// this and cannot do that: `mo uninstall --list` is a machine-readable
-    /// one-shot, while every named uninstall stops at an interactive prompt.
-    /// One flag for both would either hide the inventory or promise a removal
-    /// that fails at the prompt — see ADR 0021.
+    /// Separate from [`Capabilities::uninstall_apps`] because the two are
+    /// genuinely different claims: a backend can publish an inventory without
+    /// being able to remove anything from it, and one that removes applications
+    /// need not be the one that lists them. Keeping them apart is what let Mole
+    /// offer a working inventory through the releases where its removal was not
+    /// reachable at all.
     pub app_inventory: bool,
 
-    /// Application removal including leftover files, driven non-interactively.
+    /// Application removal including leftover files, reachable from a GUI.
+    ///
+    /// "Reachable from a GUI" rather than "non-interactive": the backend may own
+    /// a confirmation prompt, and it may authenticate the user itself. What this
+    /// flag promises is that the removal can be *previewed exactly* and then run
+    /// to completion without a terminal — see ADR 0027 for what that requires of
+    /// an implementor, which is considerably more than spawning a process.
     pub uninstall_apps: bool,
 
     /// System health metrics.

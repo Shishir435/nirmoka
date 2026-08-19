@@ -20,6 +20,14 @@ export function ScanBar() {
   const [path, setPath] = useState("~");
   const canScan = canStartScan({ scanner: selection?.scanner, listenersReady, state: scan });
 
+  // Only when there is something to stop or something to re-run. Before a scan —
+  // and after one that was cancelled or failed — the start screen owns choosing a
+  // directory, and this row was an empty text field the width of the window
+  // beside a second primary button doing the same job as the one below it: the
+  // duplication ADR 0026 removed, reintroduced one level down. What went wrong is
+  // reported by `ScanStatusStrip`, which needs no control of its own.
+  if (scan.status !== "scanning" && scan.status !== "done") return null;
+
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <input
@@ -34,7 +42,10 @@ export function ScanBar() {
         disabled={scan.status === "scanning"}
         placeholder="Directory to scan"
         spellCheck={false}
-        className="h-9 min-w-48 flex-1 rounded-md border bg-background px-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/20 disabled:opacity-50"
+        // Bounded rather than flex-1. A path is short and a scan root is
+        // shorter; stretching the field to the full window width made an empty
+        // input the largest object on the screen.
+        className="h-9 w-full max-w-96 min-w-48 rounded-md border bg-background px-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/20 disabled:opacity-50"
       />
       {scan.status === "scanning" ? (
         <Button variant="destructive" onClick={() => void cancelScan()}>

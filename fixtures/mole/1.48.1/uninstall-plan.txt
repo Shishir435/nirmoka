@@ -1,0 +1,38 @@
+# Recorded from Mole 1.48.1 by scripts/record-mole-fixture.sh
+#
+# The plan `mo uninstall --dry-run <name>` prints once its prompt is
+# answered. Evidence for ADR 0027, and the input the adapter's parser is
+# tested against. Recorded with the same `y` the adapter writes.
+#
+# Exit status was 0. Nothing was modified: --dry-run is set during
+# flag parsing and every removal below it is separately gated on it.
+
+→ DRY RUN MODE, No app files or settings will be modified
+
+◎ Matched 1 app(s):
+1. Example  83.2MB  |  Last: <when>
+
+Proceed with uninstallation? [y/N] 
+Files to be removed:
+◎ Homebrew apps will be fully cleaned, --zap removes configs and data
+
+◎ Example [Brew] , 83.4MB
+  ✓ /Applications/Example.app , 83.2MB
+  ✓ ~/Library/Containers/com.example.desktop , 225KB
+  ✓ ~/Library/Application Scripts/com.example.desktop
+  ✓ ~/Library/Application Scripts/com.example.desktop.ShareExtension
+  ✓ ~/Library/Containers/com.example.desktop.ShareExtension , 4KB
+  ✓ ~/Library/Application Scripts/com.example.desktop.ShareExtension
+  ✓ ~/Library/Containers/com.example.desktop.ShareExtension , 4KB
+
+➤ Remove 1 app, 83.4MB  Enter confirm, ESC cancel: 
+
+======================================================================
+Uninstall dry run complete
+Would remove 1 app, would free 83.4MB: Example
+☞ Local Network permissions on macOS 15+ can outlive app removal: Example
+↳ Mole does not reset /Volumes/Data/Library/Preferences/com.apple.networkextension*.plist
+↳ If stale or duplicate entries remain, clear them manually in Recovery mode because the reset is global
+======================================================================
+
+[DRY RUN] Would refresh LaunchServices and update Dock entries

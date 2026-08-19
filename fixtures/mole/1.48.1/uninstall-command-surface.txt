@@ -1,7 +1,8 @@
 # Recorded from Mole 1.48.1 by scripts/record-mole-fixture.sh
 #
-# Evidence for ADR 0021. Nirmoka parses none of this; it is the proof that
-# uninstall cannot be driven non-interactively.
+# Evidence for ADR 0027. Nirmoka parses none of this. It records two things
+# the uninstall flow depends on: that Mole still prompts, and that it still
+# routes to the Trash unless --permanent is passed, which Nirmoka never does.
 
 == mo uninstall --help ==
 Usage: mo uninstall [OPTIONS] [APP_NAME ...]
@@ -36,4 +37,6 @@ recovered. Use --permanent to skip the Trash step.
 
 Proceed with uninstallation? [y/N] 
 
-(exit status: 1, and the plan never printed)
+(exit status: 1. With stdin closed the prompt is unanswerable and the
+plan never prints — which is what ADR 0021 measured. See uninstall-plan.txt
+for the same command with `y` on stdin.)

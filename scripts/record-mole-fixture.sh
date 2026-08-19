@@ -70,13 +70,13 @@ record() {
 record root "$tree"
 record nested "$tree/nested"
 
-# The uninstall command surface, which is the evidence behind ADR 0021.
+# The uninstall command surface, which is the evidence behind ADR 0027.
 #
 # Two facts are recorded, both re-checkable after a Mole upgrade: the flags `mo
 # uninstall` accepts, and what a named uninstall does when nothing can answer
-# its prompt. Neither the plan nor the removal is reachable without writing to
-# that prompt, which is why the adapter refuses the operation instead of
-# synthesizing an answer.
+# its prompt. ADR 0021 read the second as a closed door and withdrew the
+# operation. ADR 0027 records what it actually is — a prompt one line of input
+# away from a full plan — and `uninstall-plan.txt` below is that plan.
 surface="$out/uninstall-command-surface.txt"
 # Read the list in full before parsing. An `exit` inside awk would SIGPIPE the
 # backend, and `pipefail` would end the recording on a successful read.
@@ -163,8 +163,9 @@ echo "recorded $applications ($(wc -c <"$applications" | tr -d ' ') bytes)"
 {
   echo "# Recorded from Mole $version by scripts/record-mole-fixture.sh"
   echo "#"
-  echo "# Evidence for ADR 0021. Nirmoka parses none of this; it is the proof that"
-  echo "# uninstall cannot be driven non-interactively."
+  echo "# Evidence for ADR 0027. Nirmoka parses none of this. It records two things"
+  echo "# the uninstall flow depends on: that Mole still prompts, and that it still"
+  echo "# routes to the Trash unless --permanent is passed, which Nirmoka never does."
   echo
   echo "== mo uninstall --help =="
   mo uninstall --help 2>&1
@@ -181,16 +182,67 @@ echo "recorded $applications ($(wc -c <"$applications" | tr -d ' ') bytes)"
       sed -e $'s/\033\\[[0-9;]*[a-zA-Z]//g' -e "s|$app|Example|g" |
       sed -E 's/^[0-9]+\. .*/1. Example  <size>  |  Last: <when>/'
     echo
-    echo "(exit status: $status, and the plan never printed)"
+    echo "(exit status: $status. With stdin closed the prompt is unanswerable and the"
+    echo "plan never prints — which is what ADR 0021 measured. See uninstall-plan.txt"
+    echo "for the same command with \`y\` on stdin.)"
   else
     echo "(no installed application was available to probe)"
   fi
 } >"$surface"
 echo "recorded $surface ($(wc -c <"$surface" | tr -d ' ') bytes)"
 
+# The dry-run plan, which the adapter parses. This is the fixture behind
+# ADR 0027: proof that `y` on stdin reaches Mole's complete leftover plan, and
+# that `--dry-run` modifies nothing while doing so.
+#
+# Recorded with the same confirmation the adapter writes, because a fixture
+# recorded a different way would test a code path the app never takes.
+plan="$out/uninstall-plan.txt"
+if [[ -n "$app" ]]; then
+  # The probed app's own identifiers, so the recording machine's applications do
+  # not reach a committed fixture. Read from the inventory rather than guessed:
+  # the bundle id appears inside container and preference paths.
+  app_display=$(printf '%s\n' "$inventory" | awk -v id="$app" '
+    index($0, "\"uninstall_name\": \"" id "\"") {
+      split($0, after, /"name": "/); split(after[2], name, "\""); print name[1]; exit
+    }')
+  app_bundle=$(printf '%s\n' "$inventory" | awk -v id="$app" '
+    index($0, "\"uninstall_name\": \"" id "\"") {
+      split($0, after, /"bundle_id": "/); split(after[2], value, "\""); print value[1]; exit
+    }')
+
+  set +e
+  transcript=$(printf 'y\n' | mo uninstall --dry-run "$app" 2>&1)
+  status=$?
+  set -e
+
+  {
+    echo "# Recorded from Mole $version by scripts/record-mole-fixture.sh"
+    echo "#"
+    echo "# The plan \`mo uninstall --dry-run <name>\` prints once its prompt is"
+    echo "# answered. Evidence for ADR 0027, and the input the adapter's parser is"
+    echo "# tested against. Recorded with the same \`y\` the adapter writes."
+    echo "#"
+    echo "# Exit status was $status. Nothing was modified: --dry-run is set during"
+    echo "# flag parsing and every removal below it is separately gated on it."
+    echo
+    printf '%s\n' "$transcript" |
+      sed -e $'s/\033\\[[0-9;]*[a-zA-Z]//g' \
+        -e "s|$HOME|~|g" \
+        ${app_bundle:+-e "s|$app_bundle|com.example.desktop|g"} \
+        ${app_display:+-e "s|$app_display|Example|g"} \
+        -e "s|$app|example-cask|g" |
+      sed -E -e 's/Last: [^|]*$/Last: <when>/'
+  } >"$plan"
+  echo "recorded $plan ($(wc -c <"$plan" | tr -d ' ') bytes)"
+else
+  echo "no installed application was available to probe; $plan is unchanged" >&2
+fi
+
 echo
 echo "Recorded from Mole $version into $out."
 echo "If root.json now contains entries below its immediate children, ADR 0012"
 echo "is out of date and the adapter should be reconsidered."
-echo "If uninstall-command-surface.txt now shows a non-interactive flag, ADR 0021"
-echo "is out of date and uninstall should be reconsidered."
+echo "If uninstall-plan.txt no longer shows a complete leftover plan, or shows a"
+echo "third prompt after the plan, ADR 0027 is out of date and the uninstall"
+echo "confirmation flow must be re-derived before the version gate is widened."

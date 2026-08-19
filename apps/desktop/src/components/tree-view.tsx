@@ -49,10 +49,21 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: "nameDescending", label: "Name Z–A" },
 ];
 
+/**
+ * How much of this directory the row accounts for.
+ *
+ * The bar is the point of the row: a reader compares lengths far faster than
+ * they compare two byte counts in different units. It was drawn with `bg-brand`,
+ * a token defined nowhere, so every bar in the browser rendered as an empty
+ * track and size was left to the number alone.
+ */
 function Bar({ share }: { share: number }) {
   return (
     <div className="bg-muted h-1.5 w-20 shrink-0 overflow-hidden rounded-full">
-      <div className="bg-brand h-full rounded-full" style={{ width: `${share * 100}%` }} />
+      <div
+        className="bg-primary h-full rounded-full"
+        style={{ width: `${Math.min(100, Math.max(0, share * 100))}%` }}
+      />
     </div>
   );
 }

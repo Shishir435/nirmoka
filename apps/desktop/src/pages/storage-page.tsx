@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Sort } from "@nirmoka/transport";
 
-import { EmptyState, PageHeader } from "@/components/shared";
+import { PageHeader } from "@/components/shared";
+import { StartScreen } from "@/components/start-screen";
 import { Button } from "@/components/ui/button";
 import { TreeView } from "@/components/tree-view";
 import { useApp } from "@/lib/app-context";
@@ -57,18 +58,21 @@ export function StoragePage({
     setHistory((current) => visit(current, { scanId: summary.scanId, parentId: nextParentId }));
   };
 
+  // Before a scan there is no tree to view, no summary to head, and no reason to
+  // ask Mole about system status. Rendering the tabs, the title, and a collapsed
+  // backend section over an empty state described a page that was not there —
+  // three view switches over three empty states. Capacity is the one thing that
+  // can be shown without a backend, so that is the whole screen.
+  if (!summary) return <StartScreen />;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Storage"
-        subtitle={
-          summary
-            ? "Everything below comes from the scan in the bar above"
-            : "Scan a directory to see what is using space"
-        }
+        subtitle="Everything below comes from the scan in the bar above"
       />
 
-      {summary && <SummarySection summary={summary} />}
+      <SummarySection summary={summary} />
 
       {/* The rule spans the content width; the row inside it is pulled left by
           the buttons' own padding, so "Folders" starts under "Storage" rather
@@ -90,16 +94,13 @@ export function StoragePage({
         </div>
       </div>
 
-      {/* Applications is the one view with a source other than the scan: Mole
-          reports what is installed whether or not anything has been scanned. The
-          other two are the tree, so they wait for it. */}
+      {/* Applications keeps its second source — Mole reports what is installed
+          whether or not anything has been scanned — but it no longer carries the
+          no-scan case on its own. `/Applications` is a one-click target on the
+          start screen, which reaches the version of this view whose rows can
+          actually be acted on. */}
       {view === "applications" ? (
         <ApplicationsSection />
-      ) : !summary ? (
-        <EmptyState
-          title="No completed scan"
-          text="Type a directory in the bar above and press Scan. Your home directory is the default, and scanning is read-only."
-        />
       ) : view === "folders" ? (
         <TreeView
           transport={transport}

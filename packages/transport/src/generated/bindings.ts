@@ -373,8 +373,60 @@ targetPath: string, totalBytes: number,
  */
 isDirectory: boolean, warning: string, };
 
+export type UninstallApp = { name: string, homebrewCask: boolean, reportedSize: string | null, items: Array<UninstallItem>, };
+
+export type UninstallCompletion = "finished" | "partial" | "cancelled" | "failed";
+
+export type UninstallItem = { 
+/**
+ * The backend's display form, tilde-abbreviated. Not a resolvable path, and
+ * nothing in the window may treat it as one — see `nirmoka_adapter::uninstall`.
+ */
+displayPath: string, reportedSize: string | null, scope: UninstallItemScope, };
+
+export type UninstallItemScope = "removed" | "system" | "reviewOnly";
+
+/**
+ * One durable uninstall journal entry.
+ */
+export type UninstallOperation = { id: number, backend: string, backendVersion: string, reviewedApplications: Array<string>, reviewedItems: number, reviewedTotal: string | null, completion: UninstallCompletion, removed: Array<string>, failed: Array<string>, reportedFreed: string | null, warnings: Array<string>, executedAtMs: number, logError: string | null, };
+
+/**
+ * Latest Rust-held uninstall review, bound to a short-lived one-time token.
+ *
+ * The token is the only thing that can start the removal. No application name
+ * and no path returns as an execute parameter.
+ */
+export type UninstallPreparation = { confirmationToken: number, backend: string, backendVersion: string, 
+/**
+ * Display names, for the dialog's own sentence. The identifiers stay in Rust.
+ */
+applications: Array<string>, reportedTotal: string | null, totalItems: number, hasReviewOnlyItems: boolean, warnings: Array<string>, expiresInSeconds: number, requiresConfirmation: boolean, warning: string, };
+
+/**
+ * One backend-produced uninstall plan, for the window to render and the user to
+ * approve.
+ *
+ * Carries the backend's own transcript beside the parsed rows. That is
+ * deliberate: the rows are what the UI draws, and the transcript is what the
+ * user is actually approving, so a parse that silently narrowed the plan stays
+ * visible instead of becoming the whole story.
+ */
+export type UninstallPreview = { backend: string, backendVersion: string, 
+/**
+ * The backend identifiers this plan covers, which is what a confirmation
+ * later names. Never a display name.
+ */
+requested: Array<string>, apps: Array<UninstallApp>, reportedTotal: string | null, totalItems: number, hasReviewOnlyItems: boolean, warnings: Array<string>, notes: Array<string>, transcript: string, };
+
 /**
  * Capacity of the filesystem containing a path. This is deliberately separate
  * from a scan summary: bytes reached by a scan are not disk capacity.
  */
-export type VolumeInfo = { mountPoint: string, totalBytes: number, usedBytes: number, freeBytes: number, };
+export type VolumeInfo = { 
+/**
+ * What the desktop calls this volume — "Macintosh HD" rather than
+ * `/System/Volumes/Data`. Resolved by the platform layer, because the name
+ * is not in `df` output and the window has no way to look it up.
+ */
+name: string, mountPoint: string, totalBytes: number, usedBytes: number, freeBytes: number, };
