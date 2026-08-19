@@ -1,18 +1,8 @@
 import { ArrowUpDown, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type {
-  ApplicationInventory,
-  InstalledApplicationInventory,
-  PlatformFeatures,
-} from "@nirmoka/transport";
+import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
 
-import {
-  EmptyState,
-  MetricCard,
-  PageHeader,
-  SafetyBanner,
-  SectionTitle,
-} from "@/components/shared";
+import { EmptyState, MetricCard, SafetyBanner, SectionTitle } from "@/components/shared";
 import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,8 +12,12 @@ import { uninstallOffer } from "@/lib/engine/backend-gating";
 import { INITIAL_TRASH, outcomeMessage, reduceTrash } from "@/lib/engine/trash-flow";
 import { formatBytes, formatCount } from "@/lib/format";
 
-export function ApplicationsPage() {
-  const { transport, scan, backends } = useApp();
+/**
+ * The scan tree filtered to `.app` bundles, beside Mole's own inventory when a
+ * scan cannot supply one. A view of the scan rather than a tab — see ADR 0026.
+ */
+export function ApplicationsSection() {
+  const { transport, scan, backends, features } = useApp();
   const offer = uninstallOffer(backends);
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
@@ -33,20 +27,8 @@ export function ApplicationsPage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [largestFirst, setLargestFirst] = useState(true);
-  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
   const nextTrashRequest = useRef(0);
-
-  useEffect(() => {
-    let live = true;
-    transport.platformFeatures().then(
-      (value) => live && setFeatures(value),
-      () => live && setFeatures(null),
-    );
-    return () => {
-      live = false;
-    };
-  }, [transport]);
 
   useEffect(() => {
     dispatchTrash({ type: "rescanned" });
@@ -163,14 +145,11 @@ export function ApplicationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Applications"
-        subtitle={
-          installed
-            ? "Applications Mole can address for uninstall"
-            : "Application bundles found in the current scan"
-        }
-      />
+      <p className="text-sm text-muted-foreground">
+        {installed
+          ? "Applications Mole can address for uninstall. Scan /Applications for bundles this window can move itself."
+          : "Application bundles found in the current scan."}
+      </p>
       {installedLoading && !inventory ? (
         <EmptyState title="Reading applications" text="Checking Mole and the current scan." />
       ) : !installed && !summary ? (

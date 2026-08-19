@@ -22,13 +22,14 @@
 import { Eye, FolderOpen, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import type { PlatformFeatures, Row, ScanSummary, Sort, Transport } from "@nirmoka/transport";
+import type { Row, ScanSummary, Sort, Transport } from "@nirmoka/transport";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { activeDescendantId, rowElementId, rowIntent, rowLabel } from "@/components/row-keyboard";
 import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
 import { useDirectory, type DirectoryHeader } from "@/hooks/use-directory";
+import { useApp } from "@/lib/app-context";
 import {
   canTrash,
   INITIAL_TRASH,
@@ -161,10 +162,14 @@ export function TreeView({
   canGoForward: boolean;
   onSort: (sort: Sort) => void;
 }) {
+  // What this desktop can do with a path, from the context rather than a fetch
+  // of its own. A button labelled "Reveal in Finder" on another platform would
+  // be a macOS habit leaking out, and three components asking separately was
+  // three answers that could disagree while they were in flight.
+  const { features } = useApp();
   const directory = useDirectory(transport, { scanId: summary.scanId, parentId, sort });
   const scroller = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [trash, dispatchTrash] = useReducer(reduceTrash, INITIAL_TRASH);
   const nextTrashRequest = useRef(0);
@@ -205,19 +210,6 @@ export function TreeView({
   useEffect(() => {
     dispatchTrash({ type: "rescanned" });
   }, [summary.scanId]);
-
-  // What this desktop can do with a path, asked once. A button labelled
-  // "Reveal in Finder" on another platform would be a macOS habit leaking out.
-  useEffect(() => {
-    let live = true;
-    transport.platformFeatures().then(
-      (value) => live && setFeatures(value),
-      () => live && setFeatures(null),
-    );
-    return () => {
-      live = false;
-    };
-  }, [transport]);
 
   // Held as a local so the dialog's callbacks narrow it: a reducer field cannot
   // be narrowed across a closure, and the alternative is a `!` on a token that

@@ -1,0 +1,51 @@
+<!--
+  The app icon: the same mark as assets/nirmoka-mark.svg, placed on Apple's
+  macOS icon grid.
+
+  A macOS app icon is not the artwork at full bleed. The tile is 824×824 inside a
+  1024×1024 canvas — 100px of transparent margin on every side — with a corner
+  radius of 185.4. Filling the whole canvas instead, which is what the first
+  version of this did, makes the icon larger than every neighbour in the Dock and
+  squares off its corners against them.
+
+  The margin must stay transparent, so nothing here draws a background. The mark
+  is 512 units wide, so it scales by 824/512 = 1.609375 and shifts by 100.
+
+  Regenerate the bundled icon set after editing:  ./scripts/generate-icons.sh
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="nirmoka-icon-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8B5CF6" />
+      <stop offset="1" stop-color="#6D28D9" />
+    </linearGradient>
+    <!--
+      macOS bakes a shadow into the icon rather than drawing one, which is the
+      other half of why a flat full-bleed square looked wrong in the Dock. It
+      fits inside the 100px margin, so it costs nothing and clips nowhere.
+    -->
+    <filter id="nirmoka-icon-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.28" />
+    </filter>
+  </defs>
+  <g transform="translate(100 100) scale(1.609375)">
+    <rect width="512" height="512" rx="115.2" fill="url(#nirmoka-icon-bg)" filter="url(#nirmoka-icon-shadow)" />
+    <rect x="150" y="142" width="46" height="228" rx="23" fill="#FFFFFF" />
+    <rect x="316" y="142" width="46" height="228" rx="23" fill="#FFFFFF" />
+    <path
+      d="M240 240 L338 338"
+      fill="none"
+      stroke="#FFFFFF"
+      stroke-width="46"
+      stroke-linecap="round"
+    />
+    <path
+      d="M230 162 L260 192"
+      fill="none"
+      stroke="#EDE9FE"
+      stroke-opacity="0.6"
+      stroke-width="46"
+      stroke-linecap="round"
+    />
+  </g>
+</svg>

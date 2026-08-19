@@ -1,23 +1,51 @@
-import { RotateCcw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Brush, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import type { DeleteOperation } from "@nirmoka/transport";
 
-import { EmptyState, PageHeader, SafetyBanner, StatusBadge } from "@/components/shared";
+import { EmptyState, MetricCard, PageHeader, SafetyBanner, StatusBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useApp } from "@/lib/app-context";
+import {
+  activityCounts,
+  measuredBytes,
+  mergeActivity,
+  NO_JOURNALS,
+  recoveryOf,
+  type ActivityEntry,
+  type Journals,
+} from "@/lib/engine/activity-feed";
+import { outcomeLabel, outcomeTone } from "@/lib/engine/cleanup-flow";
+import { formatBytes, formatCount } from "@/lib/format";
 
 const dates = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function ActivityPage() {
   const { transport } = useApp();
-  const [operations, setOperations] = useState<DeleteOperation[] | null>(null);
+  const [journals, setJournals] = useState<Journals | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = () => {
+
+  const load = useCallback(() => {
     setError(null);
-    transport.operationLog().then(setOperations, (reason: unknown) => setError(String(reason)));
-  };
-  useEffect(load, [transport]);
+    // One await per journal, and a failure names itself rather than emptying the
+    // page: a cleanup log that cannot be read is not evidence that nothing was
+    // trashed.
+    Promise.allSettled([
+      transport.trashLog(),
+      transport.cleanupLog(),
+      transport.operationLog(),
+    ]).then(([trashed, cleaned, deleted]) => {
+      setJournals({
+        trashed: trashed.status === "fulfilled" ? trashed.value : [],
+        cleaned: cleaned.status === "fulfilled" ? cleaned.value : [],
+        deleted: deleted.status === "fulfilled" ? deleted.value : [],
+      });
+      const failure = [trashed, cleaned, deleted].find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") setError(String(failure.reason));
+    });
+  }, [transport]);
+
+  useEffect(load, [load]);
 
   const undo = async (operation: DeleteOperation) => {
     try {
@@ -28,11 +56,14 @@ export function ActivityPage() {
     }
   };
 
+  const entries = mergeActivity(journals ?? NO_JOURNALS);
+  const counts = activityCounts(entries);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Activity"
-        subtitle="Durable deletion and undo history"
+        subtitle="Everything this Mac's journal records, newest first"
         action={
           <Button variant="outline" onClick={load}>
             <RotateCcw />
@@ -41,54 +72,136 @@ export function ActivityPage() {
         }
       />
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {(operations?.length ?? 0) === 0 ? (
+
+      {counts.total > 0 && (
+        <div className="grid grid-cols-4 gap-3 max-[1100px]:grid-cols-2">
+          <MetricCard
+            label="Moved to Trash"
+            value={formatCount(counts.trashed)}
+            hint={`${formatBytes(measuredBytes(entries))} measured before the move`}
+          />
+          <MetricCard
+            label="Cleanup runs"
+            value={formatCount(counts.cleaned)}
+            hint="Sizes are Mole's reviewed totals, not receipts"
+          />
+          <MetricCard
+            label="Deletions"
+            value={formatCount(counts.deleted)}
+            hint="Recorded backend receipts"
+          />
+          <MetricCard
+            label="Journal entries"
+            value={formatCount(counts.total)}
+            hint="One shared id space"
+          />
+        </div>
+      )}
+
+      {counts.total === 0 ? (
         <EmptyState
-          title={operations ? "No recorded operations" : "Loading activity"}
-          text="Scan history is not fabricated. Only durable deletion receipts appear here."
+          title={journals ? "Nothing has happened yet" : "Loading activity"}
+          text="Scans are not recorded, because nothing changed. Trashed items, cleanup runs, and deletions appear here as they happen."
         />
       ) : (
         <Card className="shadow-none">
           <CardContent className="p-0">
-            <div className="grid grid-cols-[90px_1fr_100px_110px_170px_90px] gap-4 border-b bg-muted/30 px-4 py-3 text-[11px] font-medium text-muted-foreground">
-              <span>Backend</span>
-              <span>Target</span>
-              <span>Disposition</span>
-              <span>Recovery</span>
-              <span>Date & Time</span>
-              <span>Status</span>
+            <div className="divide-y">
+              {entries.map((entry) => (
+                <ActivityRow key={`${entry.kind}-${entry.id}`} entry={entry} onUndo={undo} />
+              ))}
             </div>
-            {operations?.map((operation) => (
-              <div
-                key={operation.id}
-                className="grid grid-cols-[90px_1fr_100px_110px_170px_90px] items-center gap-4 border-b px-4 py-3 text-xs"
-              >
-                <span className="font-medium">{operation.backend}</span>
-                <span className="truncate font-mono text-muted-foreground">
-                  {operation.targetPath}
-                </span>
-                <span>{operation.disposition}</span>
-                <span>{operation.recoverable ? "Recoverable" : "Permanent"}</span>
-                <span className="text-muted-foreground">{dates.format(operation.deletedAtMs)}</span>
-                {operation.recoverable && !operation.undone ? (
-                  <Button size="sm" variant="outline" onClick={() => void undo(operation)}>
-                    Undo
-                  </Button>
-                ) : (
-                  <StatusBadge tone={operation.undone ? "neutral" : "success"}>
-                    {operation.undone ? "Undone" : "Complete"}
-                  </StatusBadge>
-                )}
-              </div>
-            ))}
           </CardContent>
         </Card>
       )}
+
       <SafetyBanner compact>
         <p className="text-xs text-muted-foreground">
-          The journal is stored locally. Sizes and item counts remain unavailable because existing
-          receipts do not record them.
+          The journal is stored on this Mac and never leaves it. A trashed item is restored from the
+          Finder with Put Back; a cleanup run has no per-path receipt to restore from, because Mole
+          publishes none.
         </p>
       </SafetyBanner>
     </div>
   );
+}
+
+function ActivityRow({
+  entry,
+  onUndo,
+}: {
+  entry: ActivityEntry;
+  onUndo: (operation: DeleteOperation) => void;
+}) {
+  const recovery = recoveryOf(entry);
+
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 text-sm">
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+        {entry.kind === "cleaned" ? <Brush className="size-4" /> : <Trash2 className="size-4" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-medium">{title(entry)}</span>
+          <span className="text-xs text-muted-foreground">{dates.format(entry.atMs)}</span>
+        </p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{detail(entry)}</p>
+        {entry.operation.logError && (
+          <p className="mt-1 text-xs text-warning-foreground">
+            This happened but could not be written to the journal: {entry.operation.logError}
+          </p>
+        )}
+      </div>
+      <div className="shrink-0 pt-0.5">
+        {entry.kind === "cleaned" ? (
+          <StatusBadge tone={outcomeTone(entry.operation.completion)}>
+            {outcomeLabel(entry.operation.completion)}
+          </StatusBadge>
+        ) : recovery === "undoable" && entry.kind === "deleted" ? (
+          <Button size="sm" variant="outline" onClick={() => onUndo(entry.operation)}>
+            <Undo2 />
+            Undo
+          </Button>
+        ) : (
+          <StatusBadge tone={recovery === "undone" ? "neutral" : "success"}>
+            {recovery === "putBack"
+              ? "In the Trash"
+              : recovery === "undone"
+                ? "Undone"
+                : "Complete"}
+          </StatusBadge>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function title(entry: ActivityEntry): string {
+  switch (entry.kind) {
+    case "trashed":
+      return name(entry.operation.targetPath);
+    case "deleted":
+      return name(entry.operation.targetPath);
+    case "cleaned":
+      return `${entry.operation.backend} cleanup`;
+  }
+}
+
+function detail(entry: ActivityEntry): string {
+  switch (entry.kind) {
+    case "trashed":
+      return `Moved to the Trash · ${formatBytes(entry.operation.totalBytes)} · ${entry.operation.targetPath}`;
+    case "deleted":
+      return `${entry.operation.disposition === "trash" ? "Trashed" : "Deleted"} by ${entry.operation.backend} · ${entry.operation.targetPath}`;
+    case "cleaned":
+      return `${entry.operation.backend} ${entry.operation.backendVersion} · reviewed ${formatCount(entry.operation.reviewedItems)} items${
+        entry.operation.reviewedPotentialCleanup
+          ? ` and ${entry.operation.reviewedPotentialCleanup}`
+          : ""
+      } · Mole re-discovered candidates as it ran`;
+  }
+}
+
+function name(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }

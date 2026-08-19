@@ -80,9 +80,10 @@ export function SafetyBanner({
       <div className="min-w-0 flex-1">
         {children ?? (
           <>
-            <p className="text-sm font-medium">Read-only mode is active</p>
+            <p className="text-sm font-medium">Nothing is removed without your confirmation</p>
             <p className="text-xs text-muted-foreground">
-              Nirmoka never deletes files without your explicit confirmation.
+              Removal moves things to the Trash, so the Finder can put them back. Permanent deletion
+              of a path you pick is not offered.
             </p>
           </>
         )}

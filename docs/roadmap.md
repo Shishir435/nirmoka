@@ -3,11 +3,13 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 12 — Move to Trash.** Step 11 shipped as 0.1.1: `brew install nirmoka/tap/nirmoka`
-installs a working macOS beta, and it is read-only. Step 12 adds the verb the product is missing —
-see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md). Releases are unsigned until
-there is an Apple Developer account, which is why the install path is a Homebrew formula rather
-than a download — [ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
+**Current step: 13 — three destinations.** Step 11 shipped as 0.1.1: `brew install
+nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
+product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
+first person to use it said the seven tabs were confusing, which step 13 answers. **0.2.0 ships both.**
+Releases are unsigned until there is an Apple Developer account, which is why the install path is a
+Homebrew formula rather than a download —
+[ADR 0024](adr/0024-distribution-is-a-source-built-homebrew-formula.md).
 
 ## Sequencing rules
 
@@ -363,22 +365,34 @@ Nothing here ships without tests.
 
 ### Phase 2 — the operation
 
-- [ ] `crates/app/src/trash.rs`, beside `reveal.rs`. Validate through the shared
-      `validate_delete_target`, validate again immediately before the move, then move
-- [ ] The `trash` crate (5.2.6, MIT) rather than a subprocess: the platform's own Trash service,
-      no optional install, and Windows and freedesktop for free
-- [ ] `PlatformFeatures` gains the platform's own wording and whether the operation is offered
-- [ ] Tests for an empty path, a path that is gone, the scan root, a symlink escaping the root, a
-      system-critical location, and a real round trip into the Trash
+- [x] `crates/app/src/trash.rs`, beside `reveal.rs`. Validate through the shared
+      `validate_delete_target`, validate again immediately before the move, then move — a
+      confirmation dialog can sit open for as long as the user leaves it open
+- [x] The `trash` crate (5.2.6, MIT) rather than a subprocess: the platform's own Trash service,
+      no optional install, and Windows and freedesktop for free. Default features off; they add
+      `chrono` only to list Trash contents, which macOS does not support. On macOS the move goes
+      through the Finder rather than `trashItemAtURL:`, because Put Back is the property
+      [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) rests on and only the Finder
+      route records it — so a refused Apple event names the setting to grant
+- [x] `PlatformFeatures` gains the platform's own wording and whether the operation is offered
+- [x] Tests for an empty path, a path that is gone, the scan root, a symlink escaping the root, a
+      system-critical location, and a real round trip into the Trash. Eleven tests; the round trip
+      really moves a file, because a mock would prove only that the mock was called
 
 ### Phase 3 — the boundary
 
-- [ ] A `Trashed` journal event with no recovery path. The crate cannot enumerate or restore the
-      macOS Trash, and guessing a name inside `~/.Trash` would be a receipt that does not resolve
-- [ ] A failed journal append reports the move beside the error rather than failing it — ADR 0020's
+- [x] A `Trashed` journal event with no recovery path. The crate cannot enumerate or restore the
+      macOS Trash, and guessing a name inside `~/.Trash` would be a receipt that does not resolve.
+      It shares the deletion id space and survives reload
+- [x] A failed journal append reports the move beside the error rather than failing it — ADR 0020's
       rule, because the Trash is its own record
-- [ ] Prepare and confirm commands through the existing one-time token; no raw path crosses back in
-- [ ] `pnpm types`, with the regenerated bindings committed
+- [x] Prepare and confirm commands through the existing one-time token; no raw path crosses back in.
+      The confirmation carries the resolved path, not the clicked one, and the pending slot is an
+      enum rather than a second map, so a prepared cleanup and a prepared move cannot both be live
+- [x] `TrashPreparation` is deliberately not `DeletePreparation`: that type carries a backend, the
+      backend it displaced, and whether a dry run happened — three questions with no answer when no
+      backend is involved
+- [x] `pnpm types`, with the regenerated bindings committed
 
 ### Phase 4 — Space
 
@@ -408,11 +422,46 @@ Nothing here ships without tests.
 - [x] One confirmation dialog, shared with the browser. Two copies of a destructive confirmation
       drift, and the copy that drifts is the one nobody was looking at
 
-### Phase 6 — ship it
+### Phase 6 — verified
 
-- [ ] `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`, `pnpm typecheck && pnpm build`
-- [ ] `pnpm tauri dev` and trash something from the window. A command that compiles and a window
-      that moves a file are different claims
+- [x] `cargo fmt`, `clippy -D warnings`, `cargo test --workspace`, `pnpm typecheck && pnpm build`,
+      `pnpm lint`, and `scripts/check-invariants.sh`. 315 Rust tests and 61 frontend tests pass,
+      and regenerating the bindings produces no diff
+- [x] `pnpm tauri dev` and trash something from the window. A command that compiles and a window
+      that moves a file are different claims. Confirmed from the real window on macOS 26
+- [ ] Tagging moved to step 13, so 0.2.0 ships the verb and a window worth using it in
+
+## Step 13 — Three destinations
+
+The first person to use the beta said the tabs were confusing, and they were right: seven nav items
+for three jobs, five of them reading the same scan. Nothing here changes what a backend does — no
+command added, none widened, no `Capabilities` flag moved. See
+[ADR 0026](adr/0026-the-window-has-three-destinations.md).
+
+- [x] **Storage, Clean, Activity.** Help and Settings become header controls; the sidebar carries
+      three items and one honest badge
+- [x] One scan bar, in the shell header. Rust holds exactly one scan, so two sets of controls
+      described a second one that does not exist
+- [x] Overview, Space Explorer, Developer, Applications, and System Status become sections under
+      `pages/sections/`, and Storage switches between Folders, Developer, and Applications as views
+      of the same tree. Applications is the one view with another source, so it still works with no
+      scan: Mole reports what is installed either way
+- [x] System status loads when its section is opened. It was a tab that ran `mo status` on arrival,
+      to report battery health on a disk cleanup tool
+- [x] Retired hashes redirect rather than falling through to a default — `#/overview`, `#/space`,
+      `#/status` to Storage, `#/developer` and `#/applications` to their view. `route.ts`, 7 tests
+- [x] **Activity shows all three journals.** It read only `operation_log()`, so a file the user had
+      just moved to the Trash appeared in no history at all while cleanup history sat on the Clean
+      page. `activity-feed.ts` merges them newest first and breaks ties on the shared id, which is
+      exact rather than arbitrary. 8 tests
+- [x] Recovery is stated per kind and none of them is a fake button: Put Back for the Trash, nothing
+      for a cleanup run because Mole publishes no receipt, Undo only for a recorded recoverable
+      deletion
+- [x] The "Read Only Mode" badge is gone. It was already half wrong in 0.1.1, because Clean executes
+      real cleanups, and fully wrong once Trash landed. What is unavailable is _permanent_
+      selected-path deletion, which is ADR 0017's gate and not a mode
+- [ ] `pnpm tauri dev` and use all three destinations. Scan, trash a row, check it appears in
+      Activity, and open an old `#/overview` link
 - [ ] 0.2.0, tagged, with the tap updated
 
 ---

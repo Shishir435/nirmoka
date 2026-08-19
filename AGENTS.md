@@ -94,6 +94,7 @@ pnpm nrmk scan ~/Downloads                    # real backend, largest first
 pnpm nrmk scan . --json --depth 2 --limit 5
 pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
 
+./scripts/generate-icons.sh                   # rebuild crates/app/icons from assets/nirmoka-mark.svg
 ./scripts/record-ncdu-fixture.sh              # re-record fixtures after an ncdu upgrade
 ./scripts/record-gdu-fixture.sh               # re-record fixtures after a gdu upgrade
 ./scripts/record-mole-fixture.sh              # re-record the evidence behind ADR 0012

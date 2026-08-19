@@ -5,6 +5,7 @@ import {
   canStartScan,
   INITIAL_SCAN,
   reduceScan,
+  scanStatusLine,
   type ScanEvent,
   type ScanState,
 } from "../apps/desktop/src/lib/engine/scan-machine.ts";
@@ -127,4 +128,103 @@ test("the scan button needs a scanner, listeners, and no scan in flight", () => 
     true,
     "a cancelled scan must be restartable",
   );
+});
+
+/**
+ * The strip sits above the page, so its height is the page's position. Every
+ * assertion here is really about that: one line, one label, and the part that
+ * can be long kept in the field that truncates.
+ */
+test("the status strip is one line, with anything long in the truncating half", () => {
+  const deep = "/Users/sc/Projects/nirmoka/node_modules/.pnpm/@jridgewell+gen-mapping@0.3.13/dist";
+  const scanning = run([
+    { type: "requested", root: "~" },
+    { type: "progress", progress: { scanned: 1_100_001, currentPath: deep } as never },
+  ]);
+  const line = scanStatusLine({
+    state: scanning,
+    scanner: "ncdu",
+    backendError: null,
+    formatCount: (value) => value.toLocaleString("en-US"),
+  });
+
+  assert.equal(line?.label, "Scanning 1,100,001 entries…");
+  assert.equal(line?.detail, deep, "the path is the detail, because that is what gets cut");
+  assert.equal(line?.tone, "muted");
+  assert.equal(line?.label.includes("\n"), false);
+});
+
+test("a finished scan reports its numbers and its root, in that order", () => {
+  const line = scanStatusLine({
+    state: run([{ type: "restored", summary: summary(1) }]),
+    scanner: "ncdu",
+    backendError: null,
+    formatCount: (value) => value.toLocaleString("en-US"),
+  });
+
+  assert.equal(line?.label, "2,200,000 entries · ncdu");
+  assert.equal(line?.detail, "/Users/fixture");
+});
+
+test("a problem arrives as the detail rather than as a second line", () => {
+  const failed = scanStatusLine({
+    state: run([
+      { type: "requested", root: "~" },
+      { type: "failed", failure: { message: "ncdu exited with status 1", cancelled: false } },
+    ]),
+    scanner: "ncdu",
+    backendError: null,
+    formatCount: String,
+  });
+  assert.deepEqual(failed, {
+    label: "Scan failed.",
+    detail: "ncdu exited with status 1",
+    tone: "error",
+  });
+
+  const backendBroken = scanStatusLine({
+    state: run([{ type: "restored", summary: summary(2) }]),
+    scanner: "ncdu",
+    backendError: "detection failed",
+    formatCount: String,
+  });
+  assert.equal(backendBroken?.detail, "detection failed");
+  assert.equal(backendBroken?.tone, "error");
+});
+
+test("an idle window with a usable scanner says nothing, so no strip is drawn", () => {
+  assert.equal(
+    scanStatusLine({
+      state: INITIAL_SCAN,
+      scanner: "ncdu",
+      backendError: null,
+      formatCount: String,
+    }),
+    null,
+  );
+  assert.equal(
+    scanStatusLine({
+      state: INITIAL_SCAN,
+      scanner: undefined,
+      backendError: null,
+      formatCount: String,
+    })?.label,
+    "No scanner installed.",
+  );
+});
+
+/** Progress for a scan that already finished must not reopen the strip. */
+test("the strip follows the state machine rather than the last event", () => {
+  const late = run([
+    { type: "requested", root: "~" },
+    { type: "finished", summary: summary(3) },
+    { type: "progress", progress: { scanned: 99, currentPath: "/late" } as never },
+  ]);
+  const line = scanStatusLine({
+    state: late,
+    scanner: "ncdu",
+    backendError: null,
+    formatCount: String,
+  });
+  assert.equal(line?.detail, "/Users/fixture");
 });

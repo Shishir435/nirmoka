@@ -14,6 +14,7 @@ import {
   resolveTransport,
   type Backend,
   type BackendSelection,
+  type PlatformFeatures,
   type Transport,
   type Unsubscribe,
 } from "@nirmoka/transport";
@@ -28,6 +29,12 @@ interface AppContextValue {
   backends: Backend[] | null;
   selection: BackendSelection | null;
   backendError: string | null;
+  /**
+   * What the running desktop can do, and what room it needs. Fetched once here
+   * rather than per page: three components used to ask for it separately, and
+   * the shell needs it before any of them render.
+   */
+  features: PlatformFeatures | null;
   listenersReady: boolean;
   scan: ScanState;
   startScan: (path?: string) => Promise<void>;
@@ -43,6 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [backends, setBackends] = useState<Backend[] | null>(null);
   const [selection, setSelection] = useState<BackendSelection | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [features, setFeatures] = useState<PlatformFeatures | null>(null);
   const [listenersReady, setListenersReady] = useState(false);
   // The transitions live in `scan-machine`, where the ones that are easy to get
   // wrong — late progress, cancellation, a rescan — are covered by tests.
@@ -66,6 +74,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [transport]);
 
   useEffect(() => void refreshBackends(), [refreshBackends]);
+
+  useEffect(() => {
+    let live = true;
+    transport.platformFeatures().then(
+      (value) => live && setFeatures(value),
+      // A window that cannot read its own platform still scans. Every consumer
+      // treats null as "no platform integration offered".
+      () => live && setFeatures(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [transport]);
 
   useEffect(() => {
     let live = true;
@@ -129,6 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         backends,
         selection,
         backendError,
+        features,
         listenersReady,
         scan,
         startScan,
