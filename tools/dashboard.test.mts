@@ -9,6 +9,7 @@ import {
   isBundle,
   openTarget,
   rankConsumers,
+  unscannedBytes,
   usageSlices,
 } from "../apps/desktop/src/lib/engine/dashboard.ts";
 
@@ -74,61 +75,46 @@ const breakdown = (options: { volume?: boolean } = {}) => ({
   ],
 });
 
-test("free space joins the bar so it describes the volume, not the scan", () => {
-  const slices = usageSlices(
-    breakdown({ volume: true }),
-    display,
-    "free-colour",
-    "unscanned-colour",
+test("the bar divides the scan, so a subtree scan stays legible", () => {
+  // 400 in use on a 1000 volume, 300 of it scanned. Framed against capacity the
+  // five categories shared 30% of the bar and the rest was grey; framed against
+  // the scan they fill it, which is what makes the chart worth drawing.
+  const slices = usageSlices(breakdown({ volume: true }), display);
+
+  assert.deepEqual(
+    slices.map((slice) => slice.key),
+    ["apps", "personalFiles", "development", "system", "other"],
   );
-
-  assert.deepEqual(slices.at(-1), { key: "free", label: "Free", bytes: 600, color: "free-colour" });
-  assert.equal(barTotal(breakdown({ volume: true })), 1000);
-});
-
-test("space in use that was not scanned is its own slice, not bare track", () => {
-  // 400 in use, 300 of it scanned. The missing 100 is occupied, and leaving it
-  // as track would draw it in the same colour as free space.
-  const slices = usageSlices(
-    breakdown({ volume: true }),
-    display,
-    "free-colour",
-    "unscanned-colour",
-  );
-  const unscanned = slices.find((slice) => slice.key === "unscanned");
-
-  assert.deepEqual(unscanned, {
-    key: "unscanned",
-    label: "Not scanned",
-    bytes: 100,
-    color: "unscanned-colour",
-  });
-  // Nothing shows through: the slices are exactly the volume.
+  assert.equal(barTotal(breakdown({ volume: true })), 300);
   assert.equal(
     slices.reduce((sum, slice) => sum + slice.bytes, 0),
     barTotal(breakdown({ volume: true })),
+    "the slices are exactly the bar",
   );
 });
 
-test("a scan covering the whole volume has no unscanned slice", () => {
-  const whole = {
-    ...breakdown({ volume: true }),
-    scannedBytes: 400,
-  };
-
-  assert.ok(
-    !usageSlices(whole, display, "free-colour", "unscanned-colour").some(
-      (s) => s.key === "unscanned",
-    ),
-  );
+test("capacity is stated rather than drawn", () => {
+  // The 100 in use that the scan did not reach is a sentence, not a slice.
+  assert.equal(unscannedBytes(breakdown({ volume: true })), 100);
+  assert.equal(unscannedBytes({ ...breakdown({ volume: true }), scannedBytes: 400 }), 0);
+  // No capacity, nothing to subtract from.
+  assert.equal(unscannedBytes(breakdown()), 0);
 });
 
-test("without capacity the bar is the scan alone", () => {
-  const slices = usageSlices(breakdown(), display, "free-colour", "unscanned-colour");
+test("a scan that crossed onto another filesystem states nothing", () => {
+  // Scanned more than this volume holds in use, so the remainder would be
+  // negative and the two numbers are not about the same disk.
+  const crossed = { ...breakdown({ volume: true }), scannedBytes: 900 };
+
+  assert.equal(unscannedBytes(crossed), 0);
+  // The bar still divides the scan, so it is unaffected.
+  assert.equal(barTotal(crossed), 900);
+});
+
+test("without capacity the bar is unchanged, because it never used it", () => {
+  const slices = usageSlices(breakdown(), display);
 
   assert.equal(slices.length, 5);
-  assert.ok(!slices.some((slice) => slice.key === "free"));
-  // The widths then divide the scan, so they still fill the bar.
   assert.equal(barTotal(breakdown()), 300);
 });
 
@@ -161,7 +147,7 @@ test("a scan that exactly fills the volume keeps it as the frame", () => {
 });
 
 test("every category keeps a slice, including the empty ones", () => {
-  const slices = usageSlices(breakdown(), display, "free-colour", "unscanned-colour");
+  const slices = usageSlices(breakdown(), display);
 
   assert.deepEqual(
     slices.map((slice) => slice.key),
@@ -299,5 +285,5 @@ test("nothing to show is an empty list, not a crash", () => {
 
   const bare = { ...breakdown(), categories: [] };
   assert.deepEqual(rankConsumers(bare), []);
-  assert.deepEqual(usageSlices(bare, display, "free-colour", "unscanned-colour"), []);
+  assert.deepEqual(usageSlices(bare, display), []);
 });

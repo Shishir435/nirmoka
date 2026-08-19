@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { History } from "lucide-react";
 import { Toaster } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
@@ -28,6 +29,10 @@ const Onboarding = lazy(() =>
 const StoragePage = lazy(() =>
   import("@/pages/storage-page").then((module) => ({ default: module.StoragePage })),
 );
+/**
+ * Everything below the dashboard. Each renders as its own screen with a back
+ * control rather than as a nav destination — see ADR 0031.
+ */
 const pages: Record<Exclude<Route, "storage">, React.LazyExoticComponent<React.ComponentType>> = {
   clean: lazy(() => import("@/pages/clean-page").then((module) => ({ default: module.CleanPage }))),
   activity: lazy(() =>
@@ -56,7 +61,7 @@ export function App() {
   }, [theme]);
   // The view the user was last looking at, kept while they are on another
   // destination so returning to Storage does not silently reset it.
-  const view: StorageView = location === "onboarding" ? DEFAULT_LOCATION.view : location.view;
+  const view: StorageView | null = location === "onboarding" ? null : location.view;
   const go = (next: Location) => {
     window.location.hash = hashForLocation(next);
     setLocation(next);
@@ -86,8 +91,14 @@ export function App() {
       </>
     );
   const Page = location.route === "storage" ? null : pages[location.route];
+  // The dashboard is the root, so everything else offers the way back to it.
+  // A destination rather than a history step: it cannot strand anyone in a loop.
+  const back =
+    location.route === "storage" && location.view === null
+      ? undefined
+      : { label: "Nirmoka", onBack: () => go(DEFAULT_LOCATION) };
   return (
-    <AppShell route={location.route} onRoute={navigate} onSettings={() => setSettingsOpen(true)}>
+    <AppShell onSettings={() => setSettingsOpen(true)} onHelp={() => navigate("help")} back={back}>
       {!isShell && (
         <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning-foreground">
           Browser development mode: fixture transport is active. Packaged Tauri builds always use
@@ -159,6 +170,23 @@ export function App() {
                   {selection.scanner} scans because {selection.scannerInsteadOf} cannot scan.
                 </p>
               )}
+            </div>
+            <div>
+              <p className="text-sm font-medium">History</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Every removal this program has made, newest first, across the Trash, cleanup runs,
+                and deletions.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-2"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  navigate("activity");
+                }}
+              >
+                <History /> Open Activity
+              </Button>
             </div>
             <div className="flex justify-end">
               <Button onClick={() => setSettingsOpen(false)}>Done</Button>

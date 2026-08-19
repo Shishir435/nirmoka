@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 16 — dashboard.** Step 11 shipped as 0.1.1: `brew install
+**Current step: 16.5 — the window is the dashboard.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
 first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18
@@ -530,6 +530,31 @@ reclaimable banner reading the cleanup preview total.
 - [x] The reclaimable banner shows Mole's total or does not render. No estimate of our own, and no
       dry run on arrival: a subprocess per visit is the fault ADR 0026 removed from System Status,
       so the banner offers to check and reports Mole's own figure once it has one
+
+## Step 16.5 — The window is the dashboard
+
+Step 16 built the dashboard and left it inside the shell from step 13. The approved design has no
+navigation on any of its five screens, so the rail goes and the dashboard becomes the window. See
+[ADR 0031](adr/0031-the-window-has-one-destination.md), which supersedes ADR 0026's navigation.
+
+- [x] The sidebar goes. Header is window controls, the name, and three controls: Scan, Settings,
+      Help. The scan strip and the page title go with it — a window whose only screen is Storage
+      does not need a heading that says Storage
+- [x] Scan becomes a control rather than a bar. The targets the start screen already offers move
+      into it, so choosing what to scan is one button and a menu rather than a path field that is
+      always on screen
+- [x] Settings is a sheet, and it reaches Activity beside the backend choice. Retired hashes keep
+      resolving — `#/activity` and `#/clean` open what they named, which is the same promise
+      `route.ts` already makes for `#/overview`
+- [x] Dashboard matches screen 1: two columns, six cards including Free Space, `% of used`, and the
+      biggest-users list beside the grid rather than beneath it
+- [x] The bar divides the scan rather than the volume. A scan of `~/Downloads` against a 253 GiB
+      disk drew every category as a hairline and 233 GiB of grey; capacity is stated in the header
+      numbers and the caption, which is where a number that is not about the scan belongs
+- [x] Anything below the dashboard carries `‹ Nirmoka`. The tree browser keeps its own breadcrumb,
+      because its depth is real and the back control is not a history step. `#/storage` is the
+      dashboard and `#/storage/folders` is the browser — they were one place under ADR 0026, which
+      is precisely what changed. `route.ts`, tests updated
 
 ## Step 17 — Inspector
 

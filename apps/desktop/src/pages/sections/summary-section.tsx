@@ -10,12 +10,13 @@ import { StorageUsageBar, StorageUsageLegend } from "@/components/storage-usage-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CATEGORY_DISPLAY, FREE_SPACE_COLOR, UNSCANNED_COLOR } from "@/lib/category-display";
+import { CATEGORY_DISPLAY, FREE_SPACE_DISPLAY } from "@/lib/category-display";
 import {
   applyFootprint,
   applyIcon,
   barTotal,
   barVolume,
+  unscannedBytes,
   isBundle,
   openTarget,
   rankConsumers,
@@ -33,10 +34,7 @@ const TOP_CONSUMERS = 6;
  *
  * Each can walk `~/Library` when the scan did not cover it, so they are not all
  * fired together: the list is readable from its first paint and the numbers
- * upgrade as they arrive. The queue is every installed application rather than
- * a chosen few — the backend caps ordinary rows and exempts bundles, because a
- * bundle's size cannot say whether its footprint belongs at the top — and it is
- * worked largest-bundle-first, so the rows most likely to move settle early.
+ * upgrade as they arrive.
  */
 const FOOTPRINT_CONCURRENCY = 2;
 
@@ -75,8 +73,7 @@ export function SummarySection({
   const consumers = useTopConsumers(breakdown, summary.scanId);
 
   const slices = useMemo(
-    () =>
-      breakdown ? usageSlices(breakdown, CATEGORY_DISPLAY, FREE_SPACE_COLOR, UNSCANNED_COLOR) : [],
+    () => (breakdown ? usageSlices(breakdown, CATEGORY_DISPLAY) : []),
     [breakdown],
   );
 
@@ -102,6 +99,8 @@ export function SummarySection({
   // volume that was read: a scan that crossed onto another filesystem does not
   // fit inside this one's capacity.
   const framed = barVolume(breakdown);
+  // What the bar does not cover, stated rather than drawn.
+  const unscanned = unscannedBytes(breakdown);
   // Trimmed here rather than in the hook, so a footprint that arrives late can
   // still promote its row into view.
   const visible = consumers.slice(0, TOP_CONSUMERS);
@@ -150,61 +149,82 @@ export function SummarySection({
           {/* The scan and the volume are different numbers whenever the scan was
               not the whole disk, and saying so is cheaper than a user working
               out why the bar does not fill. A scan larger than the volume is the
-              other direction of the same problem — the two measurements
-              disagree, so the bar is the scan — and that is worth stating rather
+              other direction of the same problem: it crossed onto another
+              filesystem, the bar is the scan, and that is worth stating rather
               than leaving as a chart that quietly changed what it measures. */}
           {volume && !framed ? (
             <p className="mt-4 text-xs text-muted-foreground">
               This scan measured {formatBytes(breakdown.scannedBytes)}, more than {volume.name}{" "}
-              reports in use. The two disagree, so the bar shows the scan rather than this volume's
-              capacity.
+              holds, so it reached onto another volume. The bar divides the scan.
             </p>
-          ) : framed && breakdown.scannedBytes < framed.usedBytes ? (
+          ) : unscanned > 0 ? (
             <p className="mt-4 text-xs text-muted-foreground">
-              This scan covered {formatBytes(breakdown.scannedBytes)} of{" "}
-              {formatBytes(framed.usedBytes)} in use. The rest was not looked at.
+              The bar divides the {formatBytes(breakdown.scannedBytes)} this scan covered.{" "}
+              {formatBytes(unscanned)} more is in use on this volume and was not looked at.
             </p>
           ) : null}
         </CardContent>
       </Card>
 
-      <div>
-        <SectionTitle title="What's using your space" />
-        <div className="grid grid-cols-5 gap-3 max-[1200px]:grid-cols-3 max-[720px]:grid-cols-2">
-          {breakdown.categories.map((category) => (
-            <StorageCategorySummary
-              key={category.category}
-              summary={category}
-              scannedBytes={breakdown.scannedBytes}
-            />
-          ))}
+      {/* Two columns, as the design draws it: the grid of categories beside the
+          list of what is actually large. They answer different questions — what
+          kind of thing, and which thing — and stacking them made the second one
+          a scroll away. */}
+      <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-6 max-[1100px]:grid-cols-1">
+        <div>
+          <SectionTitle title="What's using your space" />
+          <div className="grid grid-cols-3 gap-3 max-[520px]:grid-cols-2">
+            {breakdown.categories.map((category) => (
+              <StorageCategorySummary
+                key={category.category}
+                summary={category}
+                scannedBytes={breakdown.scannedBytes}
+              />
+            ))}
+            {/* Free space is not a category — nothing is using it — but "how
+                much room is left" is the question the window is opened with,
+                and the design gives it the sixth tile rather than a footnote. */}
+            {framed ? (
+              <StorageCategorySummary
+                display={FREE_SPACE_DISPLAY}
+                summary={{
+                  category: "other",
+                  totalBytes: framed.freeBytes,
+                  share: framed.totalBytes === 0 ? 0 : framed.freeBytes / framed.totalBytes,
+                  consumers: [],
+                }}
+                scannedBytes={framed.totalBytes}
+                shareOf="volume"
+              />
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      <Card className="shadow-none">
-        <CardContent className="p-5">
-          <SectionTitle title="Biggest space users" />
-          {visible.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              This scan found nothing large enough to list.
-            </p>
-          ) : (
-            <div className="-mx-2 divide-y">
-              {visible.map((entry) => (
-                <StorageConsumerRow
-                  key={`${entry.category}:${entry.consumer.id}`}
-                  consumer={entry.consumer}
-                  category={entry.category}
-                  largestBytes={largest}
-                  measure={entry.measure}
-                  icon={entry.icon}
-                  onOpen={onOpen ? () => onOpen(openTarget(entry)) : undefined}
-                />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        <Card className="shadow-none">
+          <CardContent className="p-5">
+            <SectionTitle title="Biggest space users" />
+            {visible.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                This scan found nothing large enough to list.
+              </p>
+            ) : (
+              <div className="-mx-2 divide-y">
+                {visible.map((entry) => (
+                  <StorageConsumerRow
+                    key={`${entry.category}:${entry.consumer.id}`}
+                    consumer={entry.consumer}
+                    category={entry.category}
+                    largestBytes={largest}
+                    measure={entry.measure}
+                    icon={entry.icon}
+                    onOpen={onOpen ? () => onOpen(openTarget(entry)) : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <ReclaimableBanner />
 

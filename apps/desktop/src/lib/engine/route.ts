@@ -1,29 +1,37 @@
 /**
  * Where the window is, resolved from the URL hash.
  *
- * Three destinations, not seven. The window used to carry a nav item per
- * command surface — Overview, Space Explorer, Developer, Applications, System
- * Status — which described how the backends are arranged rather than what a
- * user came to do. Everything derived from one scan tree now lives on `storage`
- * as a view of it, and the old hashes redirect there rather than 404ing into a
- * default. See ADR 0026.
+ * One destination, not three and not seven. The window used to carry a nav item
+ * per command surface — Overview, Space Explorer, Developer, Applications,
+ * System Status — which described how the backends are arranged rather than
+ * what a user came to do. ADR 0026 folded those into `storage`; ADR 0031
+ * removed the rail entirely, so what is left is a root and the screens drilled
+ * into from it.
+ *
+ * `storage` with no view **is** that root: the dashboard. A view names the tree
+ * browser underneath it, which is why `view` is nullable rather than defaulted
+ * — a default view would make the browser the root again and there would be no
+ * dashboard to come back to. Old hashes still name the content that absorbed
+ * them rather than 404ing into a default.
  */
 
 export type Route = "storage" | "clean" | "activity" | "help";
 
-/** Which slice of the current scan tree `storage` is showing. */
+/** Which slice of the current scan tree the browser is showing. */
 export type StorageView = "folders" | "developer" | "applications";
 
 export interface Location {
   route: Route;
   /**
-   * Carried on every location, not only on `storage`. It is where the user was
-   * looking, so leaving for Clean and coming back should not silently reset it.
+   * `null` is the dashboard. A view is the tree browser, and is carried on
+   * every location rather than only on `storage`: it is where the user was
+   * looking, so leaving for Clean and coming back should not reset it.
    */
-  view: StorageView;
+  view: StorageView | null;
 }
 
-export const DEFAULT_LOCATION: Location = { route: "storage", view: "folders" };
+/** The dashboard, which is the window's one destination. */
+export const DEFAULT_LOCATION: Location = { route: "storage", view: null };
 
 export const STORAGE_VIEWS: readonly StorageView[] = ["folders", "developer", "applications"];
 
@@ -33,9 +41,11 @@ export const STORAGE_VIEWS: readonly StorageView[] = ["folders", "developer", "a
  * default.
  */
 const RETIRED: Record<string, Location> = {
-  overview: { route: "storage", view: "folders" },
+  // The Overview page's content is the dashboard now, so it lands there rather
+  // than in the browser that absorbed it under ADR 0026.
+  overview: { route: "storage", view: null },
   space: { route: "storage", view: "folders" },
-  status: { route: "storage", view: "folders" },
+  status: { route: "storage", view: null },
   developer: { route: "storage", view: "developer" },
   applications: { route: "storage", view: "applications" },
 };
@@ -61,17 +71,15 @@ export function locationFromHash(hash: string): Location | "onboarding" {
   const retired = RETIRED[first];
   if (retired) return retired;
   if (!isRoute(first)) return DEFAULT_LOCATION;
-  return { route: first, view: isView(second) ? second : DEFAULT_LOCATION.view };
+  return { route: first, view: isView(second) ? second : null };
 }
 
 /**
- * The default view is left out of the hash. `#/storage` and `#/storage/folders`
- * are the same place, and only one of them should appear in a shared link.
+ * `#/storage` is the dashboard and `#/storage/folders` is the browser, so the
+ * view appears in the hash exactly when there is one. They are different places
+ * now, which is why the suffix is no longer suppressed as a default.
  */
 export function hashForLocation(location: Location): string {
-  const suffix =
-    location.route === "storage" && location.view !== DEFAULT_LOCATION.view
-      ? `/${location.view}`
-      : "";
+  const suffix = location.route === "storage" && location.view ? `/${location.view}` : "";
   return `#/${location.route}${suffix}`;
 }
