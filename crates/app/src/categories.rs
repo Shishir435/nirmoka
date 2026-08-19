@@ -27,11 +27,15 @@ use nirmoka_core::{NodeId, Tree};
 use crate::dto::{CategoryBreakdown, CategoryConsumer, CategorySummary, StorageCategory};
 use crate::state::ScanId;
 
-/// Consumers reported per category.
+/// Consumers reported per category, ranked by the bytes they account for.
 ///
 /// The dashboard shows a handful and the list is a summary, not a browser: the
 /// tree view is what exists for looking at everything.
 const MAX_CONSUMERS: usize = 8;
+
+// Application bundles are not subject to that cap at all — see
+// `trim_consumers`. Any number chosen here would be a number of applications
+// the dashboard silently stops being able to rank.
 
 /// Directories a user's own files live in, directly under home.
 const PERSONAL_DIRECTORIES: &[&str] = &[
@@ -88,7 +92,17 @@ const SYSTEM_ROOTS: &[&str] = &[
 /// Applications so that `Xcode.app`'s DerivedData does not read as the
 /// application, and precedes Personal Files so that a repository checked out
 /// into `~/Documents` reports its `node_modules` as build output.
-fn claim(node_name: &str, path: &Path, home: &Path, is_dir: bool) -> Option<StorageCategory> {
+///
+/// `inherited` is what the nearest claiming ancestor decided, which two rules
+/// need: a bundle inside build output is a build product rather than an
+/// installed application.
+fn claim(
+    node_name: &str,
+    path: &Path,
+    home: &Path,
+    is_dir: bool,
+    inherited: StorageCategory,
+) -> Option<StorageCategory> {
     let parent = path.parent();
     let under_home = |name: &str| parent == Some(home) && node_name == name;
 
@@ -107,7 +121,22 @@ fn claim(node_name: &str, path: &Path, home: &Path, is_dir: bool) -> Option<Stor
     }
 
     // Applications.
-    if is_dir && node_name.to_ascii_lowercase().ends_with(".app") {
+    //
+    // An application is the outermost bundle. The helpers inside `Chrome.app`
+    // are `.app` directories too, and a rule that claimed each of them would
+    // report a browser as five unrelated rows while understating the one the
+    // user recognises by the size of its own helpers. Nested bundles therefore
+    // claim nothing and their bytes stay with the application enclosing them.
+    //
+    // A bundle built by a checkout is not an installed application either:
+    // `node_modules/electron/dist/Electron.app` and the `.app`s inside a
+    // simulator runtime are build output, and Development having claimed the
+    // ground above them is the evidence that says so.
+    if is_dir
+        && node_name.to_ascii_lowercase().ends_with(".app")
+        && inherited != StorageCategory::Development
+        && !is_inside_bundle(path)
+    {
         return Some(StorageCategory::Apps);
     }
     if path == Path::new("/Applications") || path == home.join("Applications") {
@@ -132,6 +161,20 @@ fn claim(node_name: &str, path: &Path, home: &Path, is_dir: bool) -> Option<Stor
     None
 }
 
+/// Whether an ancestor of this path is itself an application bundle.
+///
+/// The node's own name is excluded: a bundle is not inside itself.
+fn is_inside_bundle(path: &Path) -> bool {
+    path.parent().is_some_and(|parent| {
+        parent.components().any(|part| {
+            part.as_os_str()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".app")
+        })
+    })
+}
+
 /// Xcode and simulator working data, which is evidence-based rather than a
 /// fixed location: `Developer` appears under both `~/Library` and `/Library`.
 fn is_developer_data(node_name: &str, path: &Path) -> bool {
@@ -149,6 +192,17 @@ fn is_developer_data(node_name: &str, path: &Path) -> bool {
         "Caches" | "Logs" => under_developer,
         _ => false,
     }
+}
+
+/// What one consumer accounts for, accumulated as the walk passes through it.
+struct ClaimedBytes {
+    bytes: u64,
+    /// False once any byte counted here came from an entry read in part.
+    complete: bool,
+    /// Decided by the claim that made this node an owner, not recomputed
+    /// afterwards: the same node claims differently depending on what stands
+    /// above it, and the walk is where that is known.
+    category: StorageCategory,
 }
 
 /// Classify the whole scan, and name the biggest thing in each category.
@@ -173,7 +227,10 @@ pub fn breakdown(
     // subtree's either — the `node_modules` below it belongs to another
     // consumer, and its errors are that consumer's to report. What is
     // accumulated here is exactly what is attributed here.
-    let mut claimed: HashMap<NodeId, (u64, bool)> = HashMap::new();
+    // The category rides along with them: it depends on what the ancestors
+    // claimed, so the walk is the only place that can answer it without
+    // climbing the tree again.
+    let mut claimed: HashMap<NodeId, ClaimedBytes> = HashMap::new();
 
     let Some(root) = tree.root() else {
         return empty(scan_id, tree, volume);
@@ -185,7 +242,7 @@ pub fn breakdown(
         let Ok(node) = tree.get(id) else { continue };
         let Ok(path) = tree.path_of(id) else { continue };
 
-        let claimed_here = claim(&node.name, &path, home, node.is_dir());
+        let claimed_here = claim(&node.name, &path, home, node.is_dir(), inherited);
         let category = claimed_here.unwrap_or(inherited);
         // A direct child of the root is a consumer even when it claims nothing,
         // or the default category would have no rows to show at all.
@@ -197,9 +254,15 @@ pub fn breakdown(
 
         *totals.entry(category).or_default() += node.own_bytes;
         if let Some(owner) = owner {
-            let entry = claimed.entry(owner).or_insert((0, true));
-            entry.0 += node.own_bytes;
-            entry.1 &= !node.size_is_partial();
+            // Every node contributing here inherited the owner's category, so
+            // the first insert settles it.
+            let entry = claimed.entry(owner).or_insert(ClaimedBytes {
+                bytes: 0,
+                complete: true,
+                category,
+            });
+            entry.bytes += node.own_bytes;
+            entry.complete &= !node.size_is_partial();
         }
 
         pending.extend(
@@ -212,22 +275,26 @@ pub fn breakdown(
     // A consumer is reported under the category it claimed, so the same pass
     // that totalled the bytes decides where the row belongs.
     let mut consumers: HashMap<StorageCategory, Vec<CategoryConsumer>> = HashMap::new();
-    for (id, (bytes, complete)) in claimed {
+    for (id, claimed) in claimed {
         let (Ok(node), Ok(path)) = (tree.get(id), tree.path_of(id)) else {
             continue;
         };
-        let category = claim(&node.name, &path, home, node.is_dir())
-            .or_else(|| inherited_category(tree, id, home))
-            .unwrap_or(StorageCategory::Other);
         consumers
-            .entry(category)
+            .entry(claimed.category)
             .or_default()
             .push(CategoryConsumer {
                 id: id.raw(),
                 name: node.name.clone(),
                 path: path.display().to_string(),
-                total_bytes: bytes,
-                size_is_partial: !complete,
+                is_dir: node.is_dir(),
+                // The window addresses the scan root as `null`, so the root's
+                // own id would name a location it does not recognise.
+                parent_id: tree
+                    .parent_of(id)
+                    .filter(|parent| Some(*parent) != tree.root())
+                    .map(|parent| parent.raw()),
+                total_bytes: claimed.bytes,
+                size_is_partial: !claimed.complete,
             });
     }
 
@@ -242,7 +309,7 @@ pub fn breakdown(
                     .cmp(&a.total_bytes)
                     .then_with(|| a.path.cmp(&b.path))
             });
-            rows.truncate(MAX_CONSUMERS);
+            trim_consumers(&mut rows);
             CategorySummary {
                 category: *category,
                 total_bytes,
@@ -261,17 +328,39 @@ pub fn breakdown(
     }
 }
 
-/// The category a node inherits, for a consumer that claimed nothing itself.
-fn inherited_category(tree: &Tree, id: NodeId, home: &Path) -> Option<StorageCategory> {
-    for ancestor in tree.ancestors_of(id).into_iter().rev() {
-        let (Ok(node), Ok(path)) = (tree.get(ancestor), tree.path_of(ancestor)) else {
-            continue;
-        };
-        if let Some(category) = claim(&node.name, &path, home, node.is_dir()) {
-            return Some(category);
+/// Cut a category's sorted consumers down to what the dashboard needs.
+///
+/// Two rules, not one: the largest [`MAX_CONSUMERS`] by attributed bytes, plus
+/// every application bundle whatever its rank. Order is untouched, so the
+/// caller's sort still holds.
+///
+/// Bundles are exempt because a bundle's size on disk is not what the
+/// application costs — see ADR 0028 — and the footprint that says so is
+/// measured later, on the rows this list hands over. A cut by bundle size
+/// removes exactly the applications that belong at the top: a 300 MB bundle can
+/// carry tens of gigabytes under `~/Library`. Any fixed allowance would be a
+/// number of installed applications past which the ranking quietly stops being
+/// true, so there is none.
+///
+/// What keeps that bounded is [`claim`], not a cap here. Only the outermost
+/// bundle outside build output is an application, so the count is the number of
+/// applications installed rather than every `.app` on the disk — helpers inside
+/// a browser and the hundreds inside a simulator runtime are not candidates.
+fn trim_consumers(rows: &mut Vec<CategoryConsumer>) {
+    let mut ranked = 0usize;
+    rows.retain(|row| {
+        let keep = ranked < MAX_CONSUMERS || is_app_bundle(row);
+        if keep {
+            ranked += 1;
         }
-    }
-    None
+        keep
+    });
+}
+
+/// A `.app` directory: the same test [`claim`] uses, and the same one the
+/// frontend uses to decide a row is measured as an application.
+fn is_app_bundle(row: &CategoryConsumer) -> bool {
+    row.is_dir && row.name.to_ascii_lowercase().ends_with(".app")
 }
 
 fn share_of(part: u64, whole: u64) -> f64 {
@@ -315,12 +404,21 @@ mod tests {
     }
 
     fn classify(path: &str, is_dir: bool) -> Option<StorageCategory> {
+        classify_under(path, is_dir, StorageCategory::Other)
+    }
+
+    /// The same rules, with what an ancestor already claimed.
+    fn classify_under(
+        path: &str,
+        is_dir: bool,
+        inherited: StorageCategory,
+    ) -> Option<StorageCategory> {
         let path = PathBuf::from(path);
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default();
-        claim(&name, &path, &home(), is_dir)
+        claim(&name, &path, &home(), is_dir, inherited)
     }
 
     #[test]
@@ -542,6 +640,182 @@ mod tests {
 
         assert!(consumer_of(StorageCategory::Development, "node_modules").size_is_partial);
         assert!(!consumer_of(StorageCategory::PersonalFiles, "Documents").size_is_partial);
+    }
+
+    /// A file can be the biggest thing in a category, and browsing "into" it
+    /// would show an empty directory. Each consumer therefore carries where to
+    /// open, and a direct child of the root opens the root, which the window
+    /// addresses as null rather than by id.
+    #[test]
+    fn a_file_consumer_reports_the_directory_that_holds_it() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        tree.push(Some(root), Node::file("scratch.iso", 9_000));
+        let downloads = tree.push(Some(root), Node::directory("Downloads"));
+        tree.push(Some(downloads), Node::file("installer.dmg", 4_000));
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let other = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Other)
+            .expect("other is reported");
+
+        let file = &other.consumers[0];
+        assert_eq!(file.name, "scratch.iso");
+        assert!(!file.is_dir);
+        assert_eq!(file.parent_id, None, "its parent is the scan root");
+
+        let personal = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::PersonalFiles)
+            .expect("personal files are reported");
+        assert!(personal.consumers[0].is_dir);
+    }
+
+    /// A bundle's size is not what the application costs, and the footprint that
+    /// says so is measured after this cut. So no bundle may be cut by bundle
+    /// size: whatever allowance this made, a machine with one more application
+    /// than that could not rank its largest one.
+    #[test]
+    fn every_bundle_survives_the_size_cap() {
+        let mut tree = Tree::new("/Applications");
+        let root = tree.push(None, Node::directory("Applications"));
+        // Forty applications, descending, so most of them rank past the cap.
+        for index in 0..40u64 {
+            let bundle = tree.push(Some(root), Node::directory(format!("App{index:02}.app")));
+            tree.push(
+                Some(bundle),
+                Node::file("binary", 1_000_000 - index * 1_000),
+            );
+        }
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let apps = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Apps)
+            .expect("apps are reported");
+
+        assert_eq!(
+            apps.consumers.len(),
+            40,
+            "every application is a footprint candidate"
+        );
+        assert!(apps.consumers.iter().any(|row| row.name == "App39.app"));
+        // Order is untouched: the ranked rows still come first.
+        assert_eq!(apps.consumers[0].name, "App00.app");
+    }
+
+    /// What keeps that list the length of the Applications folder rather than
+    /// the length of every `.app` on the disk. A browser's helpers are bundles
+    /// too, and each one claiming for itself would report one application as
+    /// several rows while understating the row the user recognises.
+    #[test]
+    fn a_nested_bundle_belongs_to_the_application_around_it() {
+        assert_eq!(
+            classify("/Applications/Chrome.app", true),
+            Some(StorageCategory::Apps)
+        );
+        assert_eq!(
+            classify(
+                "/Applications/Chrome.app/Contents/Frameworks/Chrome Helper.app",
+                true
+            ),
+            None,
+            "a helper is part of the application, not another one"
+        );
+
+        let mut tree = Tree::new("/Applications");
+        let root = tree.push(None, Node::directory("Applications"));
+        let chrome = tree.push(Some(root), Node::directory("Chrome.app"));
+        tree.push(Some(chrome), Node::file("binary", 1_000));
+        let frameworks = tree.push(Some(chrome), Node::directory("Frameworks"));
+        let helper = tree.push(Some(frameworks), Node::directory("Chrome Helper.app"));
+        tree.push(Some(helper), Node::file("binary", 9_000));
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let apps = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Apps)
+            .expect("apps are reported");
+
+        assert!(
+            !apps
+                .consumers
+                .iter()
+                .any(|row| row.name == "Chrome Helper.app"),
+            "a helper is not a row of its own"
+        );
+        let chrome = apps
+            .consumers
+            .iter()
+            .find(|row| row.name == "Chrome.app")
+            .expect("the application is a consumer");
+        assert_eq!(
+            chrome.total_bytes, 10_000,
+            "the helper's bytes are the application's"
+        );
+    }
+
+    /// The other half of the same rule. A checkout builds `.app` directories by
+    /// the dozen and a simulator runtime ships hundreds; they are build output,
+    /// and the Development claim above them is the evidence.
+    #[test]
+    fn a_bundle_inside_build_output_is_not_an_installed_application() {
+        assert_eq!(
+            classify_under(
+                "/users/example/code/app/node_modules/electron/dist/Electron.app",
+                true,
+                StorageCategory::Development,
+            ),
+            None
+        );
+        assert_eq!(
+            classify_under(
+                "/users/example/Library/Developer/CoreSimulator/Devices/x/data/Example.app",
+                true,
+                StorageCategory::Development,
+            ),
+            None
+        );
+        // An application installed under a personal directory is still one.
+        assert_eq!(
+            classify_under(
+                "/users/example/Downloads/Example.app",
+                true,
+                StorageCategory::PersonalFiles,
+            ),
+            Some(StorageCategory::Apps)
+        );
+    }
+
+    /// Only bundles get that exemption. Anything else is measured by the size
+    /// already reported, so the cap is the whole truth about it.
+    #[test]
+    fn an_ordinary_directory_does_not_survive_the_size_cap() {
+        let mut tree = Tree::new("/users/example");
+        let root = tree.push(None, Node::directory("example"));
+        for index in 0..12u64 {
+            let dir = tree.push(Some(root), Node::directory(format!("dir{index:02}")));
+            tree.push(Some(dir), Node::file("blob", 1_000_000 - index * 1_000));
+        }
+        tree.rollup();
+
+        let breakdown = breakdown(1, &tree, &home(), None);
+        let other = breakdown
+            .categories
+            .iter()
+            .find(|summary| summary.category == StorageCategory::Other)
+            .expect("other is reported");
+
+        assert_eq!(other.consumers.len(), MAX_CONSUMERS);
+        assert!(!other.consumers.iter().any(|row| row.name == "dir11"));
     }
 
     /// Every category is always reported, so the dashboard's cards do not move

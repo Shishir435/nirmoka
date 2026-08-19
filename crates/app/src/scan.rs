@@ -225,6 +225,25 @@ fn run(app: AppHandle, id: ScanId, root: PathBuf, cancel: CancelToken) {
     }
 }
 
+/// The options every scan the window starts runs with.
+///
+/// One filesystem, which is what makes the dashboard's capacity arithmetic
+/// true. The bar subtracts the scanned bytes from this volume's used bytes to
+/// say how much of it was never looked at; bytes counted on a mounted disk or a
+/// Time Machine snapshot are not this volume's, so counting them would report
+/// unexplored space as explored and draw another disk's contents as if they sat
+/// here. Scanning `/` without it also wanders into every mounted volume, which
+/// is slow and answers a question nobody asked.
+///
+/// The CLI still exposes the flag — see `nrmk scan --help` — because a headless
+/// harness has reason to cross where a capacity bar does not.
+fn window_options() -> ScanOptions {
+    ScanOptions {
+        one_file_system: true,
+        ..ScanOptions::default()
+    }
+}
+
 fn walk(
     state: &AppState,
     app: &AppHandle,
@@ -246,7 +265,7 @@ fn walk(
 
     let mut sink = ProgressSink::new(app);
     let summary = adapter
-        .scan(root, &ScanOptions::default(), &mut sink, cancel)
+        .scan(root, &window_options(), &mut sink, cancel)
         .map_err(|error| dto::ScanFailure {
             message: error.to_string(),
             cancelled: error.is_cancellation(),
@@ -262,6 +281,15 @@ fn walk(
 
 #[cfg(test)]
 mod tests {
+
+    /// The dashboard subtracts the scan from this volume's used bytes to say
+    /// what was never looked at. A scan that wandered onto a mounted disk or a
+    /// snapshot would make that difference too small, so the window's scans are
+    /// confined and this is the assertion that keeps them that way.
+    #[test]
+    fn the_window_scans_one_filesystem() {
+        assert!(window_options().one_file_system);
+    }
     use std::sync::Mutex;
 
     use super::*;

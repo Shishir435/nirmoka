@@ -3,7 +3,7 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 15 — categories, icons.** Step 11 shipped as 0.1.1: `brew install
+**Current step: 16 — dashboard.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
 first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18
@@ -517,12 +517,19 @@ sorts by size and knows nothing about kind.
 Screen 1. Volume header with the stacked usage bar, the category grid, biggest space users, and the
 reclaimable banner reading the cleanup preview total.
 
-- [ ] `storage-usage-bar.tsx`, `storage-category-summary.tsx`, `storage-consumer-row.tsx`
-- [ ] `summary-section.tsx` rewritten against `category_breakdown`. The donut goes; a stacked bar
-      answers "what is on this disk" in one glance and the donut answered "what did the scan see"
-- [ ] Biggest space users mixes applications and directories, because the disk does. An application
-      row carries its footprint, a directory row carries its size, and the two are labelled
-- [ ] The reclaimable banner shows Mole's total or does not render. No estimate of our own
+- [x] `storage-usage-bar.tsx`, `storage-category-summary.tsx`, `storage-consumer-row.tsx`, plus
+      `category-display.ts` so the bar, the grid, and the legend cannot disagree about a colour
+- [x] `summary-section.tsx` rewritten against `category_breakdown`. The donut goes; a stacked bar
+      answers "what is on this disk" in one glance and the donut answered "what did the scan see".
+      Free space is a slice of it, so the bar runs to capacity rather than to the scan. Removing the
+      donut removed `recharts`: the shared chunk went from 333 kB to 5.4 kB
+- [x] Biggest space users mixes applications and directories, because the disk does. An application
+      row carries its footprint, a directory row carries its size, and each row says which. The
+      footprint arrives after the row does — it can walk `~/Library` — so the list is readable from
+      its first paint and re-sorts as the real numbers land. `dashboard.ts`, 11 tests
+- [x] The reclaimable banner shows Mole's total or does not render. No estimate of our own, and no
+      dry run on arrival: a subprocess per visit is the fault ADR 0026 removed from System Status,
+      so the banner offers to check and reports Mole's own figure once it has one
 
 ## Step 17 — Inspector
 
