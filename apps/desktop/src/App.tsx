@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { History } from "lucide-react";
+import { History, RefreshCw } from "lucide-react";
 import { Toaster } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
@@ -52,7 +52,7 @@ const ONBOARDED_KEY = "nirmoka-onboarded";
 const hasOnboarded = () => window.localStorage.getItem(ONBOARDED_KEY) === "true";
 
 export function App() {
-  const { isShell, backends, selection, chooseBackend } = useApp();
+  const { isShell, backends, selection, chooseBackend, refreshBackends } = useApp();
   const [location, setLocation] = useState<Location | "onboarding">(() => {
     const opening = firstLocation(window.location.hash, hasOnboarded());
     // Written into the hash as well, so the listener below and the window agree
@@ -64,6 +64,7 @@ export function App() {
     return opening;
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [refreshingBackends, setRefreshingBackends] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     window.localStorage.getItem("nirmoka-theme") === "dark" ? "dark" : "light",
   );
@@ -171,9 +172,27 @@ export function App() {
               </p>
             </div>
             <div>
-              <label htmlFor="backend-choice" className="text-sm font-medium">
-                Preferred backend
-              </label>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="backend-choice" className="text-sm font-medium">
+                  Preferred backend
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={refreshingBackends}
+                  onClick={async () => {
+                    setRefreshingBackends(true);
+                    try {
+                      await refreshBackends();
+                    } finally {
+                      setRefreshingBackends(false);
+                    }
+                  }}
+                >
+                  <RefreshCw className={refreshingBackends ? "animate-spin" : undefined} />
+                  {refreshingBackends ? "Checking…" : "Check again"}
+                </Button>
+              </div>
               <select
                 id="backend-choice"
                 value={selection?.chosen ?? ""}
