@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import type { CleanupOperation, CleanupPreview } from "@nirmoka/transport";
 
+import { BackendSetupCard } from "@/components/backend-setup-card";
 import {
   EmptyState,
   MetricCard,
@@ -21,7 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
-import { cleanupAvailability } from "@/lib/engine/backend-gating";
+import { cleanupAvailability, moleSetup } from "@/lib/engine/backend-gating";
 import {
   canReview,
   INITIAL_CLEANUP,
@@ -33,8 +34,9 @@ import {
 const PAGE_SIZE = 50;
 
 export function CleanPage() {
-  const { backends, transport } = useApp();
+  const { backends, transport, refreshBackends } = useApp();
   const cleanup = cleanupAvailability(backends);
+  const mole = moleSetup(backends);
   const previewCapable = cleanup.available;
   // Every transition lives in `cleanup-flow`, where the endings that matter —
   // stopped, failed, partial — are covered by tests instead of by clicking.
@@ -164,6 +166,10 @@ export function CleanPage() {
           </div>
         </CardContent>
       </Card>
+
+      {!previewCapable && mole.state !== "ready" && (
+        <BackendSetupCard setup={mole} onCheckAgain={refreshBackends} />
+      )}
 
       {flow.runError && <EmptyState title="Cleanup did not run" text={flow.runError} />}
 

@@ -1,34 +1,19 @@
-import {
-  Check,
-  CheckCircle2,
-  Clipboard,
-  LockKeyhole,
-  ShieldCheck,
-  Terminal,
-  TriangleAlert,
-} from "lucide-react";
+import { Check, CheckCircle2, LockKeyhole, Terminal } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { OnboardingLayout } from "@/components/app-shell";
+import { BackendSetupCard } from "@/components/backend-setup-card";
 import { NirmokaMark } from "@/components/mark";
 import { OnboardingFeature, PrivacyNote } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/lib/app-context";
+import { scannerSetup } from "@/lib/engine/backend-gating";
 import { cn } from "@/lib/utils";
 
 export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const { backends, refreshBackends, selection } = useApp();
   const [step, setStep] = useState(1);
-  const [checking, setChecking] = useState(false);
-  const [access, setAccess] = useState<"standard" | "full">("standard");
-  const [installMethod, setInstallMethod] = useState<"homebrew" | "manual">("homebrew");
-  const installCommand =
-    installMethod === "homebrew"
-      ? "brew install ncdu mole"
-      : "Install ncdu 2.x and Mole 1.48+ and add both binaries to PATH";
-  const scanner = backends?.find((backend) => backend.capabilities.scan && backend.usable);
-  const mole = backends?.find((backend) => backend.id === "mole");
+  const scanner = scannerSetup(backends, selection);
   if (step === 1)
     return (
       <OnboardingLayout step={1}>
@@ -65,82 +50,23 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           <HeroIcon dark>
             <Terminal />
           </HeroIcon>
-          <h1 className="mt-7 text-2xl font-semibold">Check Disk Backends</h1>
+          <h1 className="mt-7 text-2xl font-semibold">Scanner Check</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            ncdu scans on macOS. Mole provides separate cleanup capabilities.
+            Nirmoka needs one supported scanner before it can map your storage.
           </p>
         </div>
-        <div className="mt-8 rounded-xl border bg-muted/30 p-4">
-          <div className="flex items-center gap-3">
-            <TriangleAlert className="size-5 text-warning" />
-            <div>
-              <p className="text-sm font-medium">
-                {scanner
-                  ? `${scanner.displayName} scanner detected`
-                  : "Supported scanner not found"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Mole:{" "}
-                {mole?.usable
-                  ? "detected"
-                  : mole?.detection?.state === "unsupportedVersion"
-                    ? "unsupported version"
-                    : "not detected"}
-              </p>
-            </div>
-          </div>
+        <div className="mt-8">
+          <BackendSetupCard setup={scanner} onCheckAgain={refreshBackends} />
         </div>
-        <div className="mt-5">
-          <div className="flex gap-1 rounded-lg bg-muted p-1">
-            <button
-              onClick={() => setInstallMethod("homebrew")}
-              className={cn(
-                "h-8 flex-1 rounded-md text-xs font-medium",
-                installMethod === "homebrew" ? "bg-background shadow-xs" : "text-muted-foreground",
-              )}
-            >
-              Homebrew (Recommended)
-            </button>
-            <button
-              onClick={() => setInstallMethod("manual")}
-              className={cn(
-                "h-8 flex-1 rounded-md text-xs font-medium",
-                installMethod === "manual" ? "bg-background shadow-xs" : "text-muted-foreground",
-              )}
-            >
-              Manual Install
-            </button>
-          </div>
-          <p className="mt-4 text-xs font-medium">1. Open Terminal</p>
-          <p className="mt-3 text-xs font-medium">2. Run Homebrew command</p>
-          <div className="mt-2 flex items-center gap-2 rounded-lg border bg-background px-3 py-2.5 font-mono text-xs">
-            <span className="flex-1">{installCommand}</span>
-            <button
-              aria-label="Copy command"
-              onClick={() => {
-                void navigator.clipboard?.writeText(installCommand);
-                toast.success("Command copied");
-              }}
-            >
-              <Clipboard className="size-4 text-muted-foreground" />
-            </button>
-          </div>
-          <p className="mt-3 text-xs font-medium">3. Verify installation</p>
-        </div>
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          Mole is optional. Nirmoka will offer it later when you open complete cleanup or uninstall.
+        </p>
         <div className="mt-8 flex justify-between">
           <Button variant="outline" onClick={() => setStep(1)}>
             Back
           </Button>
-          <Button
-            disabled={checking}
-            onClick={async () => {
-              setChecking(true);
-              await refreshBackends();
-              setChecking(false);
-              setStep(3);
-            }}
-          >
-            {checking ? "Looking for Mole…" : "Verify Installation"}
+          <Button disabled={scanner.state !== "ready"} onClick={() => setStep(3)}>
+            Continue
           </Button>
         </div>
       </OnboardingLayout>
@@ -152,33 +78,19 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           <HeroIcon>
             <LockKeyhole />
           </HeroIcon>
-          <h1 className="mt-7 text-2xl font-semibold">Choose Access Level</h1>
+          <h1 className="mt-7 text-2xl font-semibold">Start with Standard Access</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Nirmoka can scan more locations with your permission.
+            Start safely. You can grant broader access later if a scan reports protected paths.
           </p>
         </div>
-        <div className="mt-8 space-y-3">
-          <AccessOption
-            active={access === "standard"}
-            title="Standard Access (Recommended)"
-            text="Scan your home folder, Downloads, Applications, project folders and common caches."
-            onClick={() => setAccess("standard")}
-          />
-          <AccessOption
-            active={access === "full"}
-            title="Full Disk Access (Optional)"
-            text="Inspect additional protected app and Library locations for more complete results."
-            onClick={() => setAccess("full")}
-          />
+        <div className="mt-8 rounded-xl border bg-muted/30 p-5">
+          <p className="text-sm font-medium">Standard Access</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Scan your home folder, Downloads, Applications, project folders and common caches.
+            Protected macOS locations may be reported as unreadable instead of being silently
+            omitted.
+          </p>
         </div>
-        {access === "full" && (
-          <div className="mt-4 rounded-xl bg-muted p-4 text-xs text-muted-foreground">
-            <p>Nirmoka remains usable without Full Disk Access.</p>
-            <Button variant="outline" size="sm" className="mt-3" disabled>
-              Open System Settings (Unavailable)
-            </Button>
-          </div>
-        )}
         <PrivacyNote>Nirmoka never changes permissions itself.</PrivacyNote>
         <div className="mt-8 flex justify-between">
           <Button variant="outline" onClick={() => setStep(2)}>
@@ -202,13 +114,9 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
       <div className="mx-auto mt-9 max-w-sm space-y-5">
         <ReadyRow
           label="Scanner"
-          value={selection?.scanner ? `${selection.scanner} detected` : "No supported scanner"}
+          value={selection?.scanner ? `${selection.scanner} detected` : "Ready"}
         />
-        <ReadyRow label="Mole cleanup" value={mole?.usable ? "Detected" : "Unavailable"} />
-        <ReadyRow
-          label="Access Level"
-          value={access === "standard" ? "Standard Access" : "Full Disk Access"}
-        />
+        <ReadyRow label="Access Level" value="Standard Access" />
         <ReadyRow label="Ready to Scan" value="Read-only first scan" />
       </div>
       <p className="mt-8 text-center text-xs text-muted-foreground">
@@ -230,41 +138,6 @@ function HeroIcon({ children, dark = false }: { children: React.ReactNode; dark?
     >
       {children}
     </div>
-  );
-}
-function AccessOption({
-  active,
-  title,
-  text,
-  onClick,
-}: {
-  active: boolean;
-  title: string;
-  text: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-4 rounded-xl border p-4 text-left focus-visible:ring-3 focus-visible:ring-ring/20",
-        active && "border-primary bg-accent",
-      )}
-    >
-      <span
-        className={cn(
-          "grid size-5 place-items-center rounded-full border",
-          active && "border-primary bg-primary text-primary-foreground",
-        )}
-      >
-        {active && <Check className="size-3" />}
-      </span>
-      <span className="flex-1">
-        <span className="block text-sm font-medium">{title}</span>
-        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{text}</span>
-      </span>
-      <ShieldCheck className="size-4 text-muted-foreground" />
-    </button>
   );
 }
 function ReadyRow({ label, value }: { label: string; value: string }) {

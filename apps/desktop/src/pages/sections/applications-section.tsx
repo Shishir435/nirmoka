@@ -2,6 +2,7 @@ import { ArrowUpDown, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ApplicationInventory, InstalledApplicationInventory } from "@nirmoka/transport";
 
+import { BackendSetupCard } from "@/components/backend-setup-card";
 import { EmptyState, MetricCard, SafetyBanner, SectionTitle } from "@/components/shared";
 import { TrashConfirmation } from "@/components/trash-confirmation";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { UninstallReview } from "@/components/uninstall-review";
 import { useApp } from "@/lib/app-context";
-import { uninstallOffer } from "@/lib/engine/backend-gating";
+import { moleSetup, uninstallOffer } from "@/lib/engine/backend-gating";
 import { INITIAL_TRASH, outcomeMessage, reduceTrash } from "@/lib/engine/trash-flow";
 import {
   canUninstall,
@@ -56,8 +57,9 @@ function useApplicationIcons(paths: string[]) {
 }
 
 export function ApplicationsSection() {
-  const { transport, scan, backends, features } = useApp();
+  const { transport, scan, backends, features, refreshBackends } = useApp();
   const offer = uninstallOffer(backends);
+  const mole = moleSetup(backends);
   const summary = scan.status === "done" ? scan.summary : null;
   const [inventory, setInventory] = useState<ApplicationInventory | null>(null);
   const [installed, setInstalled] = useState<InstalledApplicationInventory | null>(null);
@@ -76,7 +78,16 @@ export function ApplicationsSection() {
   }, [summary?.scanId]);
 
   useEffect(() => {
+    if (mole.state !== "ready") {
+      setInstalled(null);
+      setInstalledError(null);
+      setInstalledLoading(false);
+      return;
+    }
+
     let live = true;
+    setInstalledLoading(true);
+    setInstalledError(null);
     transport
       .installedApplicationInventory()
       .then(
@@ -93,7 +104,7 @@ export function ApplicationsSection() {
     return () => {
       live = false;
     };
-  }, [transport]);
+  }, [mole.state, transport]);
 
   useEffect(() => {
     if (!summary) {
@@ -236,10 +247,15 @@ export function ApplicationsSection() {
       {installedLoading && !inventory ? (
         <EmptyState title="Reading applications" text="Checking Mole and the current scan." />
       ) : !installed && !summary ? (
-        <EmptyState
-          title="No application inventory"
-          text={`${installedError ?? "Mole application inventory is unavailable"}. Install a supported Mole release, or scan /Applications.`}
-        />
+        <div className="space-y-4">
+          <EmptyState
+            title="No application inventory"
+            text={`${installedError ?? "Scan /Applications to list application bundles"}. Complete uninstall is an optional Mole capability.`}
+          />
+          {mole.state !== "ready" && (
+            <BackendSetupCard setup={mole} onCheckAgain={refreshBackends} compact />
+          )}
+        </div>
       ) : scanError && !installed ? (
         <p className="text-sm text-destructive">{scanError}</p>
       ) : (
@@ -342,6 +358,10 @@ export function ApplicationsSection() {
             <p className="text-xs text-muted-foreground">
               Showing {allRows.length} of {total} applications.
             </p>
+          )}
+
+          {!installed && mole.state !== "ready" && (
+            <BackendSetupCard setup={mole} onCheckAgain={refreshBackends} compact />
           )}
 
           {installed ? (

@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   cleanupAvailability,
+  moleSetup,
   scanAvailability,
+  scannerSetup,
   uninstallOffer,
 } from "../apps/desktop/src/lib/engine/backend-gating.ts";
 
@@ -46,6 +48,17 @@ const selection = (scanner: string | null) =>
     saveError: null,
   }) as never;
 
+const unsupported = (id: string, capabilities: Record<string, boolean>, supported: string) =>
+  ({
+    ...backend(id, false, capabilities),
+    detection: {
+      state: "unsupportedVersion",
+      path: `/fake/${id}`,
+      version: "0.1.0",
+      supported,
+    },
+  }) as never;
+
 /** "Nothing is installed" and "we have not looked yet" are different claims. */
 test("detection in progress is not reported as a missing backend", () => {
   const pending = scanAvailability(null, null);
@@ -63,6 +76,41 @@ test("a scan needs a resolved scanner, whatever else is installed", () => {
   const molePreferred = mole({ cleanupCategories: true, dryRun: true });
   assert.equal(scanAvailability(molePreferred, selection(null)).available, false);
   assert.equal(scanAvailability(molePreferred, selection("ncdu")).available, true);
+});
+
+test("scanner setup never asks for Mole and distinguishes install from upgrade", () => {
+  assert.equal(scannerSetup(null, null).state, "checking");
+  assert.equal(scannerSetup([], null).state, "unavailable");
+
+  const missing = scannerSetup([], selection(null));
+  assert.equal(missing.state, "install");
+  assert.equal(missing.command, "brew install ncdu");
+  assert.doesNotMatch(missing.command, /mole/);
+
+  const old = scannerSetup([unsupported("ncdu", { scan: true }, ">=2.0, <3.0")], selection(null));
+  assert.equal(old.state, "upgrade");
+  assert.equal(old.command, "brew upgrade ncdu");
+
+  const ready = scannerSetup([backend("ncdu", true, { scan: true })], selection("ncdu"));
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.command, null);
+});
+
+test("Mole setup is optional, contextual, and version-aware", () => {
+  assert.equal(moleSetup(null).state, "checking");
+
+  const missing = moleSetup([backend("ncdu", true, { scan: true })]);
+  assert.equal(missing.state, "install");
+  assert.equal(missing.command, "brew install mole");
+  assert.match(missing.detail, /Storage analysis already works/);
+
+  const old = moleSetup([unsupported("mole", {}, ">=1.48, <2.0")]);
+  assert.equal(old.state, "upgrade");
+  assert.equal(old.command, "brew upgrade mole");
+
+  const ready = moleSetup(mole({ cleanupCategories: true, dryRun: true }));
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.command, null);
 });
 
 test("cleanup review needs a usable Mole with both flags", () => {
