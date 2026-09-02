@@ -9,6 +9,9 @@ import {
   uninstallOutcomeMessage,
   type UninstallEvent,
   type UninstallState,
+  groupOf,
+  groupPlan,
+  survivingItems,
 } from "../apps/desktop/src/lib/engine/uninstall-flow.ts";
 
 const item = (displayPath: string, scope = "removed") =>
@@ -228,4 +231,65 @@ test("a move that happened but was not logged says both", () => {
 
   assert.match(message, /moved to the Trash/);
   assert.match(message, /could not be added to the operation log: disk full/);
+});
+
+test("a plan is grouped by where its paths sit, in the footprint's vocabulary", () => {
+  // The same names attribution.rs uses, so the screen that says what an
+  // application costs and the screen that says what removing it touches
+  // describe the same places the same way.
+  const items = [
+    item("~/Library/Caches/com.example.desktop"),
+    item("/Applications/Example.app"),
+    item("~/Library/Preferences/com.example.desktop.plist"),
+    item("~/Library/Containers/com.example.desktop"),
+    item("~/Library/Application Scripts/com.example.desktop"),
+    item("~/Library/Application Support/com.example.desktop"),
+    item("~/Library/Logs/com.example.desktop"),
+    item("~/.example-rc"),
+  ];
+
+  assert.deepEqual(
+    groupPlan(items).map((group) => [group.label, group.items.length]),
+    [
+      ["Application", 1],
+      ["Containers", 2],
+      ["Application Support", 1],
+      ["Caches", 1],
+      ["Logs", 1],
+      ["Preferences", 1],
+      ["Other", 1],
+    ],
+  );
+});
+
+test("groups nothing fell into are absent, not empty", () => {
+  assert.deepEqual(
+    groupPlan([item("/Applications/Example.app")]).map((group) => group.label),
+    ["Application"],
+  );
+  assert.deepEqual(groupPlan([]), []);
+});
+
+test("a saved-state file is preferences, not something uncategorised", () => {
+  assert.equal(
+    groupOf("~/Library/Saved Application State/com.example.desktop.savedState"),
+    "Preferences",
+  );
+  assert.equal(groupOf("~/Library/WebKit/com.example.desktop"), "Caches");
+  assert.equal(groupOf("~/Library/HTTPStorages/com.example.desktop"), "Caches");
+});
+
+test("what the backend will not remove is separated from what it will", () => {
+  // ADR 0029: this stands where the design puts a keep-user-data choice, and
+  // it has to be the backend's answer rather than an option we invented.
+  const items = [
+    item("/Applications/Example.app"),
+    { ...item("/Library/LaunchDaemons/com.example.plist"), scope: "system" as const },
+    { ...item("~/Library/Group Containers/example"), scope: "reviewOnly" as const },
+  ];
+
+  assert.deepEqual(
+    survivingItems(items).map((i) => i.displayPath),
+    ["/Library/LaunchDaemons/com.example.plist", "~/Library/Group Containers/example"],
+  );
 });

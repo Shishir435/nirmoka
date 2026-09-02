@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { planCounts } from "@/lib/engine/uninstall-flow";
+import { groupPlan, planCounts, survivingItems } from "@/lib/engine/uninstall-flow";
 
 export function UninstallReview({
   preview,
@@ -105,11 +105,45 @@ function ReviewBody({
                 </span>
               )}
             </h3>
-            <ul className="mt-2 space-y-1">
-              {app.items.map((item, index) => (
-                <PlanRow key={`${item.displayPath}-${index}`} item={item} />
+            {/* Grouped by where the paths sit, in the same vocabulary the
+                Inspector uses for a footprint. A flat list of thirty paths is a
+                transcript; these are the parts of the application. */}
+            <div className="mt-2 space-y-3">
+              {groupPlan(app.items).map((group) => (
+                <div key={group.label}>
+                  <p className="text-xs font-medium text-muted-foreground">{group.label}</p>
+                  <ul className="mt-1 space-y-1">
+                    {group.items.map((item, index) => (
+                      <PlanRow key={`${item.displayPath}-${index}`} item={item} />
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
+
+            {/* Where the approved design puts a "keep user data" choice. No
+                flag backs that choice, so this is the true answer to the
+                question it asks — quoted, not described. See ADR 0029. */}
+            {survivingItems(app.items).length > 0 && (
+              <div className="mt-3 rounded-md border bg-muted/40 p-3">
+                <p className="text-xs font-medium">What this will not remove</p>
+                <ul className="mt-1 space-y-1">
+                  {survivingItems(app.items).map((item, index) => (
+                    <li
+                      key={`${item.displayPath}-${index}`}
+                      className="truncate font-mono text-xs text-muted-foreground"
+                      dir="ltr"
+                    >
+                      {item.displayPath}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {preview.backend} reported these and does not act on them. There is no option to
+                  keep anything else: it removes what it decides to remove.
+                </p>
+              </div>
+            )}
           </section>
         ))}
 

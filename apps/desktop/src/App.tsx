@@ -83,7 +83,7 @@ export function App() {
     window.location.hash = hashForLocation(next);
     setLocation(next);
   };
-  const navigate = (route: Route) => go({ route, view });
+  const navigate = (route: Route) => go({ route, view, inspect: null });
   const chooseTheme = (next: "light" | "dark") => {
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(next);
@@ -116,7 +116,7 @@ export function App() {
   // The dashboard is the root, so everything else offers the way back to it.
   // A destination rather than a history step: it cannot strand anyone in a loop.
   const back =
-    location.route === "storage" && location.view === null
+    location.route === "storage" && location.view === null && location.inspect === null
       ? undefined
       : { label: "Nirmoka", onBack: () => go(DEFAULT_LOCATION) };
   return (
@@ -131,7 +131,12 @@ export function App() {
         {Page ? (
           <Page />
         ) : (
-          <StoragePage view={view} onView={(next) => go({ route: "storage", view: next })} />
+          <StoragePage
+            view={view}
+            inspect={location.inspect}
+            onView={(next) => go({ route: "storage", view: next, inspect: null })}
+            onInspect={(nodeId) => go({ route: "storage", view: null, inspect: nodeId })}
+          />
         )}
       </Suspense>
       <Toaster richColors position="bottom-right" />
