@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# CI reads. Nothing here publishes, comments, or pushes, so the token should
+# not be able to. The release workflow raises this per job where it needs to.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -107,6 +112,14 @@ jobs:
       - name: Clippy
         if: matrix.lint
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Deliberately without `--all-targets`, so this compiles lib and bin
+      # targets only. A panic is how a test asserts; in shipping code it is how
+      # a disk tool dies holding someone's file. The count is zero today, which
+      # is what makes this a ratchet rather than a cleanup task.
+      - name: No unwrap in shipping code
+        if: matrix.lint
+        run: cargo clippy --workspace -- -D clippy::unwrap_used
 
       - name: Check
         run: cargo check --workspace --all-targets
@@ -321,6 +334,22 @@ jobs:
       - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm build
+
+  # Licences and advisories. A separate job because it reads Cargo.lock rather
+  # than building anything, and because its most important assertion is not
+  # about this platform: NOTICE.md and AGENTS.md both forbid Nirmoka becoming a
+  # derivative work of a GPL backend, and `deny.toml`'s allow-list is what turns
+  # that from a rule people remember into a build failure.
+  supply-chain:
+    name: licences and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
 
   # Architectural invariants. The checks live in scripts/check-invariants.sh so
   # that this job and the pre-push hook run the exact same code and cannot drift.

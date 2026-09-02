@@ -11,6 +11,8 @@
 //! platform default, and at every step only among backends that can do the thing
 //! being asked. See [`crate::preference`].
 
+use std::fmt;
+
 use crate::preference::{default_order, Ability, Preference};
 use crate::{Adapter, AdapterError, Capabilities, Detection};
 
@@ -20,6 +22,7 @@ pub struct Registry {
 }
 
 /// One adapter's detection outcome, ready for display or serialisation.
+#[derive(Debug)]
 pub struct RegistryEntry {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -42,6 +45,29 @@ pub struct Choice<'a> {
     /// cannot cover everything. A user who picks Mole on macOS should be told
     /// that ncdu scanned, rather than left to conclude the setting did nothing.
     pub instead_of: Option<String>,
+}
+
+impl fmt::Debug for Registry {
+    /// The ids, not the adapters. `dyn Adapter` is behaviour rather than data,
+    /// and requiring `Debug` on the trait would put the bound on every
+    /// implementor to print something no one wants to read.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Registry")
+            .field(
+                "adapters",
+                &self.adapters.iter().map(|a| a.id()).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl fmt::Debug for Choice<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Choice")
+            .field("adapter", &self.adapter.id())
+            .field("instead_of", &self.instead_of)
+            .finish()
+    }
 }
 
 impl Registry {

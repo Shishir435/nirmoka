@@ -105,7 +105,7 @@ test("a row label says what makes its number unreliable", () => {
   assert.equal(rowLabel({ ...base, childCount: 1 }), "Folder Library, 4.20 GB, 1 entry");
 
   const flagged = rowLabel({ ...base, readError: true, excluded: true, hardlink: true });
-  assert.match(flagged, /could not be read, size is a lower bound/);
-  assert.match(flagged, /excluded from the scan/);
-  assert.match(flagged, /hardlink, counted once elsewhere/);
+  assert.match(flagged, /could not be read, size is a lower bound/u);
+  assert.match(flagged, /excluded from the scan/u);
+  assert.match(flagged, /hardlink, counted once elsewhere/u);
 });

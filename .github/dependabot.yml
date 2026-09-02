@@ -1,0 +1,38 @@
+# Nothing here updates itself otherwise. The GitHub Actions in the two workflows
+# are pinned to floating major tags, the Rust and JS lockfiles are committed, and
+# `deny.toml` only reports an advisory once one is published — it cannot raise a
+# version. This is what turns those into pull requests.
+#
+# Weekly rather than daily: this is a small project, and a flood of dependency
+# PRs is a flood nobody reads.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    # The dependency list in Cargo.toml is deliberately short and every entry
+    # has a stated reason, so a major bump is a decision rather than a merge.
+    # Patch and minor arrive grouped; majors come one at a time.
+    groups:
+      rust-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      js-minor-and-patch:
+        update-types: ["minor", "patch"]

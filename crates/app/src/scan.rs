@@ -55,6 +55,7 @@ impl Reporter for AppHandle {
 ///
 /// It tracks the directory stack rather than a path string, because building a
 /// path per entry would allocate millions of times to display a few hundred.
+#[derive(Debug)]
 pub struct ProgressSink<'a, R: Reporter> {
     inner: TreeSink,
     reporter: &'a R,

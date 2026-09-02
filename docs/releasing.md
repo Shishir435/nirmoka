@@ -86,9 +86,23 @@ The published formula lives in a separate repository, because a tap must be name
 [`packaging/homebrew/nirmoka.rb`](../packaging/homebrew/nirmoka.rb), which is the source of truth and
 the only one to edit.
 
-Two lines change per release — `url` and `sha256`. The workflow's **What the tap needs** step prints
-both into the run summary, already formatted; guessing either produces a formula that installs for
-nobody.
+Two lines change per release — `url` and `sha256`. **The workflow writes them for you.** Its
+**Update the tap** step downloads the source tarball GitHub generated for the tag, hashes it, rewrites
+those two lines in a copy of the source-of-truth formula, and pushes the result to the tap. A
+hand-copied `sha256` is the most breakable step in this whole pipeline: get one character wrong and
+every `brew install` fails checksum verification, for everyone, until someone notices.
+
+That step needs **`TAP_TOKEN`** — a repository secret holding a fine-grained personal access token
+with `Contents: read and write` on `nirmoka/homebrew-tap`. The default `GITHUB_TOKEN` is scoped to
+this repository and cannot push to another one. Without the secret the step still computes and prints
+the two lines, warns loudly that the tap was **not** updated, and leaves it to be done by hand — the
+old behaviour, kept as the fallback rather than as the default.
+
+The step is skipped for rehearsal tags, because the tap must never point at one.
+
+Note the ordering: the tap is updated while the release is still a **draft**, so the tarball it points
+at does not exist yet and `brew install` fails to download until the draft is published. The workflow
+says so in its run summary. Publish the draft promptly.
 
 Verify a change before pushing it to the tap:
 
@@ -151,13 +165,16 @@ base64 -i certificate.p12 | pbcopy
 5. Wait for the workflow. A red run means no draft exists, which is the intended outcome of any
    failure here. A green run with the signature step **skipped** means the release is unsigned, which
    is expected until there is a certificate.
-6. Update the tap: copy `packaging/homebrew/nirmoka.rb` into `nirmoka/homebrew-tap`, with the two
-   lines from the run summary. Then install it on a clean machine, or at least a clean prefix, and
-   launch the app. That is the path users take, so it is the one that has to be checked.
-7. If the release is signed, also download the `.dmg`, open it on a Mac that has never seen the app,
+6. Publish the draft release. Do this before testing the tap: the workflow has already pointed the
+   tap at this tag, and the source tarball is not downloadable until the release is out of draft.
+7. Check the tap was updated (the run summary says whether it was, and names what is left if it was
+   not). Then install it on a clean machine, or at least a clean prefix, and launch the app. That is
+   the path users take, so it is the one that has to be checked.
+8. If the release is signed, also download the `.dmg`, open it on a Mac that has never seen the app,
    and check that it launches without a Gatekeeper warning. Notarization can be verified without a
    second machine; first-launch behaviour cannot.
-8. Edit the release notes, then publish.
+9. Update `CHANGELOG.md`: move `[Unreleased]` down under the new version, and add the comparison
+   link at the bottom.
 
 ## What a first-time user needs
 
@@ -170,9 +187,30 @@ with none of them gets a window that says so. Release notes should name the mini
 
 ## Versions to bump together
 
+```bash
+./scripts/bump-version.sh 0.3.0
+```
+
+That writes all three, rotates the changelog heading, and runs the invariant check. The list below
+is what it touches and why each one has to agree — worth knowing when the script is not what you
+reach for.
+
 - `crates/app/tauri.conf.json` — the version inside the bundle, and what the workflow checks.
 - `Cargo.toml` — `workspace.package.version`, inherited by every crate.
-- `packaging/homebrew/nirmoka.rb` — the `url` tag and its `sha256`, from the run summary.
+- `packaging/homebrew/nirmoka.rb` — the `url` tag. `./scripts/check-invariants.sh` fails when this
+  disagrees with `tauri.conf.json`, so CI catches the bump you forget. The `sha256` cannot be known
+  until the tag exists, so the repository copy carries a placeholder and the workflow fills in the
+  real one on its way to the tap.
+
+  The version cannot move out of the formula, and it is worth knowing why rather than rediscovering
+  it. A tap is a static Ruby file that `brew` reads after cloning it — there is no CI anywhere in a
+  user's install path — and the `url` plus `sha256` pin one exact tarball, which is the whole job of
+  a formula. Homebrew parses the version out of the url tag, which is why there is no `version`
+  stanza: adding one is redundant, and interpolating `v#{version}` into the url fails Homebrew's own
+  `FormulaAudit/ComponentsOrder` rule, which requires `url` to come first. So the version stays
+  written in the url, and the bump script is what keeps writing it by hand out of the process.
+
+- `CHANGELOG.md` — the `[Unreleased]` heading becomes the version, with a dated entry.
 
 `package.json` files stay at `0.0.0`: they are private workspace members, never published to npm,
 and a version there would be a number nobody reads and everybody has to remember to change.

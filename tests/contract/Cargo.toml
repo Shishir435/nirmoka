@@ -21,3 +21,6 @@ nirmoka-adapter-rip = { workspace = true }
 nirmoka-adapter-mole = { workspace = true }
 nirmoka-adapter-ncdu = { workspace = true }
 nirmoka-core = { workspace = true }
+
+[lints]
+workspace = true

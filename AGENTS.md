@@ -75,12 +75,17 @@ pnpm install                 # JS workspace
 pnpm dev                     # frontend dev server on :5173 (strict port)
 pnpm build                   # typecheck + vite build
 pnpm typecheck               # every JS package
-pnpm format                  # prettier
+pnpm lint                    # oxlint, then the node --test suite in tools/
+pnpm lint:fix                # oxlint --fix
+pnpm format                  # oxfmt, in place
+pnpm format:check            # oxfmt, read-only; what CI runs
 
 cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
+pnpm rs:lint:strict          # no unwrap() in lib/bin targets — shipping code
+pnpm rs:deny                 # licences and advisories (needs cargo-deny)
 
 cargo run -p nirmoka-cli -- backends
 cargo run -p nirmoka-cli -- backends --json
@@ -98,6 +103,7 @@ pnpm nrmk scan ~/Downloads                    # real backend, largest first
 pnpm nrmk scan . --json --depth 2 --limit 5
 pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
 
+./scripts/bump-version.sh 0.3.0                # the version, in all three files that carry it
 ./scripts/generate-icons.sh                   # rebuild crates/app/icons from assets/nirmoka-mark.svg
 ./scripts/record-ncdu-fixture.sh              # re-record fixtures after an ncdu upgrade
 ./scripts/record-gdu-fixture.sh               # re-record fixtures after a gdu upgrade
@@ -107,8 +113,12 @@ pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend need
 ## Verification
 
 - **Rust changes:** `cargo fmt --all`, then `cargo clippy --workspace --all-targets -- -D
-warnings`, then `cargo test --workspace`.
-- **Frontend changes:** `pnpm typecheck && pnpm build`.
+warnings`, then `pnpm rs:lint:strict`, then `cargo test --workspace`.
+- **Frontend changes:** `pnpm lint && pnpm format:check && pnpm typecheck && pnpm build`.
+- **A new dependency:** `pnpm rs:deny`. The licence allow-list in `deny.toml` is what
+  keeps invariant-adjacent prose in `NOTICE.md` — no GPL code enters this project —
+  enforced by the build rather than by memory. Install once with
+  `cargo install cargo-deny --locked`.
 - **Adapter changes:** `cargo test --workspace`, then `cargo run -p nirmoka-cli --
 backends` and `-- scan <dir>` against a real backend. The shared suite in
   `tests/contract` must pass unchanged; needing a special case there means the trait is
@@ -132,6 +142,12 @@ backends` and `-- scan <dir>` against a real backend. The shared suite in
 - **Record decisions as ADRs.** Anything that will matter in six months goes in
   `docs/adr/`, numbered sequentially, never deleted. A reversed decision gets a new ADR
   marking the old one superseded.
+- **Lint sets are deliberately narrow.** `clippy::pedantic` produces 343 warnings on this
+  workspace and oxlint's `restriction` category is worse; a lint that has to be muted at
+  every third call site teaches people to mute lints. Everything turned on in
+  `[workspace.lints]` and `.oxlintrc.json` was measured at zero, or at a number small
+  enough to fix in the same commit, so any new hit is a real one. Suppressions carry the
+  reason on the line above them.
 - **A new dependency needs a stated reason.** Both `Cargo.toml` and `package.json` lists
   are deliberately short. Prefer the standard library.
 - **Do not add tooling before it hurts.** No Turborepo until builds are slow. No

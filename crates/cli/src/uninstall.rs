@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use nirmoka_adapter::{Ability, CancelToken, Preference, Registry, UninstallItemScope};
 
 #[derive(clap::Args)]
-pub struct UninstallArgs {
+pub(crate) struct UninstallArgs {
     /// Backend identifiers to preview, as published by `--list`.
     ///
     /// Not display names. "Google Chrome" is listed; `google-chrome` is what the
@@ -38,7 +38,7 @@ pub struct UninstallArgs {
     transcript: bool,
 }
 
-pub fn run(args: UninstallArgs, registry: &Registry, preference: &Preference) -> ExitCode {
+pub(crate) fn run(args: UninstallArgs, registry: &Registry, preference: &Preference) -> ExitCode {
     let ability = if args.list {
         Ability::AppInventory
     } else {

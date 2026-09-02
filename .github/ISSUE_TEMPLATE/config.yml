@@ -1,0 +1,15 @@
+# Blank issues are off so that a report arrives with the backends and versions
+# already in it. Nirmoka's behaviour depends almost entirely on which backends
+# are installed and at which version, so a free-form issue nearly always needs a
+# round trip before it can be acted on.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    # SECURITY.md rather than /security/advisories/new: private reporting has to
+    # be enabled in repository settings, and a link that 404s is worse than one
+    # that explains. The file names the button to use.
+    url: https://github.com/Shishir435/nirmoka/blob/main/SECURITY.md
+    about: Report privately, never in a public issue. This explains how.
+  - name: How to contribute
+    url: https://github.com/Shishir435/nirmoka/blob/main/CONTRIBUTING.md
+    about: Checks to run, the invariants CI enforces, and how to add a backend.

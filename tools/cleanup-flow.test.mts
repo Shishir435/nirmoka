@@ -130,7 +130,7 @@ test("a run that never started leaves an error and no result", () => {
   ]);
 
   assert.equal(refused.result, null);
-  assert.match(refused.runError ?? "", /changed from reviewed version/);
+  assert.match(refused.runError ?? "", /changed from reviewed version/u);
   assert.equal(refused.running, false);
   assert.equal(refused.preview, null, "the spent review is gone either way");
 });

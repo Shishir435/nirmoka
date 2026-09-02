@@ -108,6 +108,46 @@ else
   pass "transport is the only Tauri-aware module"
 fi
 
+# ---------------------------------------------------------------------------
+# 5. The Homebrew formula names the version the bundle actually is.
+#
+# The formula is the supported install path (ADR 0024) and it is copied into a
+# separate tap repository, so a version that disagrees with tauri.conf.json
+# produces a formula that builds one thing and calls it another. Nothing else
+# in CI reads this file, so without this check the first report is a user's
+# failed install.
+# ---------------------------------------------------------------------------
+formula='packaging/homebrew/nirmoka.rb'
+bundled=$(grep -o '"version": *"[^"]*"' crates/app/tauri.conf.json | head -1 |
+  sed 's/.*"version": *"\([^"]*\)".*/\1/')
+tagged=$(grep -o 'archive/refs/tags/v[^"]*\.tar\.gz' "$formula" | head -1 |
+  sed 's|archive/refs/tags/v\(.*\)\.tar\.gz|\1|')
+
+if [[ -z "$bundled" || -z "$tagged" ]]; then
+  fail "could not read a version from tauri.conf.json or $formula"
+elif [[ "$bundled" != "$tagged" ]]; then
+  fail "formula is v${tagged} but the bundle is ${bundled}"
+  printf '  update the url in %s, or bump tauri.conf.json\n' "$formula" >&2
+else
+  pass "the formula and the bundle agree on ${bundled}"
+fi
+
+# A syntax error in the formula is only discovered by whoever runs `brew
+# install` next. `brew style` is not usable here — run against a loose file it
+# applies Homebrew's internal Sorbet and frozen-string rules that real formulae
+# are exempt from, and it also sees a locally tapped copy as a duplicate. A
+# parse check is the part that is actually about this file.
+if command -v ruby > /dev/null 2>&1; then
+  if ruby -c "$formula" > /dev/null 2>&1; then
+    pass "the formula parses"
+  else
+    fail "the formula is not valid Ruby"
+    ruby -c "$formula" >&2 || true
+  fi
+else
+  printf '      ruby not found; skipped the formula parse check\n'
+fi
+
 if ((failed)); then
   printf '\n\033[31mArchitecture invariants violated.\033[0m See docs/architecture.md.\n' >&2
   exit 1

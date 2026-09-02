@@ -327,6 +327,10 @@ function useTopConsumers(breakdown: CategoryBreakdown | null, scanId: number) {
         const row = queue.shift();
         if (!row) return;
         try {
+          // Sequential on purpose: this is one worker draining a shared queue,
+          // and the parallelism is the pool of them below. Promise.all here
+          // would walk every bundle's footprint at once.
+          // eslint-disable-next-line no-await-in-loop
           const footprint = await transport.appFootprint(scanId, row.consumer.id);
           if (!live) return;
           setRows((current) => applyFootprint(current, row.consumer.id, footprint.totalBytes));

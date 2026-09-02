@@ -19,7 +19,7 @@ use nirmoka_core::{format_bytes, NodeId, Tree};
 use serde::Serialize;
 
 #[derive(Args)]
-pub struct ScanArgs {
+pub(crate) struct ScanArgs {
     /// Directory to scan.
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -60,7 +60,7 @@ pub struct ScanArgs {
     from_export: Option<PathBuf>,
 }
 
-pub fn run(args: ScanArgs, registry: &Registry, preference: &Preference) -> ExitCode {
+pub(crate) fn run(args: ScanArgs, registry: &Registry, preference: &Preference) -> ExitCode {
     let started = Instant::now();
 
     let outcome = match &args.from_export {

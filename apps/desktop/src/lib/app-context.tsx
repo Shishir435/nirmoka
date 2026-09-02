@@ -142,26 +142,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [refreshBackends, transport],
   );
 
-  return (
-    <AppContext.Provider
-      value={{
-        transport,
-        isShell: isTauri(),
-        backends,
-        selection,
-        backendError,
-        features,
-        listenersReady,
-        scan,
-        startScan,
-        cancelScan,
-        refreshBackends,
-        chooseBackend,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+  // Constructed inline, this object is a new identity on every render, so every
+  // consumer of the context re-renders whenever the provider does — including
+  // the virtualized list, on every scan progress event.
+  const value = useMemo(
+    () => ({
+      transport,
+      isShell: isTauri(),
+      backends,
+      selection,
+      backendError,
+      features,
+      listenersReady,
+      scan,
+      startScan,
+      cancelScan,
+      refreshBackends,
+      chooseBackend,
+    }),
+    [
+      transport,
+      backends,
+      selection,
+      backendError,
+      features,
+      listenersReady,
+      scan,
+      startScan,
+      cancelScan,
+      refreshBackends,
+      chooseBackend,
+    ],
   );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {

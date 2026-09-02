@@ -49,27 +49,53 @@ if command -v cargo > /dev/null 2>&1; then
   step "cargo fmt" cargo fmt --all -- --check
   step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
 
+  # Lib and bin targets only — see the same step in CI for why.
+  step "no unwrap in shipping code" cargo clippy --workspace -- -D clippy::unwrap_used
+
+  # Optional locally: it is a separate install, and CI is the gate. Skipping it
+  # loudly beats making the repo unpushable for anyone who has not installed it.
+  if command -v cargo-deny > /dev/null 2>&1; then
+    step "cargo deny" cargo deny check
+  else
+    printf '\n\033[33m⚠ cargo-deny not found — licence and advisory checks skipped.\033[0m\n'
+    printf '  Install: cargo install cargo-deny --locked\n'
+  fi
+
   # Host clippy cannot see imports or branches removed by `#[cfg]` on another
   # target. Compile the deletion adapter's tests as Windows too: it is small,
   # platform-sensitive, and does not need linking or a Windows VM.
   windows_target=x86_64-pc-windows-gnu
   rust_host=$(rustc -vV | awk '/^host:/ { print $2 }')
   if [[ "$rust_host" != *windows* ]]; then
-    if ! command -v rustup > /dev/null 2>&1; then
-      printf '\n\033[31m✗ Windows-target clippy\033[0m\n'
-      printf 'rustup is required by this repository; install it before pushing.\n'
-      failed=1
-    elif ! rustup target list --installed | grep -qx "$windows_target"; then
-      printf '\n\033[31m✗ Windows-target clippy\033[0m\n'
-      printf 'Missing Rust target. Install once: rustup target add %s\n' "$windows_target"
-      failed=1
-    else
+    # Ask the toolchain that will actually run, not rustup. `rustup target list`
+    # answers for rustup's toolchain, but if another rustc comes first on PATH —
+    # Homebrew's `rust` formula is the common way this happens — that is the one
+    # cargo uses, and rustup's answer is about a toolchain nothing is invoking.
+    # The symptom is a wall of "can't find crate for `std`" while compiling
+    # third-party crates, which reads like a code problem and is not one.
+    target_libdir=$(rustc --print target-libdir --target "$windows_target" 2> /dev/null || true)
+
+    if [[ -n "$target_libdir" && -d "$target_libdir" ]]; then
       step "Windows-target adapter clippy" \
         cargo clippy \
           -p nirmoka-adapter \
           -p nirmoka-adapter-gdu \
           -p nirmoka-adapter-rip \
           --tests --target "$windows_target" -- -D warnings
+    else
+      # Skipped, not failed. CI runs this check on a clean rustup toolchain; a
+      # local toolchain that cannot cross-compile should not make the repository
+      # unpushable, which is the same rule the missing-cargo branch above follows.
+      printf '\n\033[33m⚠ Windows-target adapter clippy skipped — no %s std for %s.\033[0m\n' \
+        "$windows_target" "$(command -v rustc)"
+      if command -v rustup > /dev/null 2>&1 &&
+        rustup target list --installed 2> /dev/null | grep -qx "$windows_target"; then
+        printf '  rustup has the target, but %s is ahead of rustup on PATH.\n' "$(command -v rustc)"
+        printf '  Put ~/.cargo/bin first, or `brew uninstall rust` — a Homebrew rustc also\n'
+        printf '  silently ignores the rust-toolchain.toml pin this repository sets.\n'
+      else
+        printf '  Install once: rustup target add %s\n' "$windows_target"
+      fi
     fi
   fi
 

@@ -1,6 +1,13 @@
 # The published copy of this file lives in the tap repository; this is the
-# source of truth it is copied from. `version` and `sha256` are the only lines
-# that change per release — the release workflow prints both.
+# source of truth it is copied from. The `url` tag and the `sha256` are the only
+# lines that differ, and the release workflow rewrites both on its way to the
+# tap — see docs/releasing.md.
+#
+# The sha256 below is a placeholder and stays one. It is the hash of the source
+# tarball GitHub generates for a tag, so it cannot be known until the tag exists,
+# and a stale real-looking hash here would be worse than an obvious placeholder.
+# The `url` tag, however, must match crates/app/tauri.conf.json:
+# scripts/check-invariants.sh fails when it does not.
 #
 # A formula rather than a cask, deliberately. Homebrew removed `--no-quarantine`
 # (Homebrew/brew#23363), so every cask install quarantines its download and an
