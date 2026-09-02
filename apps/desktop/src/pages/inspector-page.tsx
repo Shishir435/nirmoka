@@ -1,4 +1,4 @@
-import { ExternalLink, FolderOpen, Sparkles, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Package, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { AppFootprint, CleanupPreview } from "@nirmoka/transport";
@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
 import { componentShare, reclaimableFor } from "@/lib/engine/inspector";
-import { plural } from "@/lib/format";
+import { formatBytes, plural } from "@/lib/format";
 
 /**
  * What one application costs, and what that is made of.
@@ -96,73 +96,131 @@ export function InspectorPage({ nodeId, onBack }: { nodeId: number; onBack: () =
   }
 
   return (
-    <div className="space-y-6">
-      <AppHeader footprint={footprint} icon={icon} />
+    <div className="grid grid-cols-[250px_minmax(0,1fr)] gap-6 max-[900px]:grid-cols-1">
+      <aside className="space-y-3">
+        <Card className="shadow-none">
+          <CardContent className="p-5 text-center">
+            {icon ? (
+              <img src={icon} alt="" className="mx-auto size-14 rounded-xl" />
+            ) : (
+              <span className="mx-auto grid size-14 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <Package className="size-6" />
+              </span>
+            )}
+            <h1 className="mt-3 truncate text-lg font-semibold">{footprint.name}</h1>
+            <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">
+              {formatBytes(footprint.totalBytes)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {footprint.bundleId ? "Total footprint" : "Application bundle"}
+            </p>
+          </CardContent>
+        </Card>
 
-      <Card className="shadow-none">
-        <CardContent className="p-5">
-          <AppFootprintSummary footprint={footprint} />
-        </CardContent>
-      </Card>
+        <Card className="shadow-none">
+          <CardContent className="p-4">
+            <SectionTitle title="Overview" />
+            <AppFootprintSummary footprint={footprint} compact />
+          </CardContent>
+        </Card>
 
-      <Card className="shadow-none">
-        <CardContent className="p-5">
-          <SectionTitle title="What's taking up space" />
-          <div className="-mx-2 divide-y">
-            {footprint.components.map((component) => (
-              <StorageComponentRow
-                key={component.label}
-                component={component}
-                share={componentShare(component, footprint)}
-                expanded={open === component.label}
-                onToggle={() => setOpen(open === component.label ? null : component.label)}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        {reclaimable.length > 0 && (
+          <Card className="border-success/20 bg-success/6 shadow-none">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium">In Mole's cleanup review</p>
+              <p className="mt-1 text-xl font-semibold text-success tabular-nums">
+                {reclaimable.length} {plural(reclaimable.length, "item", "items")}
+              </p>
+              <Button
+                size="sm"
+                className="mt-3 w-full bg-success hover:bg-success/90"
+                onClick={() => {
+                  window.location.hash = "/clean";
+                }}
+              >
+                Review cleanup
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
-      <ReclaimableForApp rows={reclaimable} name={footprint.name} hasPreview={preview !== null} />
-
-      <Card className="shadow-none">
-        <CardContent className="p-5">
-          <SectionTitle title="Actions" />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+        <Card className="shadow-none">
+          <CardContent className="p-3">
+            <p className="px-2 pb-2 text-xs font-medium">Actions</p>
+            <InspectorAction
+              icon={<FolderOpen />}
+              label={features?.revealLabel ?? "Reveal in Finder"}
               onClick={() =>
                 summary && void transport.revealInFileManager(summary.scanId, footprint.nodeId)
               }
-            >
-              <FolderOpen /> {features?.revealLabel ?? "Reveal"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            />
+            <InspectorAction
+              icon={<ExternalLink />}
+              label={`Open ${footprint.name}`}
               onClick={() =>
                 summary && void transport.openApplication(summary.scanId, footprint.nodeId)
               }
-            >
-              <ExternalLink /> Open {footprint.name}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            />
+            <InspectorAction
+              icon={<Trash2 />}
+              label={`Uninstall ${footprint.name}…`}
               onClick={() => {
                 window.location.hash = "/storage/applications";
               }}
-            >
-              <Trash2 /> Uninstall…
-            </Button>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Uninstalling is Mole&apos;s command, run against the name it publishes. Nirmoka
-            assembles no paths for it — see ADR 0027.
-          </p>
-        </CardContent>
-      </Card>
+            />
+          </CardContent>
+        </Card>
+      </aside>
+
+      <div className="min-w-0 space-y-4">
+        <AppHeader footprint={footprint} icon={icon} />
+
+        <Card className="shadow-none">
+          <CardContent className="p-5">
+            <div className="border-b pb-3">
+              <h2 className="text-sm font-semibold">What's taking up space</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Files and data attributed to {footprint.name} by bundle identifier.
+              </p>
+            </div>
+            <div className="-mx-2 divide-y">
+              {footprint.components.map((component) => (
+                <StorageComponentRow
+                  key={component.label}
+                  component={component}
+                  share={componentShare(component, footprint)}
+                  expanded={open === component.label}
+                  onToggle={() => setOpen(open === component.label ? null : component.label)}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <ReclaimableForApp rows={reclaimable} name={footprint.name} hasPreview={preview !== null} />
+      </div>
     </div>
+  );
+}
+
+function InspectorAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-accent"
+    >
+      <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
   );
 }
 

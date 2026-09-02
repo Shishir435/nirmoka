@@ -118,25 +118,49 @@ export function AppShell({
   );
 }
 
-export function OnboardingLayout({ step, children }: { step: number; children: ReactNode }) {
+export function OnboardingLayout({
+  step,
+  steps = 3,
+  children,
+}: {
+  step: number;
+  steps?: number;
+  children: ReactNode;
+}) {
   return (
-    // Onboarding is the one screen that renders outside the shell, so it paints
-    // its own floor. This was `bg-muted/35` — a 35% tint over whatever sits
-    // behind the window, which is now the desktop, because the frame carries a
-    // vibrancy material. The opaque token is the same soft grey without the
-    // see-through setup wizard.
-    <div className="bg-muted grid min-h-screen place-items-center p-6">
-      <section className="relative w-full max-w-155 rounded-[20px] border bg-card px-14 py-12 shadow-lg max-[700px]:px-7">
-        {children}
-        <div className="mt-10 flex justify-center gap-2" aria-label={`Step ${step} of 4`}>
-          {[1, 2, 3, 4].map((n) => (
+    <div className="bg-background flex min-h-screen flex-col">
+      <header
+        data-tauri-drag-region
+        className="grid h-13 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b px-5"
+      >
+        <span />
+        <span data-tauri-drag-region className="text-[13px] font-semibold">
+          Nirmoka
+        </span>
+        {steps > 1 ? (
+          <span className="justify-self-end text-xs text-muted-foreground">
+            Setup {step} of {steps}
+          </span>
+        ) : (
+          <span />
+        )}
+      </header>
+      <main className="grid flex-1 place-items-center overflow-y-auto p-8 max-[700px]:p-5">
+        <section className="w-full max-w-230">{children}</section>
+      </main>
+      {steps > 1 && (
+        <div
+          className="flex h-9 shrink-0 items-center justify-center gap-2 border-t bg-card/60"
+          aria-label={`Step ${step} of ${steps}`}
+        >
+          {Array.from({ length: steps }, (_, index) => index + 1).map((n) => (
             <span
               key={n}
-              className={cn("size-2 rounded-full bg-border", n === step && "bg-primary")}
+              className={cn("h-1.5 w-6 rounded-full bg-border", n === step && "bg-primary")}
             />
           ))}
         </div>
-      </section>
+      )}
     </div>
   );
 }

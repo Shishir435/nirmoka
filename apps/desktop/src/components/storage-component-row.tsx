@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { Box, ChevronRight, Database, FileText, Package, Puzzle } from "lucide-react";
 
 import type { StorageComponent } from "@nirmoka/transport";
 
@@ -26,6 +26,8 @@ export function StorageComponentRow({
   onToggle: () => void;
 }) {
   const percent = Math.round(share * 100);
+  const visual = componentVisual(component.label);
+  const Icon = visual.icon;
 
   return (
     <div className={cn(!component.certain && "bg-muted/40")}>
@@ -41,6 +43,12 @@ export function StorageComponentRow({
             expanded && "rotate-90",
           )}
         />
+        <span
+          className="grid size-8 shrink-0 place-items-center rounded-lg"
+          style={{ background: visual.background, color: visual.color }}
+        >
+          <Icon className="size-4" />
+        </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
             {component.label}
@@ -84,4 +92,37 @@ export function StorageComponentRow({
       )}
     </div>
   );
+}
+
+function componentVisual(label: string) {
+  const key = label.toLowerCase();
+  if (key.includes("application")) {
+    return {
+      icon: Package,
+      color: "var(--chart-1)",
+      background: "color-mix(in oklch, var(--chart-1) 14%, transparent)",
+    };
+  }
+  if (key.includes("container")) {
+    return {
+      icon: Box,
+      color: "var(--chart-3)",
+      background: "color-mix(in oklch, var(--chart-3) 14%, transparent)",
+    };
+  }
+  if (key.includes("cache")) {
+    return {
+      icon: Database,
+      color: "var(--chart-4)",
+      background: "color-mix(in oklch, var(--chart-4) 16%, transparent)",
+    };
+  }
+  if (key.includes("log")) {
+    return {
+      icon: FileText,
+      color: "var(--destructive)",
+      background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
+    };
+  }
+  return { icon: Puzzle, color: "var(--muted-foreground)", background: "var(--muted)" };
 }
