@@ -13,6 +13,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# The one job below raises this to `contents: write` for itself, which is what
+# creating a release needs. Everything else stays read-only by default.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -205,27 +210,103 @@ jobs:
           BODY
             fi
           } > "$notes"
+          # `--prerelease` only for an actual rehearsal tag. Marking a real
+          # release as a prerelease hides it from /releases/latest, from the
+          # sidebar, and from anything scripted against either.
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          # shellcheck disable=SC2086 # deliberately unquoted: empty means absent
           gh release create "$GITHUB_REF_NAME" "$dmg" \
-            --draft --prerelease \
+            --draft $prerelease_flag \
             --title "Nirmoka ${GITHUB_REF_NAME}" \
             --notes-file "$notes"
 
-      # Two lines change in the tap per release, and guessing either of them
-      # produces a formula that fails to install for everyone but the guesser.
-      - name: What the tap needs
+      # Two lines change in the tap per release, and a hand-copied sha256 is the
+      # most breakable step in this whole pipeline: get it wrong and every
+      # `brew install` fails checksum verification, for everyone, until someone
+      # notices. So compute it here and write it to the tap directly.
+      - name: Update the tap
+        id: tap
         if: env.RELEASING == 'true' && env.PRERELEASE != 'true'
+        env:
+          # A PAT with `contents: write` on nirmoka/homebrew-tap. The default
+          # GITHUB_TOKEN is scoped to this repository and cannot push to it.
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
           tarball="${RUNNER_TEMP}/source.tar.gz"
           curl -fsSL -o "$tarball" \
             "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
           sha=$(shasum -a 256 "$tarball" | cut -d' ' -f1)
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+
+          # The repository's own copy is the source of truth for everything but
+          # these two lines, so the tap gets it with the two lines rewritten
+          # rather than a formula edited in two places that can disagree.
+          formula="${RUNNER_TEMP}/nirmoka.rb"
+          sed -e "s|^  url \".*\"|  url \"${url}\"|" \
+              -e "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" \
+              packaging/homebrew/nirmoka.rb > "$formula"
+
+          # Refuse to publish a formula that still carries the placeholder, or
+          # one sed did not actually rewrite.
+          grep -q "sha256 \"${sha}\"" "$formula" ||
+            { echo "::error::the tap formula's sha256 was not rewritten"; exit 1; }
+          grep -q "url \"${url}\"" "$formula" ||
+            { echo "::error::the tap formula's url was not rewritten"; exit 1; }
+
           {
-            echo '## packaging/homebrew/nirmoka.rb'
+            echo '## Tap formula'
             echo
             echo '```ruby'
-            echo "  url \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz\""
-            echo "  sha256 \"${sha}\""
+            grep -E '^  (url|sha256) ' "$formula"
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::TAP_TOKEN is not set — the tap was NOT updated."
+            echo "::warning::Copy the two lines above into nirmoka/homebrew-tap by hand,"
+            echo "::warning::or add the secret so the next release does it. See docs/releasing.md."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/nirmoka/homebrew-tap.git" \
+            "${RUNNER_TEMP}/tap"
+          cp "$formula" "${RUNNER_TEMP}/tap/Formula/nirmoka.rb"
+          cd "${RUNNER_TEMP}/tap"
+
+          if git diff --quiet; then
+            echo "::warning::the tap formula is already at ${GITHUB_REF_NAME}; nothing to push"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "nirmoka ${GITHUB_REF_NAME}"
+          git push -q
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "tap updated to ${GITHUB_REF_NAME}"
+
+      # The tap now points at a tag whose release is still a draft, so
+      # `brew install` would 404 until someone publishes it. Say so plainly
+      # rather than leaving it to be discovered by the first person who tries.
+      - name: What is left to do by hand
+        if: env.RELEASING == 'true' && env.PRERELEASE != 'true'
+        run: |
+          {
+            echo '## Before this release is real'
+            echo
+            echo "1. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
+            if [ "${{ steps.tap.outputs.updated }}" != "true" ]; then
+              echo '2. Update `nirmoka/homebrew-tap` by hand with the two lines above.'
+            fi
+            echo
+            echo 'Until the draft is published, the source tarball the tap points at does not'
+            echo 'exist, and `brew install nirmoka/tap/nirmoka` fails to download.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report what was produced

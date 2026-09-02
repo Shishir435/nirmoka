@@ -1,0 +1,33 @@
+name: Feature request
+description: Something Nirmoka should be able to do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does Nirmoka stop you?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+    validations:
+      required: false
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Worth checking first
+      description: >
+        Not gatekeeping — these are the two answers that come up most, and knowing
+        which one applies makes the request much faster to act on.
+      options:
+        - label: >
+            This does not need Nirmoka to write its own disk scanner or deletion
+            engine. It drives existing tools and stays that way; new abilities come
+            from a backend, as a `Capabilities` flag.
+        - label: >
+            If this needs a backend to do something, I have checked whether ncdu,
+            gdu, Mole, or rip can actually do it — or I am saying which new backend
+            would.

@@ -1,0 +1,60 @@
+name: Bug report
+description: Something Nirmoka did that it should not have
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security issue — anything that could remove a file the user did not
+        approve — close this and report it privately instead. See SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Scan ~/Downloads
+        2. Open the Applications view
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: backends
+    attributes:
+      label: Backends
+      description: >
+        The Help page lists these, or run `pnpm nrmk backends` from a checkout.
+        Nirmoka drives ncdu, gdu, Mole, and rip as subprocesses, so which of
+        them you have — and at which version — usually decides the behaviour.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Nirmoka version
+      placeholder: 0.1.1, or "built from main at <commit>"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+      placeholder: 15.2, Apple silicon
+    validations:
+      required: true
+  - type: textarea
+    id: sizes
+    attributes:
+      label: If a size or total looks wrong
+      description: >
+        Nirmoka reports disk usage, not apparent size, and it reports totals as a
+        lower bound when a directory was unreadable. Say what number you saw, what
+        you expected, and whether the summary mentioned unreadable entries.
+    validations:
+      required: false

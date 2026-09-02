@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# CI reads. Nothing here publishes, comments, or pushes, so the token should
+# not be able to. The release workflow raises this per job where it needs to.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
