@@ -205,6 +205,7 @@ enum LogEvent {
     },
 }
 
+#[derive(Debug)]
 pub struct DeletionState {
     next_confirmation: u64,
     next_operation: u64,

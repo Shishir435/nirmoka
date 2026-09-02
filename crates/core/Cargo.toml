@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+# Not published to crates.io. These crates depend on each other by path with no
+# version, so `cargo publish` would refuse them as they stand; saying so here
+# makes that explicit rather than a discovery, and stops an accidental publish.
+# Reversible: give the workspace path dependencies versions and drop this line.
+publish = false
 
 # INVARIANT: this crate must never depend on `tauri`, on any `nirmoka-adapter*`
 # crate, or on any GUI framework. It is the piece that survives swapping either
@@ -13,3 +18,6 @@ authors.workspace = true
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -31,7 +31,7 @@ function normalise(path: string, home: string): string {
   const expanded = path.startsWith("~/") && home ? `${home}${path.slice(1)}` : path;
   // A trailing separator or a wildcard is Mole describing a directory's
   // contents; the directory is what matches.
-  return expanded.replace(/[/*]+$/, "").toLowerCase();
+  return expanded.replace(/[/*]+$/u, "").toLowerCase();
 }
 
 /**

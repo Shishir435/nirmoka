@@ -56,6 +56,37 @@ plist = "1"
 # a literal is a path that only exists on the machine it was written on.
 directories = "6"
 
+# Lints every crate inherits via `[lints] workspace = true`.
+#
+# Deliberately narrow. `clippy::pedantic` produces 343 warnings on this
+# workspace, nearly all of them style preference, and a lint set that has to be
+# muted at every third call site teaches people to mute lints. Everything below
+# was measured at zero — or at a number small enough to fix in one pass — before
+# it was turned on, so the wall stays at zero and any new hit is a real one.
+#
+# `clippy::unwrap_used` is NOT here, because a Cargo lint table applies to test
+# targets too and a panic is how a test asserts. It is denied against lib and
+# bin targets only, by `pnpm rs:lint:strict` — see that script and CI.
+[workspace.lints.rust]
+# Nothing in this workspace uses `unsafe`. The day something wants to, that
+# should be a conversation rather than a commit that slips through review.
+unsafe_code = "forbid"
+# A `pub` item no other crate can reach overstates the API surface, and this
+# workspace's surface is the thing the invariants are about.
+unreachable_pub = "deny"
+# A type that cannot be printed cannot be put in an error message, which is
+# where boundary types end up when something goes wrong.
+missing_debug_implementations = "deny"
+
+[workspace.lints.clippy]
+# Debugging leftovers. All measured at zero, including in tests.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+# Leaking a guard or a file handle on a delete path is the kind of bug that
+# only shows up on someone else's machine.
+mem_forget = "deny"
+
 [profile.release]
 strip = true
 lto = true

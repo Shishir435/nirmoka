@@ -4,7 +4,8 @@
   "jsPlugins": ["./tools/oxlint-tailwind-plugin.mjs"],
   "categories": {
     "correctness": "error",
-    "suspicious": "error"
+    "suspicious": "error",
+    "perf": "error"
   },
   "rules": {
     "jsx-a11y/heading-has-content": "off",
@@ -12,7 +13,9 @@
     "nirmoka-tailwind/canonical-classes": "error",
     "react/react-in-jsx-scope": "off",
     "unicorn/no-array-reverse": "off",
-    "unicorn/no-array-sort": "off"
+    "unicorn/no-array-sort": "off",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "require-unicode-regexp": "error"
   },
   "env": {
     "builtin": true

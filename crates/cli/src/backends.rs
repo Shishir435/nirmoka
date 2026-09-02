@@ -22,7 +22,7 @@ struct BackendReport {
     capabilities: Capabilities,
 }
 
-pub fn run(json: bool, registry: &Registry, preference: &Preference) -> ExitCode {
+pub(crate) fn run(json: bool, registry: &Registry, preference: &Preference) -> ExitCode {
     let entries = registry.detect_all();
 
     let reports: Vec<BackendReport> = entries

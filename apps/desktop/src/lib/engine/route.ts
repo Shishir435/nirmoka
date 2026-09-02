@@ -80,7 +80,7 @@ function isView(value: string): value is StorageView {
  */
 export function locationFromHash(hash: string): Location | "onboarding" {
   const [first = "", second = "", third = ""] = hash
-    .replace(/^#\/?/, "")
+    .replace(/^#\/?/u, "")
     .split("/")
     .filter(Boolean);
   if (first === "onboarding") return "onboarding";
@@ -91,7 +91,7 @@ export function locationFromHash(hash: string): Location | "onboarding" {
     // Digits only, and at least one. `Number("")` is 0, so a bare
     // `#/storage/app` would otherwise open the Inspector on node zero — the
     // scan root — rather than naming no application at all.
-    return /^\d+$/.test(third)
+    return /^\d+$/u.test(third)
       ? { route: "storage", view: null, inspect: Number(third) }
       : DEFAULT_LOCATION;
   }

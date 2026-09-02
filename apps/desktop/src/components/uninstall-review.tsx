@@ -114,6 +114,9 @@ function ReviewBody({
                   <p className="text-xs font-medium text-muted-foreground">{group.label}</p>
                   <ul className="mt-1 space-y-1">
                     {group.items.map((item, index) => (
+                      // The path is the key; the index only breaks a tie, because
+                      // Mole can list the same path twice under different scopes.
+                      // eslint-disable-next-line react/no-array-index-key
                       <PlanRow key={`${item.displayPath}-${index}`} item={item} />
                     ))}
                   </ul>
@@ -130,6 +133,8 @@ function ReviewBody({
                 <ul className="mt-1 space-y-1">
                   {survivingItems(app.items).map((item, index) => (
                     <li
+                      // As above: the path leads, the index only breaks a tie.
+                      // eslint-disable-next-line react/no-array-index-key
                       key={`${item.displayPath}-${index}`}
                       className="truncate font-mono text-xs text-muted-foreground"
                       dir="ltr"

@@ -49,6 +49,18 @@ if command -v cargo > /dev/null 2>&1; then
   step "cargo fmt" cargo fmt --all -- --check
   step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
 
+  # Lib and bin targets only — see the same step in CI for why.
+  step "no unwrap in shipping code" cargo clippy --workspace -- -D clippy::unwrap_used
+
+  # Optional locally: it is a separate install, and CI is the gate. Skipping it
+  # loudly beats making the repo unpushable for anyone who has not installed it.
+  if command -v cargo-deny > /dev/null 2>&1; then
+    step "cargo deny" cargo deny check
+  else
+    printf '\n\033[33m⚠ cargo-deny not found — licence and advisory checks skipped.\033[0m\n'
+    printf '  Install: cargo install cargo-deny --locked\n'
+  fi
+
   # Host clippy cannot see imports or branches removed by `#[cfg]` on another
   # target. Compile the deletion adapter's tests as Windows too: it is small,
   # platform-sensitive, and does not need linking or a Windows VM.
