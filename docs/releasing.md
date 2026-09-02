@@ -187,12 +187,29 @@ with none of them gets a window that says so. Release notes should name the mini
 
 ## Versions to bump together
 
+```bash
+./scripts/bump-version.sh 0.3.0
+```
+
+That writes all three, rotates the changelog heading, and runs the invariant check. The list below
+is what it touches and why each one has to agree — worth knowing when the script is not what you
+reach for.
+
 - `crates/app/tauri.conf.json` — the version inside the bundle, and what the workflow checks.
 - `Cargo.toml` — `workspace.package.version`, inherited by every crate.
 - `packaging/homebrew/nirmoka.rb` — the `url` tag. `./scripts/check-invariants.sh` fails when this
   disagrees with `tauri.conf.json`, so CI catches the bump you forget. The `sha256` cannot be known
   until the tag exists, so the repository copy carries a placeholder and the workflow fills in the
   real one on its way to the tap.
+
+  The version cannot move out of the formula, and it is worth knowing why rather than rediscovering
+  it. A tap is a static Ruby file that `brew` reads after cloning it — there is no CI anywhere in a
+  user's install path — and the `url` plus `sha256` pin one exact tarball, which is the whole job of
+  a formula. Homebrew parses the version out of the url tag, which is why there is no `version`
+  stanza: adding one is redundant, and interpolating `v#{version}` into the url fails Homebrew's own
+  `FormulaAudit/ComponentsOrder` rule, which requires `url` to come first. So the version stays
+  written in the url, and the bump script is what keeps writing it by hand out of the process.
+
 - `CHANGELOG.md` — the `[Unreleased]` heading becomes the version, with a dated entry.
 
 `package.json` files stay at `0.0.0`: they are private workspace members, never published to npm,
