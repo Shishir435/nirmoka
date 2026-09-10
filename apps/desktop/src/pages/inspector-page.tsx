@@ -39,6 +39,7 @@ export function InspectorPage({ nodeId, onBack }: { nodeId: number; onBack: () =
     let live = true;
     setFootprint(null);
     setError(null);
+    setIcon(null);
     transport.appFootprint(summary.scanId, nodeId).then(
       (value) => live && setFootprint(value),
       // An id from a previous scan resolves to nothing, or to a different

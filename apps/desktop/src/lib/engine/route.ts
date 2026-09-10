@@ -91,7 +91,7 @@ export function locationFromHash(hash: string): Location | "onboarding" {
     // Digits only, and at least one. `Number("")` is 0, so a bare
     // `#/storage/app` would otherwise open the Inspector on node zero — the
     // scan root — rather than naming no application at all.
-    return /^\d+$/.test(third)
+    return /^\d+$/.test(third) && Number(third) <= 0xffffffff
       ? { route: "storage", view: null, inspect: Number(third) }
       : DEFAULT_LOCATION;
   }
