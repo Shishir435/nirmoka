@@ -74,7 +74,7 @@ export function scannerSetup(
       state: "upgrade",
       title: `Update ${unsupported.displayName}`,
       detail: `Version ${unsupported.detection.version} is installed, but this Nirmoka build understands ${unsupported.detection.supported}.`,
-      command: "brew upgrade ncdu",
+      command: `brew upgrade ${unsupported.id}`,
     };
   }
 

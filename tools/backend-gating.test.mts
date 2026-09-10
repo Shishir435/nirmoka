@@ -91,6 +91,13 @@ test("scanner setup never asks for Mole and distinguishes install from upgrade",
   assert.equal(old.state, "upgrade");
   assert.equal(old.command, "brew upgrade ncdu");
 
+  const oldGdu = scannerSetup(
+    [unsupported("gdu", { scan: true }, ">=5.32, <5.33")],
+    selection(null),
+  );
+  assert.equal(oldGdu.state, "upgrade");
+  assert.equal(oldGdu.command, "brew upgrade gdu");
+
   const ready = scannerSetup([backend("ncdu", true, { scan: true })], selection("ncdu"));
   assert.equal(ready.state, "ready");
   assert.equal(ready.command, null);
