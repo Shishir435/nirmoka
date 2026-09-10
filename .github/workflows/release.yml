@@ -104,7 +104,7 @@ jobs:
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           rustup target list --installed
 
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: Swatinem/rust-cache@v2.9.2
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
