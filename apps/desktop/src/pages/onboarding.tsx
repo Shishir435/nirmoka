@@ -1,153 +1,93 @@
-import { Check, CheckCircle2, LockKeyhole, Terminal } from "lucide-react";
-import { useState } from "react";
+import { Check, HardDrive, ShieldCheck } from "lucide-react";
 
 import { OnboardingLayout } from "@/components/app-shell";
 import { BackendSetupCard } from "@/components/backend-setup-card";
 import { NirmokaMark } from "@/components/mark";
-import { OnboardingFeature, PrivacyNote } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/lib/app-context";
 import { scannerSetup } from "@/lib/engine/backend-gating";
-import { cn } from "@/lib/utils";
 
+/**
+ * First launch asks for the one thing required to deliver value: a scanner.
+ * Backend choice, optional cleanup tools, and permissions are implementation
+ * details or contextual decisions, so they do not belong in onboarding.
+ */
 export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const { backends, refreshBackends, selection } = useApp();
-  const [step, setStep] = useState(1);
-  const scanner = scannerSetup(backends, selection);
-  if (step === 1)
-    return (
-      <OnboardingLayout step={1}>
-        <div className="text-center">
-          <NirmokaMark className="mx-auto size-16 rounded-[18px] shadow-sm" />
-          <h1 className="mt-7 text-2xl font-semibold">Welcome to Nirmoka</h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-            A safe and powerful way to understand and clean your Mac storage.
-          </p>
-        </div>
-        <div className="mx-auto mt-9 max-w-sm space-y-5">
-          <OnboardingFeature
-            title="Read-only by default"
-            text="Scan and analyze without modifying anything."
-          />
-          <OnboardingFeature
-            title="You are in control"
-            text="Review everything before taking any action."
-          />
-          <OnboardingFeature
-            title="Safe and transparent"
-            text="Recoverable deletion and clear explanations."
-          />
-        </div>
-        <Button className="mx-auto mt-10 flex w-64" onClick={() => setStep(2)}>
-          Get Started
-        </Button>
-      </OnboardingLayout>
-    );
-  if (step === 2)
-    return (
-      <OnboardingLayout step={2}>
-        <div className="text-center">
-          <HeroIcon dark>
-            <Terminal />
-          </HeroIcon>
-          <h1 className="mt-7 text-2xl font-semibold">Scanner Check</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Nirmoka needs one supported scanner before it can map your storage.
-          </p>
-        </div>
-        <div className="mt-8">
-          <BackendSetupCard setup={scanner} onCheckAgain={refreshBackends} />
-        </div>
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          Mole is optional. Nirmoka will offer it later when you open complete cleanup or uninstall.
-        </p>
-        <div className="mt-8 flex justify-between">
-          <Button variant="outline" onClick={() => setStep(1)}>
-            Back
-          </Button>
-          <Button disabled={scanner.state !== "ready"} onClick={() => setStep(3)}>
-            Continue
-          </Button>
-        </div>
-      </OnboardingLayout>
-    );
-  if (step === 3)
-    return (
-      <OnboardingLayout step={3}>
-        <div className="text-center">
-          <HeroIcon>
-            <LockKeyhole />
-          </HeroIcon>
-          <h1 className="mt-7 text-2xl font-semibold">Start with Standard Access</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Start safely. You can grant broader access later if a scan reports protected paths.
-          </p>
-        </div>
-        <div className="mt-8 rounded-xl border bg-muted/30 p-5">
-          <p className="text-sm font-medium">Standard Access</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Scan your home folder, Downloads, Applications, project folders and common caches.
-            Protected macOS locations may be reported as unreadable instead of being silently
-            omitted.
-          </p>
-        </div>
-        <PrivacyNote>Nirmoka never changes permissions itself.</PrivacyNote>
-        <div className="mt-8 flex justify-between">
-          <Button variant="outline" onClick={() => setStep(2)}>
-            Back
-          </Button>
-          <Button onClick={() => setStep(4)}>Continue</Button>
-        </div>
-      </OnboardingLayout>
-    );
+  const setup = scannerSetup(backends, selection);
+  const scanner = selection?.scanner
+    ? backends?.find((backend) => backend.id === selection.scanner)
+    : null;
+
   return (
-    <OnboardingLayout step={4}>
-      <div className="text-center">
-        <div className="mx-auto grid size-16 place-items-center rounded-full bg-success text-white shadow-sm">
-          <Check className="size-8" />
-        </div>
-        <h1 className="mt-7 text-2xl font-semibold">You're All Set!</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Nirmoka is ready to help you take control of your Mac storage.
-        </p>
+    <OnboardingLayout step={1} steps={1}>
+      <div className="mx-auto grid max-w-205 grid-cols-[minmax(0,1fr)_minmax(310px,.82fr)] items-center gap-12 max-[760px]:grid-cols-1 max-[760px]:gap-8">
+        <section>
+          <NirmokaMark className="size-14 rounded-[14px] shadow-sm" />
+          <h1 className="mt-6 text-[30px] font-semibold tracking-tight">
+            Find what is filling your Mac
+          </h1>
+          <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
+            Nirmoka turns a disk scan into a clear storage map, so you can find large files and
+            folders without learning terminal commands.
+          </p>
+
+          <div className="mt-7 space-y-4">
+            <Benefit
+              icon={<HardDrive />}
+              title="See where your space went"
+              text="Start with your home folder, applications, downloads, or any folder you choose."
+            />
+            <Benefit
+              icon={<ShieldCheck />}
+              title="Safe by default"
+              text="Scanning only reads. Nothing is removed unless you choose and confirm it."
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border bg-card p-6 shadow-xs">
+          {setup.state === "ready" ? (
+            <Ready
+              scannerName={scanner?.displayName ?? selection?.scanner ?? "Scanner"}
+              onComplete={onComplete}
+            />
+          ) : (
+            <BackendSetupCard setup={setup} onCheckAgain={refreshBackends} />
+          )}
+        </section>
       </div>
-      <div className="mx-auto mt-9 max-w-sm space-y-5">
-        <ReadyRow
-          label="Scanner"
-          value={selection?.scanner ? `${selection.scanner} detected` : "Ready"}
-        />
-        <ReadyRow label="Access Level" value="Standard Access" />
-        <ReadyRow label="Ready to Scan" value="Read-only first scan" />
-      </div>
-      <p className="mt-8 text-center text-xs text-muted-foreground">
-        First scan does not delete or modify files.
-      </p>
-      <Button className="mx-auto mt-6 flex w-64" onClick={onComplete}>
-        Open Nirmoka
-      </Button>
     </OnboardingLayout>
   );
 }
-function HeroIcon({ children, dark = false }: { children: React.ReactNode; dark?: boolean }) {
+
+function Benefit({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
-    <div
-      className={cn(
-        "mx-auto grid size-16 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg [&_svg]:size-8",
-        dark && "bg-foreground",
-      )}
-    >
-      {children}
+    <div className="flex gap-3.5">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4.5">
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{text}</p>
+      </div>
     </div>
   );
 }
-function ReadyRow({ label, value }: { label: string; value: string }) {
+
+function Ready({ scannerName, onComplete }: { scannerName: string; onComplete: () => void }) {
   return (
-    <div className="flex items-center gap-3">
-      <CheckCircle2 className="size-5 text-success" />
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{value}</p>
-      </div>
+    <div className="text-center">
+      <span className="mx-auto grid size-12 place-items-center rounded-full bg-success/12 text-success">
+        <Check className="size-6" />
+      </span>
+      <h2 className="mt-4 text-lg font-semibold">Ready to scan</h2>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {scannerName} is installed. Your first scan will be read-only.
+      </p>
+      <Button className="mt-6 w-full" onClick={onComplete}>
+        Open Nirmoka
+      </Button>
     </div>
   );
 }

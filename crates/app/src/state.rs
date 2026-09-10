@@ -49,6 +49,7 @@ pub fn registry() -> Registry {
 pub type ScanId = u64;
 
 /// A completed scan: the tree, and the facts about how it was produced.
+#[derive(Debug)]
 pub struct ScanResult {
     pub id: ScanId,
     pub tree: Tree,
@@ -56,13 +57,14 @@ pub struct ScanResult {
 }
 
 /// A scan in flight. Holding the token is what makes the stop button real.
+#[derive(Debug)]
 pub struct ActiveScan {
     pub id: ScanId,
     pub root: PathBuf,
     pub cancel: CancelToken,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ScanState {
     pub active: Option<ActiveScan>,
     pub result: Option<ScanResult>,
@@ -79,6 +81,7 @@ impl ScanState {
     }
 }
 
+#[derive(Debug)]
 pub struct AppState {
     registry: Registry,
     scan: Mutex<ScanState>,

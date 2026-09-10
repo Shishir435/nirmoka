@@ -70,7 +70,7 @@ test("a failed move leaves the row unmarked", () => {
   ]);
 
   assert.deepEqual(state.trashedIds, [], "nothing moved, so nothing is marked");
-  assert.match(state.error ?? "", /did not let Nirmoka/);
+  assert.match(state.error ?? "", /did not let Nirmoka/u);
 });
 
 test("a refused preparation opens no dialog", () => {
@@ -81,7 +81,7 @@ test("a refused preparation opens no dialog", () => {
 
   assert.equal(state.preparation, null);
   assert.equal(state.pendingNodeId, null);
-  assert.match(state.error ?? "", /scan root/);
+  assert.match(state.error ?? "", /scan root/u);
 });
 
 test("a row already in the Trash cannot be sent there twice", () => {
@@ -289,7 +289,7 @@ test("a rescan forgets every id, because the tree renumbers from zero", () => {
 test("a move whose journal write failed still reports the move", () => {
   const message = outcomeMessage(operation("permission denied"));
 
-  assert.match(message, /is in the Trash/);
-  assert.match(message, /could not be added to the operation log/);
-  assert.match(outcomeMessage(operation()), /Put Back/);
+  assert.match(message, /is in the Trash/u);
+  assert.match(message, /could not be added to the operation log/u);
+  assert.match(outcomeMessage(operation()), /Put Back/u);
 });

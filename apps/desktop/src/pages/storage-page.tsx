@@ -8,6 +8,7 @@ import { useApp } from "@/lib/app-context";
 import { STORAGE_VIEWS, type StorageView } from "@/lib/engine/route";
 import { ApplicationsSection } from "@/pages/sections/applications-section";
 import { DeveloperSection } from "@/pages/sections/developer-section";
+import { InspectorPage } from "@/pages/inspector-page";
 import { SummarySection } from "@/pages/sections/summary-section";
 import { SystemSection } from "@/pages/sections/system-section";
 import {
@@ -36,11 +37,16 @@ const viewLabels: Record<StorageView, string> = {
  */
 export function StoragePage({
   view,
+  inspect,
   onView,
+  onInspect,
 }: {
   /** `null` is the dashboard. A view is the browser beneath it — see ADR 0031. */
   view: StorageView | null;
+  /** The application being inspected, by node id, or `null` for none. */
+  inspect: number | null;
   onView: (view: StorageView | null) => void;
+  onInspect: (nodeId: number) => void;
 }) {
   const { transport, scan } = useApp();
   const [history, setHistory] = useState<SpaceHistory>(EMPTY_HISTORY);
@@ -66,6 +72,16 @@ export function StoragePage({
   // The dashboard is the destination. Everything it lists is a way into the
   // tree it came from, and that tree is a screen of its own rather than a
   // section stacked underneath — ADR 0031.
+  // An application replaces the screen rather than sitting inside it, which is
+  // what every screen below the dashboard does — ADR 0031.
+  //
+  // Tested for a number rather than against `null`: `undefined !== null` is
+  // true, so a prop that failed to arrive would open the Inspector on nothing
+  // and send `undefined` across the IPC boundary as a node id.
+  if (Number.isInteger(inspect)) {
+    return <InspectorPage nodeId={inspect as number} onBack={() => onView(null)} />;
+  }
+
   if (view === null) {
     return (
       <SummarySection
@@ -74,6 +90,7 @@ export function StoragePage({
           open(nodeId);
           onView("folders");
         }}
+        onInspect={onInspect}
       />
     );
   }

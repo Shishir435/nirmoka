@@ -48,6 +48,7 @@ impl CancelToken {
 ///
 /// The child is wrapped in a mutex because killing it happens on the watcher
 /// thread while the caller is blocked reading its stdout on this one.
+#[derive(Debug)]
 pub struct RunningProcess {
     child: Arc<Mutex<Child>>,
     stdout: Option<ChildStdout>,
@@ -58,6 +59,7 @@ pub struct RunningProcess {
 }
 
 /// What a finished process left behind.
+#[derive(Debug)]
 pub struct Outcome {
     pub status: ExitStatus,
     pub stderr: String,

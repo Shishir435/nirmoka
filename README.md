@@ -1,5 +1,9 @@
 # Nirmoka
 
+[![CI](https://github.com/Shishir435/nirmoka/actions/workflows/ci.yml/badge.svg)](https://github.com/Shishir435/nirmoka/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Shishir435/nirmoka?include_prereleases&sort=semver)](https://github.com/Shishir435/nirmoka/releases)
+
 **A cross-platform desktop GUI for disk analysis and cleanup — see what's eating your disk on macOS, Linux, and Windows.**
 
 Nirmoka is a free, open source desktop app that gives a real graphical interface to the
@@ -112,6 +116,9 @@ tells you how to get one if you have none.
 - [Development setup](docs/development.md) — prerequisites and daily commands
 - [Roadmap](docs/roadmap.md) — the step-by-step tracker
 - [Decision records](docs/adr/) — why each major choice was made
+- [Releasing](docs/releasing.md) — how a tag becomes an install
+- [Changelog](CHANGELOG.md) — what changed per release
+- [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Development
 
@@ -130,10 +137,16 @@ See [docs/development.md](docs/development.md) for the full setup.
 
 ## Contributing
 
-Not yet — the architecture is still moving. Once the adapter contract is stable and the
-first backend works end to end, this section will describe how to add a new backend.
+Yes, please. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the checks to run, the five
+invariants CI enforces, and what adding a backend involves.
 
-Issues and ideas are welcome in the meantime.
+The adapter contract is stable enough to build against: adding a second backend
+(`adapter-mole`) required no change to `crates/core` or to the `Adapter` trait, which was
+the test it had to pass.
+
+Found a bug? [Open an issue](https://github.com/Shishir435/nirmoka/issues/new/choose).
+Found something that could delete a file a user did not approve? Report it privately —
+see [`SECURITY.md`](SECURITY.md).
 
 ## License
 
