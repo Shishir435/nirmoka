@@ -301,10 +301,13 @@ jobs:
           {
             echo '## Before this release is real'
             echo
-            echo "1. Test the updated tap: \`brew reinstall --build-from-source nirmoka/tap/nirmoka\`."
-            echo "2. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
             if [ "${{ steps.tap.outputs.updated }}" != "true" ]; then
-              echo '3. Update `nirmoka/homebrew-tap` by hand with the two lines above before testing.'
+              echo '1. Update `nirmoka/homebrew-tap` by hand with the two lines above.'
+              echo '2. Test the updated tap: `brew reinstall --build-from-source nirmoka/tap/nirmoka`.'
+              echo "3. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
+            else
+              echo '1. Test the updated tap: `brew reinstall --build-from-source nirmoka/tap/nirmoka`.'
+              echo "2. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
