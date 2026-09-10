@@ -68,7 +68,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelection(resolved);
       if (summary) dispatchScan({ type: "restored", summary });
     } catch (error) {
-      setBackends([]);
+      // Keep the last successful detection. An empty list means "we checked and
+      // found nothing"; using it for a transient refresh failure incorrectly
+      // turns installed backends into missing ones and clears their live views.
       setBackendError(String(error));
     }
   }, [transport]);
