@@ -1,0 +1,71 @@
+# Supply-chain and licence policy, checked by `cargo deny check`.
+#
+# The licence half of this file is not bookkeeping. NOTICE.md and AGENTS.md both
+# carry the rule that Nirmoka must not become a derivative work of a GPL backend
+# — Mole is GPL-3.0, and Nirmoka drives it as a subprocess precisely so that it
+# does not link against it. That rule was prose enforced by memory. The
+# allow-list below makes it a build failure: a copyleft licence entering the
+# dependency graph is refused by name rather than noticed in review.
+
+[graph]
+# Check every platform the workspace claims to support, not just the host.
+# A Windows-only or Linux-only dependency has the same licence consequences.
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "x86_64-pc-windows-msvc" },
+]
+all-features = true
+
+[advisories]
+# Vulnerabilities fail at any depth — that is the check worth having, and the
+# graph is currently clean of them.
+yanked = "deny"
+ignore = []
+# "Unmaintained", however, is scoped to crates this workspace chose itself.
+# Every unmaintained notice in the graph today (16 of them: the gtk-rs GTK3
+# bindings, the unic-* family under tauri-utils, proc-macro-error) is inside
+# Tauri's own dependency tree, and RUSTSEC lists no safe upgrade for any of
+# them. Failing CI on those would mean a permanent ignore-list that has to be
+# re-justified on every Tauri bump, which is how an advisory file stops being
+# read. Scoped here, the check still fires the moment Nirmoka itself takes a
+# direct dependency on something unmaintained.
+unmaintained = "workspace"
+
+[licenses]
+# Permissive only, and every entry below was already in the graph when this file
+# was written. Anything not listed — every GPL, AGPL, and unlicensed crate —
+# fails the check. Adding a licence here is a deliberate act, which is the point.
+confidence-threshold = 0.9
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "MIT",
+  "MIT-0",
+  # Weak, file-level copyleft. Reached through `directories` (option-ext) and
+  # the CSS parser inside the webview stack. Safe because nothing here modifies
+  # those files; if that ever changes, the obligation is per-file, not viral.
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[bans]
+# A second copy of a crate is usually a transitive version skew rather than a
+# problem, and the Tauri tree has many. Warn so the count stays visible.
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates depend on each other by path with no version, which
+# reads as a wildcard. That is correct for crates that are never published, and
+# it is the only wildcard this setting should tolerate.
+allow-wildcard-paths = true
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

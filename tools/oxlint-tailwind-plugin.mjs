@@ -38,7 +38,7 @@ function carriesClasses(node) {
 }
 
 function canonicalize(value) {
-  return value.replace(/\S+/g, (candidate) => {
+  return value.replace(/\S+/gu, (candidate) => {
     const [canonical] = designSystem.canonicalizeCandidates([candidate], { rem: 16 });
     return canonical ?? candidate;
   });

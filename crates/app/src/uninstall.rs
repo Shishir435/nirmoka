@@ -39,7 +39,7 @@ pub struct UninstallPreparation {
     pub expires_in: Duration,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct UninstallState {
     next_preview: u64,
     active_preview: Option<ActivePreview>,
@@ -49,6 +49,7 @@ pub struct UninstallState {
     pending: HashMap<u64, ReviewedUninstall>,
 }
 
+#[derive(Debug)]
 struct ActivePreview {
     id: u64,
     cancel: CancelToken,

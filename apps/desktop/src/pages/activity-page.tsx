@@ -203,5 +203,9 @@ function detail(entry: ActivityEntry): string {
 }
 
 function name(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+  // The last segment, not the first, so `find` is the wrong shape. `findLast`
+  // is the right one and is ES2023; the lib here is pinned to ES2022 because
+  // that is the macOS 12 WebView floor, so this stays an index.
+  const segments = path.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? path;
 }

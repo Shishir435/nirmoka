@@ -443,6 +443,7 @@ pub fn related_paths(home: &Path, candidates: &[String], known: &[PathBuf]) -> V
 /// directory, [`resolve`] holds nothing and does the walking. Holding a scan of
 /// two million nodes locked while a cache directory is counted would stall
 /// every other command behind it, including the one that cancels this.
+#[derive(Debug)]
 pub struct FootprintPlan {
     scan_id: ScanId,
     node_id: u32,
@@ -454,6 +455,7 @@ pub struct FootprintPlan {
     pending: Vec<PlannedPath>,
 }
 
+#[derive(Debug)]
 struct PlannedPath {
     label: &'static str,
     path: PathBuf,

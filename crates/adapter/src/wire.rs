@@ -461,6 +461,7 @@ pub struct TreeStats {
 /// The first entry seen for an inode carries its bytes; later ones are flagged
 /// [`Node::hardlink`] and carry zero. This is what ncdu itself does, and it is
 /// the only way a directory total means "space freed if this is deleted".
+#[derive(Debug)]
 pub struct TreeSink {
     tree: Option<Tree>,
     stack: Vec<NodeId>,

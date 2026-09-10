@@ -26,6 +26,8 @@
     "rs:check": "cargo check --workspace --all-targets",
     "rs:test": "cargo test --workspace",
     "rs:lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rs:lint:strict": "cargo clippy --workspace -- -D clippy::unwrap_used",
+    "rs:deny": "cargo deny check",
     "rs:fmt": "cargo fmt --all"
   },
   "devDependencies": {

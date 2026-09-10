@@ -30,6 +30,10 @@ dist/
 # macOS
 .DS_Store
 
+# Design reference images. Working material for a redesign, not source, and
+# they are large binaries that would sit in history forever.
+screen-ref/
+
 # Local agent / assistant overrides
 CLAUDE.local.md
 AGENTS.local.md

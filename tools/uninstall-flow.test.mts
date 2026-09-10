@@ -217,20 +217,23 @@ test("paths the backend will leave behind are counted apart from the ones it rem
 });
 
 test("the outcome message reports the backend's own completion", () => {
-  assert.match(uninstallOutcomeMessage(operation()), /Example moved to the Trash/);
+  assert.match(uninstallOutcomeMessage(operation()), /Example moved to the Trash/u);
   assert.match(
     uninstallOutcomeMessage(operation("partial", ["Example"], ["Other is still running"])),
-    /could not remove: Other is still running/,
+    /could not remove: Other is still running/u,
   );
-  assert.match(uninstallOutcomeMessage(operation("cancelled", [], [])), /stopped part way through/);
-  assert.match(uninstallOutcomeMessage(operation("failed", [], [])), /did not finish/);
+  assert.match(
+    uninstallOutcomeMessage(operation("cancelled", [], [])),
+    /stopped part way through/u,
+  );
+  assert.match(uninstallOutcomeMessage(operation("failed", [], [])), /did not finish/u);
 });
 
 test("a move that happened but was not logged says both", () => {
   const message = uninstallOutcomeMessage(operation("finished", ["Example"], [], "disk full"));
 
-  assert.match(message, /moved to the Trash/);
-  assert.match(message, /could not be added to the operation log: disk full/);
+  assert.match(message, /moved to the Trash/u);
+  assert.match(message, /could not be added to the operation log: disk full/u);
 });
 
 test("a plan is grouped by where its paths sit, in the footprint's vocabulary", () => {

@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+# Not published to crates.io. These crates depend on each other by path with no
+# version, so `cargo publish` would refuse them as they stand; saying so here
+# makes that explicit rather than a discovery, and stops an accidental publish.
+# Reversible: give the workspace path dependencies versions and drop this line.
+publish = false
 
 [dependencies]
 directories = { workspace = true }
@@ -14,3 +19,6 @@ nirmoka-core = { workspace = true }
 # Mole's supported status and application-list boundaries are JSON; parsing stays here.
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

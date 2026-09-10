@@ -51,12 +51,12 @@ test("detection in progress is not reported as a missing backend", () => {
   const pending = scanAvailability(null, null);
 
   assert.equal(pending.available, false);
-  assert.match(pending.reason, /Detecting/);
+  assert.match(pending.reason, /Detecting/u);
 });
 
 test("a scan needs a resolved scanner, whatever else is installed", () => {
   assert.equal(scanAvailability([], selection(null)).available, false);
-  assert.match(scanAvailability([], selection(null)).reason, /No supported scanner/);
+  assert.match(scanAvailability([], selection(null)).reason, /No supported scanner/u);
 
   // Mole is usable and cannot scan, so resolution falls back — the page must
   // gate on what resolved, not on whether a backend was found.
@@ -66,16 +66,16 @@ test("a scan needs a resolved scanner, whatever else is installed", () => {
 });
 
 test("cleanup review needs a usable Mole with both flags", () => {
-  assert.match(cleanupAvailability([]).reason, /Install a supported Mole release/);
+  assert.match(cleanupAvailability([]).reason, /Install a supported Mole release/u);
   assert.match(
     cleanupAvailability(mole({ cleanupCategories: true, dryRun: true }, false)).reason,
-    /Install a supported Mole release/,
+    /Install a supported Mole release/u,
     "an unusable Mole is not a Mole",
   );
 
   const noDryRun = cleanupAvailability(mole({ cleanupCategories: true }));
   assert.equal(noDryRun.available, false);
-  assert.match(noDryRun.reason, /does not expose the capabilities/);
+  assert.match(noDryRun.reason, /does not expose the capabilities/u);
 
   const noCategories = cleanupAvailability(mole({ dryRun: true }));
   assert.equal(noCategories.available, false);

@@ -31,7 +31,7 @@ pub struct CleanupPreparation {
     pub expires_in: Duration,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CleanupState {
     next_preview: u64,
     active_preview: Option<ActivePreview>,
@@ -41,6 +41,7 @@ pub struct CleanupState {
     pending: HashMap<u64, ReviewedCleanup>,
 }
 
+#[derive(Debug)]
 struct ActivePreview {
     id: u64,
     cancel: CancelToken,

@@ -160,6 +160,10 @@ export function SystemSection() {
                     <div className="space-y-3 text-sm">
                       {status.batteries.map((battery, index) => (
                         <Fact
+                          // BatteryStatus carries no identifier, and the list is
+                          // fixed hardware read in one shot: position is the only
+                          // identity there is, and it does not reorder.
+                          // eslint-disable-next-line react/no-array-index-key
                           key={index}
                           label={`Battery ${index + 1}`}
                           value={`${percent(battery.percent)} · ${battery.status} · ${battery.health}`}
