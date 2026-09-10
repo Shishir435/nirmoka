@@ -291,22 +291,21 @@ jobs:
           echo "updated=true" >> "$GITHUB_OUTPUT"
           echo "tap updated to ${GITHUB_REF_NAME}"
 
-      # The tap now points at a tag whose release is still a draft, so
-      # `brew install` would 404 until someone publishes it. Say so plainly
-      # rather than leaving it to be discovered by the first person who tries.
+      # A tag archive exists independently of the draft release, so the updated
+      # tap can be exercised before publication. Keep that final check in the
+      # summary: it is the last chance to catch a bad formula without exposing
+      # it as a published release.
       - name: What is left to do by hand
         if: env.RELEASING == 'true' && env.PRERELEASE != 'true'
         run: |
           {
             echo '## Before this release is real'
             echo
-            echo "1. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
+            echo "1. Test the updated tap: \`brew reinstall --build-from-source nirmoka/tap/nirmoka\`."
+            echo "2. Publish the draft release for ${GITHUB_REF_NAME} — it is a draft on purpose."
             if [ "${{ steps.tap.outputs.updated }}" != "true" ]; then
-              echo '2. Update `nirmoka/homebrew-tap` by hand with the two lines above.'
+              echo '3. Update `nirmoka/homebrew-tap` by hand with the two lines above before testing.'
             fi
-            echo
-            echo 'Until the draft is published, the source tarball the tap points at does not'
-            echo 'exist, and `brew install nirmoka/tap/nirmoka` fails to download.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report what was produced

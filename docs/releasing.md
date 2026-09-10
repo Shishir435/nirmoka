@@ -100,9 +100,9 @@ old behaviour, kept as the fallback rather than as the default.
 
 The step is skipped for rehearsal tags, because the tap must never point at one.
 
-Note the ordering: the tap is updated while the release is still a **draft**, so the tarball it points
-at does not exist yet and `brew install` fails to download until the draft is published. The workflow
-says so in its run summary. Publish the draft promptly.
+Note the ordering: the tap is updated while the release is still a **draft**. GitHub's tag archive
+exists as soon as the tag does, independently of the release, so this is the useful final test window:
+install from the updated tap before publishing the draft.
 
 Verify a change before pushing it to the tap:
 
@@ -165,11 +165,11 @@ base64 -i certificate.p12 | pbcopy
 5. Wait for the workflow. A red run means no draft exists, which is the intended outcome of any
    failure here. A green run with the signature step **skipped** means the release is unsigned, which
    is expected until there is a certificate.
-6. Publish the draft release. Do this before testing the tap: the workflow has already pointed the
-   tap at this tag, and the source tarball is not downloadable until the release is out of draft.
-7. Check the tap was updated (the run summary says whether it was, and names what is left if it was
-   not). Then install it on a clean machine, or at least a clean prefix, and launch the app. That is
-   the path users take, so it is the one that has to be checked.
+6. Check the tap was updated (the run summary says whether it was, and names what is left if it was
+   not). Install it on a clean machine, or at least a clean prefix, and launch the app while the
+   release is still a draft. GitHub's tag archive already exists, so this tests the exact path users
+   will take without publishing a broken release.
+7. Publish the draft release after the tap install succeeds.
 8. If the release is signed, also download the `.dmg`, open it on a Mac that has never seen the app,
    and check that it launches without a Gatekeeper warning. Notarization can be verified without a
    second machine; first-launch behaviour cannot.
