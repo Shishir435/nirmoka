@@ -142,6 +142,8 @@ test("an id that names no application is the dashboard, not an empty Inspector",
     "#/storage/app/nonsense",
     "#/storage/app/-1",
     "#/storage/app/1.5",
+    "#/storage/app/4294967296",
+    "#/storage/app/12/extra",
   ]) {
     assert.deepEqual(locationFromHash(hash), DEFAULT_LOCATION, hash);
   }
