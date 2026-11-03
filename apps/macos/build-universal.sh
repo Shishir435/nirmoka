@@ -16,5 +16,7 @@ intel_bin=$(swift build --package-path apps/macos --scratch-path target/swift-x8
 lipo -create "$arm_bin/NirmokaMac" "$intel_bin/NirmokaMac" -output "$app_bundle/Contents/MacOS/Nirmoka"
 codesign --force --sign - --timestamp=none "$app_bundle/Contents/Helpers/nirmoka-native-service"
 codesign --force --sign - --timestamp=none "$app_bundle"
-lipo -verify_arch arm64 x86_64 "$app_bundle/Contents/MacOS/Nirmoka"
-lipo -verify_arch arm64 x86_64 "$app_bundle/Contents/Helpers/nirmoka-native-service"
+for architecture in arm64 x86_64; do
+  lipo -verify_arch "$architecture" "$app_bundle/Contents/MacOS/Nirmoka"
+  lipo -verify_arch "$architecture" "$app_bundle/Contents/Helpers/nirmoka-native-service"
+done
