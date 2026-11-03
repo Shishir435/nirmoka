@@ -9,50 +9,47 @@ changelog says what changed, an ADR says why it will still be that way in six mo
 
 ## [Unreleased]
 
-Everything below is on `main` and not yet tagged. The window a user opens is now the
-product, rather than a tree browser with a cleanup tab beside it.
+## [0.2.0] — 2026-11-03
 
 ### Added
 
-- **Move to Trash.** The verb the read-only beta was missing. Recoverable removal only,
-  through the platform's own Trash service, and on macOS through the Finder specifically
-  so that Put Back works. A `Trashed` journal event records it.
-  ([ADR 0025](docs/adr/0025-move-to-trash-is-a-platform-integration.md))
-- **Application uninstall**, relayed through Mole's own confirmation. Nirmoka never
-  handles a password; Mole puts up its own authorization dialog. Trash is the default
-  route and a test asserts on the recorded argv that `--permanent` is never passed.
-  ([ADR 0027](docs/adr/0027-uninstall-is-a-relayed-confirmation.md))
-- **Application footprint attribution.** What an application actually costs, assembled
-  from its bundle identifier rather than its `.app` bundle size alone.
-  ([ADR 0028](docs/adr/0028-an-applications-footprint-is-what-the-filesystem-says.md))
-- **The Inspector**: what one application costs, and what removing it would touch.
-- **A dashboard** that classifies the disk into kinds and draws a bar that runs to the
-  volume rather than to the scan.
-- Application icons, read from each bundle's `Info.plist`.
-- A brand mark, drawn from what the name means, on Apple's icon grid.
+- Native SwiftUI macOS app, backed by a private Rust service. macOS 13 or later.
+- Storage overview with category filtering and largest-item inspection.
+- Application footprints that include attributed Library data, available without
+  a disk scan when Mole supplies an installed-app inventory.
+- Searchable application inventory and a dedicated removal-review sheet.
+- Reviewed cleanup, uninstall, and maintenance through Mole's own safety rules.
+- Move to Trash with resolved-path confirmation and an operation journal.
+- Scanner and cleanup-tool setup guidance, including version diagnostics.
 
 ### Changed
 
-- **Three destinations instead of seven tabs**, after the first person to use the beta
-  said the tabs were confusing.
-- The scan strip is one line, so the page no longer moves while a scan runs.
+- The native macOS app is the only desktop shell. React, Tauri, the TypeScript
+  transport, and the JavaScript build workspace have been removed (ADR 0033).
+- Navigation makes Applications, cleanup, Activity, and maintenance reachable
+  outside Settings. File inspectors expose consistent actions.
+- Folder browsing has native list selection, size/name ordering, back/forward
+  history, and explicit bounded page ranges.
+- Rescans retain the previous snapshot until a replacement completes.
+- CI, Homebrew, and universal release packaging build Swift and Rust directly.
 
 ### Fixed
 
-- A scan stays on one volume, so a mounted disk no longer inflates the total.
-- An application is the outermost bundle: nested helper apps are no longer counted twice,
-  and none is cut from the list.
-- Several ways the dashboard list and bar could overstate a total.
-- Completeness is derived from the bytes a consumer actually counted, not assumed.
+- Empty directories can be opened and distinguished from unreadable locations.
+- Final uninstall confirmation appears above the removal-review sheet.
+- Closing the native app cancels its scanner instead of orphaning it.
+- Incomplete footprint measurements and scan coverage are labeled explicitly.
+- Cleanup reviews explain fresh discovery and do not promise recovery or report
+  reviewed bytes as actual space freed.
 
-### Internal
+### Known limitations
 
-- Lint sets ratcheted: `[workspace.lints]` across all crates, `clippy::unwrap_used` denied
-  in shipping code, and oxlint's `perf` category enabled. The AppContext value is now
-  memoised — it had a new identity every render, re-rendering every consumer on every scan
-  progress event.
-- `deny.toml`: the rule that no GPL code enters this project is now enforced by the build
-  rather than by memory.
+- Downloads are ad-hoc signed and not notarized. Homebrew source builds remain
+  the supported install route; building requires Xcode 16+ with Swift 6.
+- The desktop app is macOS-only. Core and adapters remain platform-neutral.
+- Directory browsing uses bounded pages; cleanup recovery is not guaranteed.
+- Backends are installed separately. The Homebrew formula installs ncdu; Mole
+  remains optional for cleanup, uninstall, inventory, and maintenance.
 
 ## [0.1.1] — 2026-08-04
 
@@ -92,6 +89,7 @@ serves 0.1.1; 0.1.0 is kept for the record.
   ([ADR 0017](docs/adr/0017-rip-deletion-is-not-execution-bound.md),
   [ADR 0018](docs/adr/0018-selected-path-deletion-is-deferred-for-v0-1.md))
 
-[unreleased]: https://github.com/Shishir435/nirmoka/compare/v0.1.1...HEAD
+[unreleased]: https://github.com/Shishir435/nirmoka/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Shishir435/nirmoka/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Shishir435/nirmoka/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Shishir435/nirmoka/releases/tag/v0.1.0

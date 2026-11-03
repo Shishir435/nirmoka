@@ -299,12 +299,12 @@ jobs:
 
       - name: Report what was produced
         run: |
-          find target/universal-apple-darwin/release/bundle -maxdepth 2 \
+          find target/macos -maxdepth 1 \
             \( -name '*.dmg' -o -name '*.app' \) |
             while read -r artifact; do
               printf '%s (%s)\n' "$artifact" "$(du -sh "$artifact" | cut -f1)"
             done
 
           if [ "$SIGNED" != "true" ]; then
-            echo "::warning::built without signing credentials — this bundle is unsigned and must not be published"
+            echo "::warning::built without signing credentials — this bundle is not notarized; Homebrew is the supported install path"
           fi
