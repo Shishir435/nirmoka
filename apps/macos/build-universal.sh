@@ -17,6 +17,6 @@ lipo -create "$arm_bin/NirmokaMac" "$intel_bin/NirmokaMac" -output "$app_bundle/
 codesign --force --sign - --timestamp=none "$app_bundle/Contents/Helpers/nirmoka-native-service"
 codesign --force --sign - --timestamp=none "$app_bundle"
 for architecture in arm64 x86_64; do
-  lipo -verify_arch "$architecture" "$app_bundle/Contents/MacOS/Nirmoka"
-  lipo -verify_arch "$architecture" "$app_bundle/Contents/Helpers/nirmoka-native-service"
+  lipo "$app_bundle/Contents/MacOS/Nirmoka" -verify_arch "$architecture"
+  lipo "$app_bundle/Contents/Helpers/nirmoka-native-service" -verify_arch "$architecture"
 done
