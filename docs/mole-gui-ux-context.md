@@ -1,3 +1,6 @@
+> Historical React/Tauri design material. Retired by ADR 0033; see development.md
+> and apps/macos for the current native application.
+
 # Context: GUI Design for Mole CLI
 
 You are helping design the user experience for **Nirmoka**, a cross-platform desktop GUI for disk analysis and cleanup. It wraps existing CLI tools (ncdu, gdu, Mole, rip) as subprocesses behind an adapter layer. The current focus is the **Mole adapter** — a macOS-only cleanup and app-uninstall CLI.

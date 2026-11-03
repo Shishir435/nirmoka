@@ -9,11 +9,11 @@
 //! — rather than abandoning it to keep churning the disk.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 
 use nirmoka_adapter::wire::{TreeSink, WireHeader, WireItem, WireSink};
 use nirmoka_adapter::{validate_scan_root, CancelToken, ScanOptions};
-use tauri::{AppHandle, Emitter, Manager};
 
 use crate::dto;
 use crate::state::{ActiveScan, AppState, ScanId, ScanResult};
@@ -29,7 +29,7 @@ pub const EVENT_FAILED: &str = "scan://failed";
 ///
 /// A home directory produces millions of entries. One event each would spend
 /// more time serialising progress than walking the disk, and would flood the
-/// webview's event loop with work it cannot render anyway.
+/// interface's event loop with work it cannot render anyway.
 const PROGRESS_EVERY: u64 = 25_000;
 
 /// The parser recurses, and [`nirmoka_adapter::wire::MAX_DEPTH`] caps that at
@@ -38,17 +38,13 @@ const PROGRESS_EVERY: u64 = 25_000;
 const WORKER_STACK_BYTES: usize = 4 * 1024 * 1024;
 
 /// Somewhere to report progress. Exists so the sink can be tested without a
-/// running Tauri application.
+/// running application.
 pub trait Reporter: Send + Sync {
     fn progress(&self, progress: dto::ScanProgress);
-}
 
-impl Reporter for AppHandle {
-    fn progress(&self, progress: dto::ScanProgress) {
-        // A failed emit means the window is gone. The scan is about to notice
-        // that too; there is nobody left to tell.
-        let _ = self.emit(EVENT_PROGRESS, progress);
-    }
+    fn finished(&self, _summary: dto::ScanSummary) {}
+
+    fn failed(&self, _failure: dto::ScanFailure) {}
 }
 
 /// Wraps [`TreeSink`] and reports where the backend has got to.
@@ -56,7 +52,7 @@ impl Reporter for AppHandle {
 /// It tracks the directory stack rather than a path string, because building a
 /// path per entry would allocate millions of times to display a few hundred.
 #[derive(Debug)]
-pub struct ProgressSink<'a, R: Reporter> {
+pub struct ProgressSink<'a, R: Reporter + ?Sized> {
     inner: TreeSink,
     reporter: &'a R,
     stack: Vec<String>,
@@ -64,7 +60,7 @@ pub struct ProgressSink<'a, R: Reporter> {
     next_report: u64,
 }
 
-impl<'a, R: Reporter> ProgressSink<'a, R> {
+impl<'a, R: Reporter + ?Sized> ProgressSink<'a, R> {
     pub fn new(reporter: &'a R) -> Self {
         Self {
             inner: TreeSink::new(),
@@ -101,7 +97,7 @@ impl<'a, R: Reporter> ProgressSink<'a, R> {
     }
 }
 
-impl<R: Reporter> WireSink for ProgressSink<'_, R> {
+impl<R: Reporter + ?Sized> WireSink for ProgressSink<'_, R> {
     fn header(&mut self, header: &WireHeader) {
         self.inner.header(header);
     }
@@ -128,28 +124,25 @@ impl<R: Reporter> WireSink for ProgressSink<'_, R> {
 /// The path is validated here rather than on the worker, so a mistyped
 /// directory is an error the caller sees immediately instead of an event that
 /// arrives after the UI has already switched to a scanning state.
-pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
-    let state = app.state::<AppState>();
-
+pub fn start_native(
+    state: Arc<AppState>,
+    root: &str,
+    reporter: Arc<dyn Reporter>,
+) -> Result<PathBuf, String> {
     if state.scanner().is_none() {
         return Err("no usable backend can scan".into());
     }
 
-    // What arrives here is text a human typed, not a path a program passed, so
-    // `~` still means what a shell would have made of it before any program
-    // saw it. Everything after this line deals in real paths.
     let root = validate_scan_root(&crate::path::expand_home(root)).map_err(|e| e.to_string())?;
     let cancel = CancelToken::new();
-
     let id = claim(&state, root.clone(), cancel.clone())?;
-
-    let worker_app = app.clone();
+    let worker_state = Arc::clone(&state);
     let worker_root = root.clone();
 
     let spawned = thread::Builder::new()
         .name("nirmoka-scan".into())
         .stack_size(WORKER_STACK_BYTES)
-        .spawn(move || run(worker_app, id, worker_root, cancel));
+        .spawn(move || run_native(worker_state, reporter, id, worker_root, cancel));
 
     if let Err(error) = spawned {
         release(&state);
@@ -161,9 +154,7 @@ pub fn start(app: &AppHandle, root: &str) -> Result<PathBuf, String> {
 
 /// Mark a scan as running, refusing if one already is.
 ///
-/// Split out from [`start`] because the pairing with [`release`] is the part
-/// worth testing, and `start` needs an `AppHandle` that only exists inside a
-/// running application.
+/// Paired with [`release`] so worker-start failures cannot leave a busy slot.
 fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<ScanId, String> {
     let mut scan = state.scan();
 
@@ -176,10 +167,9 @@ fn claim(state: &AppState, root: PathBuf, cancel: CancelToken) -> Result<ScanId,
 
     let id = scan.issue_id();
     scan.active = Some(ActiveScan { id, root, cancel });
-    // The previous result goes now, not when the new one lands. Leaving it in
-    // place would let `rows` answer from the old tree while the UI says it is
-    // scanning something else.
-    scan.result = None;
+    // Keep the previous snapshot until a replacement completes. Every request
+    // names its scan id, so the UI can label the snapshot and disable actions
+    // during a rescan without silently changing the identity of an old node.
 
     Ok(id)
 }
@@ -205,10 +195,14 @@ pub fn cancel(state: &AppState) -> bool {
     }
 }
 
-fn run(app: AppHandle, id: ScanId, root: PathBuf, cancel: CancelToken) {
-    let state = app.state::<AppState>();
-    let outcome = walk(&state, &app, id, &root, &cancel);
-
+fn run_native(
+    state: Arc<AppState>,
+    reporter: Arc<dyn Reporter>,
+    id: ScanId,
+    root: PathBuf,
+    cancel: CancelToken,
+) {
+    let outcome = walk(&state, reporter.as_ref(), id, &root, &cancel);
     let mut scan = state.scan();
     scan.active = None;
 
@@ -217,11 +211,11 @@ fn run(app: AppHandle, id: ScanId, root: PathBuf, cancel: CancelToken) {
             let summary = result.summary.clone();
             scan.result = Some(result);
             drop(scan);
-            let _ = app.emit(EVENT_FINISHED, summary);
+            reporter.finished(summary);
         }
         Err(failure) => {
             drop(scan);
-            let _ = app.emit(EVENT_FAILED, failure);
+            reporter.failed(failure);
         }
     }
 }
@@ -245,9 +239,9 @@ fn window_options() -> ScanOptions {
     }
 }
 
-fn walk(
+fn walk<R: Reporter + ?Sized>(
     state: &AppState,
-    app: &AppHandle,
+    reporter: &R,
     id: ScanId,
     root: &Path,
     cancel: &CancelToken,
@@ -264,7 +258,7 @@ fn walk(
         })?
         .adapter;
 
-    let mut sink = ProgressSink::new(app);
+    let mut sink = ProgressSink::new(reporter);
     let summary = adapter
         .scan(root, &window_options(), &mut sink, cancel)
         .map_err(|error| dto::ScanFailure {
@@ -287,6 +281,37 @@ mod tests {
     /// what was never looked at. A scan that wandered onto a mounted disk or a
     /// snapshot would make that difference too small, so the window's scans are
     /// confined and this is the assertion that keeps them that way.
+    #[test]
+    fn a_rescan_keeps_the_previous_snapshot_until_a_replacement_finishes() {
+        let state = AppState::new();
+        let mut tree = nirmoka_core::Tree::new("/fixtures/old");
+        tree.push(None, nirmoka_core::Node::directory("old"));
+        tree.rollup();
+        let summary = dto::ScanSummary {
+            scan_id: 7,
+            root_id: 0,
+            root_path: "/fixtures/old".into(),
+            total_bytes: 0,
+            entries: 1,
+            directories: 1,
+            backend_id: "ncdu".into(),
+            backend_version: None,
+            read_errors: 0,
+            excluded: 0,
+            hardlinks_deduplicated: 0,
+            hardlink_bytes_saved: 0,
+        };
+        state.scan().result = Some(ScanResult {
+            id: 7,
+            tree,
+            summary,
+        });
+        claim(&state, "/fixtures/new".into(), CancelToken::new()).unwrap();
+        assert_eq!(state.scan().result.as_ref().unwrap().id, 7);
+        release(&state);
+        assert_eq!(state.scan().result.as_ref().unwrap().id, 7);
+    }
+
     #[test]
     fn the_window_scans_one_filesystem() {
         assert!(window_options().one_file_system);

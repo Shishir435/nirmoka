@@ -5,25 +5,20 @@
 //! command that starts making decisions is a sign the logic landed in the shell,
 //! where the CLI and the tests cannot reach it.
 //!
-//! Each command delegates to a plain function taking `&AppState`, because
-//! `tauri::State` cannot be constructed outside a running application — so a
-//! command body would be untestable, and the tests would end up asserting
-//! against a copy of it.
+//! Commands are plain functions taking `&AppState`, shared by the private
+//! native service and the tests.
 //!
 //! Errors cross as strings. The frontend shows them; it does not branch on them.
 //! When it needs to — step 10, where deletion has failure modes worth
 //! distinguishing — this becomes a typed error, with an ADR for the change.
 
-use std::time::Instant;
-
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use nirmoka_adapter::{Ability, CancelToken, DeleteMode};
 
 use crate::deletion::{Pending, PendingDelete, PendingTrash};
 use crate::dto;
 use crate::inventory;
-use crate::scan;
 use crate::state::{AppState, ScanId};
 
 /// The most rows one call may return.
@@ -90,6 +85,76 @@ pub fn system_status_of(state: &AppState) -> Result<dto::SystemStatus, String> {
         .map_err(|error| error.to_string())?;
 
     Ok(dto::SystemStatus::from_adapter(backend, instead_of, status))
+}
+
+/// One exact, non-mutating Mole optimization preview.
+pub fn optimize_preview_of(
+    state: &AppState,
+    cancel: &CancelToken,
+) -> Result<nirmoka_adapter::OptimizePreview, String> {
+    let choice = state
+        .resolve(Ability::Optimize)
+        .ok_or_else(|| "no usable backend provides system optimization".to_string())?;
+    let backend = choice.adapter.id().to_string();
+    let preview = choice
+        .adapter
+        .optimize_preview(cancel)
+        .map_err(|error| error.to_string())?;
+    state.optimization().remember(backend, preview.clone());
+    Ok(preview)
+}
+
+/// Bind the current optimization review to one short-lived, one-time token.
+pub fn prepare_optimize_of(state: &AppState) -> Result<dto::OptimizePreparation, String> {
+    let preparation = state
+        .optimization()
+        .prepare(Instant::now())
+        .ok_or_else(|| {
+            "no fresh optimization preview is available; generate a new preview".to_string()
+        })?;
+    Ok(dto::OptimizePreparation {
+        confirmation_token: preparation.token,
+        backend: preparation.pending.backend,
+        backend_version: preparation.pending.preview.backend_version,
+        expires_in_seconds: preparation.expires_in.as_secs(),
+        warning: "Mole will apply the reviewed maintenance actions. Some cache and service changes may take effect immediately.".to_string(),
+    })
+}
+
+/// Consume one approval and run the exact backend version whose preview was shown.
+pub fn confirm_optimize_in(
+    state: &AppState,
+    confirmation_token: u64,
+    cancel: &CancelToken,
+) -> Result<dto::OptimizeOperation, String> {
+    let pending = state
+        .optimization()
+        .take(confirmation_token, Instant::now())
+        .ok_or_else(|| {
+            "this optimization confirmation is invalid, expired, or already used; generate a new preview".to_string()
+        })?;
+    let execution = state
+        .adapter(&pending.backend)
+        .ok_or_else(|| {
+            format!(
+                "the backend that produced this optimization review ({}) is no longer registered",
+                pending.backend
+            )
+        })?
+        .execute_optimize(&pending.preview.backend_version, cancel)
+        .map_err(|error| error.to_string())?;
+    let executed_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            duration.as_millis().min(u64::MAX as u128) as u64
+        });
+    Ok(dto::OptimizeOperation {
+        backend: pending.backend,
+        backend_version: pending.preview.backend_version,
+        completion: execution.completion,
+        transcript: execution.transcript,
+        executed_at_ms,
+    })
 }
 
 /// Narration from a running cleanup preview.
@@ -783,522 +848,30 @@ fn backend_failure(error: nirmoka_adapter::AdapterError) -> dto::DeleteFailure {
     dto::DeleteFailure::new(dto::DeleteFailureCode::Backend, error.to_string())
 }
 
-#[tauri::command]
-pub fn list_backends(state: State<'_, AppState>) -> Vec<dto::Backend> {
-    backends(&state)
-}
-
-#[tauri::command]
-pub fn capabilities(state: State<'_, AppState>) -> Result<dto::Capabilities, String> {
-    capabilities_of(&state)
-}
-
-#[tauri::command]
-pub fn backend_selection(state: State<'_, AppState>) -> dto::BackendSelection {
-    selection_of(&state)
-}
-
-#[tauri::command]
-pub fn choose_backend(state: State<'_, AppState>, id: Option<String>) -> dto::BackendSelection {
-    choose_backend_in(&state, id)
-}
-
-/// Returns the canonical root actually being scanned, which differs from what
-/// was asked for whenever the path was relative or went through a symlink.
-#[tauri::command]
-pub fn start_scan(app: AppHandle, root_path: String) -> Result<String, String> {
-    scan::start(&app, &root_path).map(|root| root.display().to_string())
-}
-
-/// Returns whether there was a scan to stop.
-#[tauri::command]
-pub fn cancel_scan(state: State<'_, AppState>) -> bool {
-    scan::cancel(&state)
-}
-
-#[tauri::command]
-pub fn scan_summary(state: State<'_, AppState>) -> Option<dto::ScanSummary> {
-    summary_of(&state)
-}
-
-#[tauri::command]
-pub fn rows(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    parent_id: Option<u32>,
-    sort: dto::Sort,
-    offset: u32,
-    limit: u32,
-) -> Result<dto::RowPage, String> {
-    rows_of(&state, scan_id, parent_id, sort, offset, limit)
-}
-
-#[tauri::command]
-pub fn prepare_delete(
-    state: State<'_, AppState>,
+/// Plan a scanned application's footprint without holding the scan lock during measurement.
+pub fn app_footprint_plan_of(
+    state: &AppState,
     scan_id: ScanId,
     node_id: u32,
-) -> Result<dto::DeletePreparation, dto::DeleteFailure> {
-    prepare_delete_in(&state, scan_id, node_id)
-}
-
-#[tauri::command]
-pub fn confirm_delete(
-    state: State<'_, AppState>,
-    confirmation_token: u64,
-) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
-    confirm_delete_in(&state, confirmation_token)
-}
-
-#[tauri::command]
-pub fn undo_delete(
-    state: State<'_, AppState>,
-    operation_id: u64,
-) -> Result<dto::DeleteOperation, dto::DeleteFailure> {
-    undo_delete_in(&state, operation_id)
-}
-
-#[tauri::command]
-pub fn operation_log(state: State<'_, AppState>) -> Vec<dto::DeleteOperation> {
-    operation_log_of(&state)
-}
-
-#[tauri::command]
-pub fn prepare_trash(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<dto::TrashPreparation, dto::DeleteFailure> {
-    prepare_trash_in(&state, scan_id, node_id)
-}
-
-#[tauri::command]
-pub fn confirm_trash(
-    state: State<'_, AppState>,
-    confirmation_token: u64,
-) -> Result<dto::TrashOperation, dto::DeleteFailure> {
-    confirm_trash_in(&state, confirmation_token)
-}
-
-#[tauri::command]
-pub fn trash_log(state: State<'_, AppState>) -> Vec<dto::TrashOperation> {
-    trash_log_of(&state)
-}
-
-/// Capacity of the volume holding `path`.
-///
-/// The path goes through the same `~` expansion a scan root does. Before this,
-/// the only caller passed an already-resolved scan root, so a literal `~` would
-/// have reached `df` as a directory name — and the window now asks about the home
-/// directory before any scan exists to resolve it.
-#[tauri::command]
-pub fn volume_info(path: String) -> Result<dto::VolumeInfo, String> {
-    crate::volume::info(&crate::path::expand_home(&path))
-}
-
-/// What this desktop can do with a selected path, and what to call it.
-#[tauri::command]
-pub fn platform_features() -> dto::PlatformFeatures {
-    crate::reveal::features()
-}
-
-#[tauri::command]
-pub fn reveal_in_file_manager(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<(), String> {
-    crate::reveal::reveal(&node_path_of(&state, scan_id, node_id)?)
-}
-
-/// Runs on a worker thread: `qlmanage -p` blocks for as long as the panel is
-/// open, and a blocked command would freeze the window behind it.
-#[tauri::command]
-pub async fn quick_look(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<(), String> {
-    let path = node_path_of(&state, scan_id, node_id)?;
-    tauri::async_runtime::spawn_blocking(move || crate::reveal::quick_look(&path))
-        .await
-        .map_err(|error| format!("Quick Look worker failed: {error}"))?
-}
-
-/// The whole scan sorted into kinds, with the volume it sits on.
-///
-/// Classification is a pass over the tree, so it runs under the lock like every
-/// other tree query. The volume read is a `df` subprocess and happens first,
-/// outside it — capacity is not a fact about the tree and holding a scan of two
-/// million nodes locked while a subprocess starts would be a stall for nothing.
-#[tauri::command]
-pub async fn category_breakdown(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-) -> Result<dto::CategoryBreakdown, String> {
-    let root = {
-        let scan = state.scan();
-        let result = scan
-            .result
-            .as_ref()
-            .ok_or_else(|| "no scan has completed yet".to_string())?;
-        if result.id != scan_id {
-            return Err(format!(
-                "scan {scan_id} has been replaced by scan {}",
-                result.id
-            ));
-        }
-        result.tree.root_path().to_path_buf()
-    };
-
-    // Capacity is reported when it can be read and omitted when it cannot. A
-    // failed `df` is a dashboard without a capacity bar, not a failed request.
-    let volume = tauri::async_runtime::spawn_blocking(move || crate::volume::info(&root))
-        .await
-        .map_err(|error| format!("the volume worker failed: {error}"))?
-        .ok();
-
+) -> Result<crate::attribution::FootprintPlan, String> {
     let scan = state.scan();
     let result = scan
         .result
         .as_ref()
         .ok_or_else(|| "no scan has completed yet".to_string())?;
-    // Re-checked after the await: a rescan can land while `df` runs, and
-    // classifying the replacement under the old id would answer a question
-    // about a tree the caller never saw.
     if result.id != scan_id {
-        return Err(format!(
-            "scan {scan_id} has been replaced by scan {}",
-            result.id
-        ));
+        return Err("the scan has changed; select the application again".into());
     }
-    let home = crate::path::expand_home("~");
-    Ok(crate::categories::breakdown(
+    let node = result
+        .tree
+        .node_id(node_id)
+        .map_err(|error| error.to_string())?;
+    crate::attribution::plan(
         result.id,
+        node,
         &result.tree,
-        &home,
-        volume,
-    ))
-}
-
-/// What one application costs, assembled in two phases.
-///
-/// The lock is held for the tree read and released before anything is walked —
-/// see `attribution::FootprintPlan`. A footprint of an application whose caches
-/// are not in the scanned set is several seconds of directory walking, and the
-/// window stays answerable throughout.
-#[tauri::command]
-pub async fn app_footprint(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<dto::AppFootprint, String> {
-    let plan = {
-        let scan = state.scan();
-        let result = scan
-            .result
-            .as_ref()
-            .ok_or_else(|| "no scan has completed yet".to_string())?;
-        if result.id != scan_id {
-            return Err(format!(
-                "scan {scan_id} has been replaced by scan {}; select the item again",
-                result.id
-            ));
-        }
-        let node = result
-            .tree
-            .node_id(node_id)
-            .map_err(|error| error.to_string())?;
-        let home = crate::path::expand_home("~");
-        crate::attribution::plan(result.id, node, &result.tree, &home)?
-    };
-
-    tauri::async_runtime::spawn_blocking(move || crate::attribution::resolve(plan))
-        .await
-        .map_err(|error| format!("the footprint worker failed: {error}"))
-}
-
-/// An application bundle's icon, as a `data:` URL.
-///
-/// `null` rather than an error when the bundle keeps its artwork somewhere this
-/// cannot read — an asset catalog, or nothing at all. Icons are decoration and
-/// a row renders without one, so a missing icon is not a failed request.
-///
-/// Runs on a worker thread: this reads a file off disk, and the dashboard asks
-/// for several at once.
-#[tauri::command]
-pub async fn application_icon(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<Option<String>, String> {
-    let path = node_path_of(&state, scan_id, node_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::icons::data_url(&path, crate::icons::DEFAULT_WIDTH)
-    })
-    .await
-    .map_err(|error| format!("the icon worker failed: {error}"))
-}
-
-/// The desktop's own folder icon, for rows that are directories.
-///
-/// One call serves every folder row, so it takes no argument: the icon does not
-/// depend on which directory it stands for. `null` where the platform has no
-/// such file, and the window draws its own.
-#[tauri::command]
-pub async fn folder_icon() -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        crate::icons::generic_folder(crate::icons::DEFAULT_WIDTH)
-    })
-    .await
-    .map_err(|error| format!("the icon worker failed: {error}"))
-}
-
-/// An installed application's icon, by path.
-///
-/// The node-id form above cannot serve this list: Mole's inventory reports a
-/// path and no scan may have run, so there is no node to name. Taking a path
-/// from the window is the thing `reveal_in_file_manager` deliberately avoids —
-/// and the reasoning does not carry here, because that rule exists so the
-/// window never assembles an argument to a *destructive* command. This reads a
-/// file and returns pixels. The path is one Rust itself reported, it is
-/// canonicalised before use, and anything that is not an existing `.app`
-/// directory is refused rather than read.
-#[tauri::command]
-pub async fn application_icon_at(path: String) -> Result<Option<String>, String> {
-    let requested = crate::path::expand_home(&path);
-    tauri::async_runtime::spawn_blocking(move || {
-        let Ok(bundle) = std::fs::canonicalize(&requested) else {
-            return None;
-        };
-        if !bundle.is_dir()
-            || !bundle
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
-        {
-            return None;
-        }
-        crate::icons::data_url(&bundle, crate::icons::DEFAULT_WIDTH)
-    })
-    .await
-    .map_err(|error| format!("the icon worker failed: {error}"))
-}
-
-/// Launch the selected application.
-///
-/// Runs on a worker thread for the same reason Quick Look does: the launcher
-/// can block while the desktop decides what to do.
-#[tauri::command]
-pub async fn open_application(
-    state: State<'_, AppState>,
-    scan_id: ScanId,
-    node_id: u32,
-) -> Result<(), String> {
-    let path = node_path_of(&state, scan_id, node_id)?;
-    tauri::async_runtime::spawn_blocking(move || crate::reveal::open_application(&path))
-        .await
-        .map_err(|error| format!("the open worker failed: {error}"))?
-}
-
-/// Runs on a worker thread.
-///
-/// This walks the whole tree, and a home directory is millions of nodes. As a
-/// synchronous command it held the main thread for as long as that took, which
-/// is the window freezing every time the Applications view is opened — the
-/// scan is in Rust precisely so that work like this does not happen where the
-/// webview can feel it.
-#[tauri::command]
-pub async fn application_inventory(
-    app: AppHandle,
-    scan_id: ScanId,
-) -> Result<dto::ApplicationInventory, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        application_inventory_of(app.state::<AppState>().inner(), scan_id)
-    })
-    .await
-    .map_err(|error| format!("the inventory worker failed: {error}"))?
-}
-
-/// Runs on a worker thread: this is `mo uninstall --list`, a subprocess that
-/// enumerates every installed application before it answers.
-#[tauri::command]
-pub async fn installed_application_inventory(
-    app: AppHandle,
-) -> Result<dto::InstalledApplicationInventory, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        installed_application_inventory_of(app.state::<AppState>().inner())
-    })
-    .await
-    .map_err(|error| format!("the inventory worker failed: {error}"))?
-}
-
-/// Runs on a worker thread, for the same reason as `application_inventory`.
-#[tauri::command]
-pub async fn developer_inventory(
-    app: AppHandle,
-    scan_id: ScanId,
-) -> Result<dto::DeveloperInventory, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        developer_inventory_of(app.state::<AppState>().inner(), scan_id)
-    })
-    .await
-    .map_err(|error| format!("the inventory worker failed: {error}"))?
-}
-
-/// Runs on a worker thread: `mo status` shells out to read hardware sensors.
-#[tauri::command]
-pub async fn system_status(app: AppHandle) -> Result<dto::SystemStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || system_status_of(app.state::<AppState>().inner()))
-        .await
-        .map_err(|error| format!("the status worker failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn cleanup_preview(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<dto::CleanupPreview, String> {
-    let (preview_id, cancel) = state.cleanup().start_preview()?;
-    let worker_app = app.clone();
-    let emitter = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        cleanup_preview_of(
-            worker_app.state::<AppState>().inner(),
-            &cancel,
-            // A failed emit means the window is gone, which the preview will
-            // notice when it tries to return. Same treatment as scan progress.
-            &mut |progress| {
-                let _ = emitter.emit(EVENT_CLEANUP_PROGRESS, progress);
-            },
-        )
-    })
-    .await;
-
-    state.cleanup().finish_preview(preview_id);
-    result.map_err(|error| format!("cleanup preview worker failed: {error}"))?
-}
-
-/// The review Rust is already holding, without running another.
-///
-/// A dry run costs minutes. Any screen that wants to show one should be able to
-/// ask whether there is one first, or the second screen a user visits offers to
-/// spend those minutes again on a question already answered.
-#[tauri::command]
-pub fn latest_cleanup_preview(state: State<'_, AppState>) -> Option<dto::CleanupPreview> {
-    let held = state.cleanup().reviewed(Instant::now())?;
-    Some(dto::CleanupPreview::from_adapter(
-        held.backend.clone(),
-        held.backend_instead_of.clone(),
-        held.preview,
-    ))
-}
-
-#[tauri::command]
-pub fn cancel_cleanup_preview(state: State<'_, AppState>) -> bool {
-    state.cleanup().cancel_preview()
-}
-
-#[tauri::command]
-pub fn prepare_cleanup(state: State<'_, AppState>) -> Result<dto::CleanupPreparation, String> {
-    prepare_cleanup_of(&state)
-}
-
-/// Runs on a worker thread, because Mole's cleanup takes minutes and a blocked
-/// command would freeze the window it is reporting to.
-#[tauri::command]
-pub async fn confirm_cleanup(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    confirmation_token: u64,
-) -> Result<dto::CleanupOperation, String> {
-    let cancel = state.cleanup().start_execution()?;
-    let worker_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        confirm_cleanup_in(
-            worker_app.state::<AppState>().inner(),
-            confirmation_token,
-            &cancel,
-        )
-    })
-    .await;
-
-    state.cleanup().finish_execution();
-    result.map_err(|error| format!("cleanup worker failed: {error}"))?
-}
-
-/// Returns whether there was a run to stop. Cancellation kills Mole; what it
-/// had already removed stays removed, which the returned operation says.
-#[tauri::command]
-pub fn cancel_cleanup(state: State<'_, AppState>) -> bool {
-    state.cleanup().cancel_execution()
-}
-
-#[tauri::command]
-pub fn cleanup_log(state: State<'_, AppState>) -> Vec<dto::CleanupOperation> {
-    cleanup_log_of(&state)
-}
-
-/// Runs on a worker thread. Mole scans every application to resolve a name, which
-/// takes seconds, and a blocked command would freeze the window it reports to.
-#[tauri::command]
-pub async fn uninstall_preview(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    names: Vec<String>,
-) -> Result<dto::UninstallPreview, String> {
-    let (preview_id, cancel) = state.uninstall().start_preview()?;
-    let worker_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        uninstall_preview_of(worker_app.state::<AppState>().inner(), &names, &cancel)
-    })
-    .await;
-
-    state.uninstall().finish_preview(preview_id);
-    result.map_err(|error| format!("uninstall preview worker failed: {error}"))?
-}
-
-#[tauri::command]
-pub fn cancel_uninstall_preview(state: State<'_, AppState>) -> bool {
-    state.uninstall().cancel_preview()
-}
-
-#[tauri::command]
-pub fn prepare_uninstall(state: State<'_, AppState>) -> Result<dto::UninstallPreparation, String> {
-    prepare_uninstall_of(&state)
-}
-
-/// Runs on a worker thread, for the same reason the cleanup run does — and here
-/// the backend may also put up its own authorization dialog, which cannot be
-/// answered while the command loop is blocked.
-#[tauri::command]
-pub async fn confirm_uninstall(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    confirmation_token: u64,
-) -> Result<dto::UninstallOperation, String> {
-    let cancel = state.uninstall().start_execution()?;
-    let worker_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        confirm_uninstall_in(
-            worker_app.state::<AppState>().inner(),
-            confirmation_token,
-            &cancel,
-        )
-    })
-    .await;
-
-    state.uninstall().finish_execution();
-    result.map_err(|error| format!("uninstall worker failed: {error}"))?
-}
-
-#[tauri::command]
-pub fn cancel_uninstall(state: State<'_, AppState>) -> bool {
-    state.uninstall().cancel_execution()
-}
-
-#[tauri::command]
-pub fn uninstall_log(state: State<'_, AppState>) -> Vec<dto::UninstallOperation> {
-    uninstall_log_of(&state)
+        &crate::path::expand_home("~"),
+    )
 }
 
 #[cfg(test)]

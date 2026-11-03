@@ -15,13 +15,11 @@ step and what is in scope.
 
 ## Stack
 
-| Layer            | Technology                                                       |
-| ---------------- | ---------------------------------------------------------------- |
-| Shell            | Tauri v2 — `crates/app`                                          |
-| Core, adapters   | Rust — `crates/*`                                                |
-| Frontend         | React 19 + TypeScript + Tailwind v4 + shadcn/ui — `apps/desktop` |
-| Wire format      | ncdu JSON export                                                 |
-| Package managers | Cargo (`crates/*`), pnpm (`apps/*`, `packages/*`)                |
+- Desktop: SwiftUI / AppKit, `apps/macos` (macOS 13+, Swift 6).
+- Service: Rust, `crates/app`, private JSON lines over stdin/stdout.
+- Core and adapters: Rust, `crates/*`; ncdu JSON export remains the scan wire format.
+- Build: Cargo and Swift Package Manager. `site/` remains independent.
+- React/Tauri and TypeScript transport are retired; see ADR 0033.
 
 ## The Five Invariants
 
@@ -33,9 +31,9 @@ around it.
 No `tauri`. No `nirmoka-adapter*`. No GUI framework. `crates/cli` exists to make a
 violation a build failure rather than a review miss.
 
-**2. `packages/transport` is the only place that may import `@tauri-apps/*`.**
-Components import from `@nirmoka/transport`. If a component calls `invoke()` directly, the
-React code is welded to Tauri and the escape route becomes fiction.
+**2. Swift views use AppModel; NativeServiceClient is the only process transport.**
+Rust owns validation, backend selection, scan trees, and one-time confirmation tokens.
+Do not reintroduce Tauri or a second desktop shell.
 
 **3. No `#[cfg(target_os)]` in `crates/core`.** Platform specifics live in adapters. Paths
 are `PathBuf`, never string concatenation. Home/cache/config directories come from the
@@ -45,9 +43,8 @@ are `PathBuf`, never string concatenation. Home/cache/config directories come fr
 the narrowest backend is what keeps the abstraction honest. New backend abilities are
 `Capabilities` flags. Widening the wire format requires a new ADR.
 
-**5. The tree lives in Rust. The frontend receives only the visible window.** A home
-directory scan is 500k–2M nodes. Shipping that into a webview and rendering it as DOM is
-the mistake that gets misattributed to Tauri; Electron would crawl identically.
+**5. The tree lives in Rust. The native frontend receives only bounded row windows.** A home
+directory scan is 500k–2M nodes. Keep paging and sorting in Rust; do not ship the whole tree into Swift.
 
 ## Safety Rules
 
@@ -68,70 +65,28 @@ Deletion is the entire risk surface. Everything else is recoverable.
   `UnsupportedVersion`, not an optimistic `Found`.
 - **Cancellation must kill the subprocess**, not orphan it. Every adapter needs a test.
 
-## Commands
+## Commands and verification
 
-```bash
-pnpm install                 # JS workspace
-pnpm dev                     # frontend dev server on :5173 (strict port)
-pnpm build                   # typecheck + vite build
-pnpm typecheck               # every JS package
-pnpm lint                    # oxlint, then the node --test suite in tools/
-pnpm lint:fix                # oxlint --fix
-pnpm format                  # oxfmt, in place
-pnpm format:check            # oxfmt, read-only; what CI runs
-
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+```sh
+apps/macos/run-local.sh
+apps/macos/build-app.sh
 cargo fmt --all
-pnpm rs:lint:strict          # no unwrap() in lib/bin targets — shipping code
-pnpm rs:deny                 # licences and advisories (needs cargo-deny)
-
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace -- -D clippy::unwrap_used
+cargo test --workspace
+cargo build -p nirmoka-app --bin nirmoka-native-service
+NIRMOKA_NATIVE_SERVICE="$PWD/target/debug/nirmoka-native-service" swift test --package-path apps/macos
+./scripts/check-invariants.sh
+cargo deny check
 cargo run -p nirmoka-cli -- backends
-cargo run -p nirmoka-cli -- backends --json
-pnpm nrmk backends           # same thing via pnpm
-pnpm nrmk --backend mole backends    # prefer one; it falls back where it cannot
-
-pnpm tauri dev               # the desktop shell (starts Vite itself)
-pnpm types                   # regenerate packages/transport/src/generated/bindings.ts
-
-pnpm nrmk uninstall --list                    # apps Mole can address, with its identifiers
-pnpm nrmk uninstall localsend                 # Mole's own plan; preview only, removes nothing
-pnpm nrmk uninstall localsend --transcript    # the backend's output verbatim
-
-pnpm nrmk scan ~/Downloads                    # real backend, largest first
-pnpm nrmk scan . --json --depth 2 --limit 5
-pnpm nrmk scan --from-export fixtures/ncdu/2.8.2/simple.json   # no backend needed
-
-./scripts/bump-version.sh 0.3.0                # the version, in all three files that carry it
-./scripts/generate-icons.sh                   # rebuild crates/app/icons from assets/nirmoka-mark.svg
-./scripts/record-ncdu-fixture.sh              # re-record fixtures after an ncdu upgrade
-./scripts/record-gdu-fixture.sh               # re-record fixtures after a gdu upgrade
-./scripts/record-mole-fixture.sh              # re-record the evidence behind ADR 0012
+cargo run -p nirmoka-cli -- scan crates/core
 ```
 
-## Verification
-
-- **Rust changes:** `cargo fmt --all`, then `cargo clippy --workspace --all-targets -- -D
-warnings`, then `pnpm rs:lint:strict`, then `cargo test --workspace`.
-- **Frontend changes:** `pnpm lint && pnpm format:check && pnpm typecheck && pnpm build`.
-- **A new dependency:** `pnpm rs:deny`. The licence allow-list in `deny.toml` is what
-  keeps invariant-adjacent prose in `NOTICE.md` — no GPL code enters this project —
-  enforced by the build rather than by memory. Install once with
-  `cargo install cargo-deny --locked`.
-- **Adapter changes:** `cargo test --workspace`, then `cargo run -p nirmoka-cli --
-backends` and `-- scan <dir>` against a real backend. The shared suite in
-  `tests/contract` must pass unchanged; needing a special case there means the trait is
-  wrong.
-- **Boundary types (`crates/app/src/dto.rs`):** `pnpm types`, then commit the regenerated
-  `packages/transport/src/generated/bindings.ts`. CI fails on a diff, and so does the
-  pre-push hook.
-- **Shell changes:** `pnpm tauri dev` and use the window. A command that compiles and a
-  window that shows the result are different claims.
-- **Anything touching deletion:** tests first, no exceptions.
-- Never pipe a test or check run into `head`/`tail` — the pipeline reports the pager's exit
-  code, so a red run reads green. Let it print in full, or capture to a file and check the
-  status separately.
+Rust changes require fmt, clippy, no-unwrap, and workspace tests. Native changes
+require Swift tests, a bundle build, and use of the actual window. New dependencies
+need a stated reason and cargo-deny. Adapter changes require the shared contract
+suite and a real backend scan. Anything touching deletion requires tests first.
+Never pipe test/check output into head/tail; capture output and check its status.
 
 ## Working Rules
 
@@ -142,21 +97,16 @@ backends` and `-- scan <dir>` against a real backend. The shared suite in
 - **Record decisions as ADRs.** Anything that will matter in six months goes in
   `docs/adr/`, numbered sequentially, never deleted. A reversed decision gets a new ADR
   marking the old one superseded.
-- **Lint sets are deliberately narrow.** `clippy::pedantic` produces 343 warnings on this
-  workspace and oxlint's `restriction` category is worse; a lint that has to be muted at
-  every third call site teaches people to mute lints. Everything turned on in
-  `[workspace.lints]` and `.oxlintrc.json` was measured at zero, or at a number small
-  enough to fix in the same commit, so any new hit is a real one. Suppressions carry the
-  reason on the line above them.
+- **Lint sets are deliberately narrow.** Keep workspace Rust lints measured and
+  actionable. Suppressions carry the reason on the line above them.
 - **A new dependency needs a stated reason.** Both `Cargo.toml` and `package.json` lists
   are deliberately short. Prefer the standard library.
 - **Do not add tooling before it hurts.** No Turborepo until builds are slow. No
   `packages/ui` until a second consumer exists. Speculative structure costs more than it
   saves at this size.
-- **Generated types are committed.** `ts-rs` output lands in
-  `packages/transport/src/generated/` and is checked in, so the frontend builds without a
-  Rust toolchain. CI regenerates and fails on a diff.
-- **`site/` is deliberately outside the pnpm workspace.** It is a zero-dependency static
+- **Boundary DTOs need contract tests.** Rust serializes JSON; Swift decodes it.
+  Run native tests against the real Rust helper after changing boundary types.
+- **`site/` is deliberately independent.** It is a zero-dependency static
   landing page deployed separately to Vercel. Do not pull it into the app build graph.
 - Do not add AI attribution trailers to commits.
 
@@ -170,29 +120,21 @@ crates/adapter-gdu/   cross-platform scanner; primary Windows backend
 crates/adapter-mole/  macOS-only cleanup backend. Does not scan — see ADR 0012
 crates/adapter-rip/   exact undo for existing receipts; new deletion refused
 crates/cli/           bin `nrmk` — headless harness, not shipped
-crates/app/           Tauri shell — commands, DTOs, ts-rs bindings
+crates/app/           Rust application service — commands, JSON DTOs, state
 
 tests/contract/       one suite every adapter must pass, fixture-driven
 fixtures/             recorded backend output, per backend and version
 
-apps/desktop/         React frontend. The list is virtualized and paged — see ADR 0011
-packages/transport/   THE IPC boundary. Only module that knows about Tauri.
+apps/macos/           The only desktop app — SwiftUI, AppModel, NativeServiceClient
 
 packaging/homebrew/   the tap formula, source of truth — see ADR 0024
-site/                 static landing page, deployed to Vercel, outside pnpm workspace
+site/                 static landing page, deployed to Vercel, independent static hosting
 docs/                 architecture, adapter contract, roadmap, ADRs
 ```
 
 ## Platform Status
 
-Development is macOS-first because that is the machine available, but **the code stays
-platform-neutral**. The mechanism that makes this work: the first backend is ncdu, which
-runs everywhere, so cross-platform-shaped code gets written and tested on one machine.
-
-CI ran `cargo check` and `cargo test` on macOS, Linux, and Windows from step 0. For the duration
-of the macOS beta the Linux and Windows matrix entries are commented out in `.github/workflows/ci.yml`
-rather than deleted, and the release pipeline packages macOS only — see
-[ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md). Mole is macOS-only (`install.sh`
-refuses other platforms; every `cmd/analyze/*.go` file is `//go:build darwin`), so it is a
-capability upgrade on one platform, never the baseline. Code stays platform-neutral regardless:
-that is what makes uncommenting those entries a one-line change instead of a project.
+The only desktop interface is native macOS SwiftUI (ADR 0033). Core and adapters
+remain platform-neutral: no platform conditionals or GUI dependencies in core.
+The Rust CI matrix retains commented Linux/Windows entries for future backend
+coverage. The desktop release builds macOS only, for Apple silicon and Intel.

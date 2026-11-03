@@ -28,7 +28,7 @@ body:
     attributes:
       label: Backends
       description: >
-        The Help page lists these, or run `pnpm nrmk backends` from a checkout.
+        The Help page lists these, or run `cargo run -p nirmoka-cli -- backends` from a checkout.
         Nirmoka drives ncdu, gdu, Mole, and rip as subprocesses, so which of
         them you have — and at which version — usually decides the behaviour.
       render: text

@@ -23,14 +23,8 @@ all-features = true
 # graph is currently clean of them.
 yanked = "deny"
 ignore = []
-# "Unmaintained", however, is scoped to crates this workspace chose itself.
-# Every unmaintained notice in the graph today (16 of them: the gtk-rs GTK3
-# bindings, the unic-* family under tauri-utils, proc-macro-error) is inside
-# Tauri's own dependency tree, and RUSTSEC lists no safe upgrade for any of
-# them. Failing CI on those would mean a permanent ignore-list that has to be
-# re-justified on every Tauri bump, which is how an advisory file stops being
-# read. Scoped here, the check still fires the moment Nirmoka itself takes a
-# direct dependency on something unmaintained.
+# Direct dependencies must remain maintained; transitive advisories are still
+# checked for vulnerabilities above.
 unmaintained = "workspace"
 
 [licenses]
@@ -56,7 +50,7 @@ allow = [
 
 [bans]
 # A second copy of a crate is usually a transitive version skew rather than a
-# problem, and the Tauri tree has many. Warn so the count stays visible.
+# problem. Warn so the count stays visible.
 multiple-versions = "warn"
 wildcards = "deny"
 # The workspace's own crates depend on each other by path with no version, which

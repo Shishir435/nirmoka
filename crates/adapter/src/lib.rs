@@ -17,6 +17,7 @@ pub mod cleanup;
 pub mod delete;
 pub mod detect;
 pub mod error;
+pub mod optimize;
 pub mod preference;
 pub mod process;
 pub mod registry;
@@ -36,6 +37,10 @@ pub use cleanup::{
 pub use delete::{validate_delete_target, DeleteMode, DeletePlan, DeleteReceipt};
 pub use detect::Detection;
 pub use error::AdapterError;
+pub use optimize::{
+    OptimizeCompletion, OptimizeExecution, OptimizeItem, OptimizeItemKind, OptimizePreview,
+    OptimizeSection,
+};
 pub use preference::{default_order, default_order_for, Ability, Preference};
 pub use process::CancelToken;
 pub use registry::{Choice, Registry};
@@ -80,6 +85,26 @@ pub trait Adapter: Send + Sync {
         Err(AdapterError::Unsupported {
             backend: self.id(),
             operation: "system status",
+        })
+    }
+
+    /// Preview the backend's supported system maintenance actions.
+    fn optimize_preview(&self, _cancel: &CancelToken) -> Result<OptimizePreview, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "system optimization preview",
+        })
+    }
+
+    /// Run a previously reviewed maintenance operation.
+    fn execute_optimize(
+        &self,
+        _reviewed_version: &str,
+        _cancel: &CancelToken,
+    ) -> Result<OptimizeExecution, AdapterError> {
+        Err(AdapterError::Unsupported {
+            backend: self.id(),
+            operation: "system optimization",
         })
     }
 

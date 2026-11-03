@@ -1,30 +1,29 @@
-# macOS beta
+# Native macOS preview
 
-The beta currently validates the Rust workspace on macOS only. The Linux and Windows entries remain
-commented in `.github/workflows/ci.yml`; uncommenting those entries restores their jobs while the
-backend installation and platform-specific assertions remain intact below the matrix.
-The separate web build remains on Ubuntu because it is platform-independent and does not exercise a
-desktop backend.
+SwiftUI is the only desktop interface (ADR 0033). Rust core and adapters remain
+independent of the native shell. The old React/Tauri app is removed.
 
-## Launch locally
+## Launch
 
-1. Install supported macOS backends: `brew install ncdu mole`.
-2. Install workspace dependencies: `pnpm install`.
-3. Confirm detection: `pnpm nrmk backends`.
-4. Start the desktop shell: `pnpm tauri dev`.
-5. In Overview, leave `~` selected for a home scan or enter a narrower directory, then choose Scan.
+1. Install Xcode with Swift 6 and the pinned Rust toolchain.
+2. Install a scanner: `brew install ncdu`.
+3. Optionally install cleanup and application management: `brew install mole`.
+4. Confirm detection: `cargo run -p nirmoka-cli -- backends`.
+5. Run `apps/macos/run-local.sh`, or build `apps/macos/build-app.sh` and open
+   `target/macos/Nirmoka.app`.
 
-The packaged Tauri application always resolves the real transport. `pnpm dev` alone is browser UI
-development and displays an explicit fixture-mode banner.
+The app always uses the real private Rust service. There is no browser fixture
+mode. Choose a folder through the native Scan menu; Applications and setup are
+available before any scan. A scan only reads. Incomplete measurements are labeled.
 
-## Current safety boundary
+## Safety
 
-Scanning is read-only. Selected-path deletion remains unavailable under ADR 0018. Mole advertises
-curated cleanup and dry-run abilities, but its preview is human-readable output; until the adapter
-exposes a typed, tested preview and confirmation API, the Clean page reports it unavailable and does
-not run a command or invent cleanup values.
+Selected items can be moved to the platform Trash after a resolved-path review and
+one-time confirmation. Permanent selected-path deletion remains unavailable.
+Cleanup and uninstall use the backend's own previews and safety rules; cleanup
+runs discover candidates again and do not guarantee recovery. Preview counts are
+not presented as a per-path receipt of what was removed. Cancelling an operation
+cannot restore changes already made.
 
-Application and developer inventories are views over the completed ncdu tree. They only report
-evidence inside the chosen scan root. Application last-used timestamps, related-data mappings,
-leftover detection, and developer modified timestamps are shown as unavailable because ncdu's wire
-format does not provide them.
+Run Rust and Swift checks from development.md and use the native window before
+shipping. Signing/notarization and universal release builds are in releasing.md.

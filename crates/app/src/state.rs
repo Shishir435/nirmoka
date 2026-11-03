@@ -17,6 +17,7 @@ use nirmoka_core::Tree;
 
 use crate::cleanup::CleanupState;
 use crate::deletion::DeletionState;
+use crate::optimization::OptimizeState;
 use crate::uninstall::UninstallState;
 use crate::{dto, settings};
 
@@ -96,6 +97,7 @@ pub struct AppState {
     persistent: bool,
     cleanup: Mutex<CleanupState>,
     uninstall: Mutex<UninstallState>,
+    optimization: Mutex<OptimizeState>,
     deletion: Mutex<DeletionState>,
 }
 
@@ -130,6 +132,7 @@ impl AppState {
             persistent,
             cleanup: Mutex::new(CleanupState::default()),
             uninstall: Mutex::new(UninstallState::default()),
+            optimization: Mutex::new(OptimizeState::default()),
             deletion: Mutex::new(DeletionState::new(operation_log)),
         }
     }
@@ -163,6 +166,12 @@ impl AppState {
 
     pub fn uninstall(&self) -> MutexGuard<'_, UninstallState> {
         self.uninstall
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn optimization(&self) -> MutexGuard<'_, OptimizeState> {
+        self.optimization
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }

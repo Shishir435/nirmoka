@@ -48,6 +48,7 @@ pub enum Ability {
     AppInventory,
     UninstallApps,
     SystemStatus,
+    Optimize,
 }
 
 impl Ability {
@@ -64,6 +65,7 @@ impl Ability {
             Self::AppInventory => "list installed applications",
             Self::UninstallApps => "uninstall applications",
             Self::SystemStatus => "system status",
+            Self::Optimize => "system optimization",
         }
     }
 
@@ -79,6 +81,7 @@ impl Ability {
             Self::AppInventory => caps.app_inventory,
             Self::UninstallApps => caps.uninstall_apps,
             Self::SystemStatus => caps.system_status,
+            Self::Optimize => caps.optimize,
         }
     }
 }
@@ -188,6 +191,7 @@ mod tests {
             app_inventory: true,
             uninstall_apps: false,
             system_status: true,
+            optimize: false,
         };
         assert!(!Ability::Scan.is_offered_by(&mole));
         assert!(Ability::CleanupCategories.is_offered_by(&mole));

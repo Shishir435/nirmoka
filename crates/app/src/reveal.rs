@@ -41,7 +41,7 @@ fn features_for(os: &str) -> PlatformFeatures {
         quick_look: os == "macos",
         trash_label: crate::trash::label_for(os).to_string(),
         // Only macOS is configured with an overlay title bar — see
-        // `tauri.conf.json` — so only macOS has buttons sitting over the
+        // the retired web shell — so only macOS had buttons sitting over the
         // webview. 72 clears the three of them at their standard size with a
         // little air; the frame draws them, so this reserves room rather than
         // positioning anything.

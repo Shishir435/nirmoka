@@ -134,6 +134,7 @@ impl Adapter for RipAdapter {
             app_inventory: false,
             uninstall_apps: false,
             system_status: false,
+            optimize: false,
         }
     }
 

@@ -10,14 +10,14 @@ This document explains the layers and the rules that keep them separate.
 
 ```
 ┌───────────────────────────────────────────────┐
-│  ui/               React + TypeScript          │
-│  Rendering, navigation, treemap, keybindings.  │
+│  apps/macos        SwiftUI          │
+│  Rendering, navigation, native dialogs.  │
 │  Knows nothing about any backend.              │
 └───────────────────────┬───────────────────────┘
-                        │  Tauri commands + events
+                        │  JSON-lines requests + events
 ┌───────────────────────┴───────────────────────┐
-│  app/              Tauri glue                  │
-│  Command handlers, event streaming, window.    │
+│  crates/app        Rust service                  │
+│  Command handlers, event streaming, state.    │
 └───────────────────────┬───────────────────────┘
                         │  domain types
 ┌───────────────────────┴───────────────────────┐
@@ -38,6 +38,21 @@ This document explains the layers and the rules that keep them separate.
 │  mo(1)     │  │   ncdu(1)    │  │   gdu(1)    │  │   rip(1)    │
 └────────────┘  └──────────────┘  └─────────────┘  └─────────────┘
 ```
+
+## Native macOS shell
+
+`apps/macos` is a SwiftUI shell for the macOS beta. It starts
+`nirmoka-native-service` from `crates/app` as a child process and exchanges
+newline-delimited JSON over stdin and stdout. It opens no local socket. The helper
+calls the shared Rust command functions; Swift owns presentation,
+navigation, and native dialogs, while the Rust adapters still own backend calls,
+version checks, previews, and confirmation tokens.
+
+This is the only desktop shell. The React/Tauri application and its TypeScript
+transport are retired by [ADR 0033](adr/0033-native-macos-is-the-only-desktop-shell.md). Mole commands
+that expose only interactive terminal pickers are not surfaced as GUI actions until an
+exact review and confirmation path exists. See
+[ADR 0032](adr/0032-native-macos-shell.md).
 
 ## Rules
 
@@ -77,6 +92,7 @@ pub struct Capabilities {
     pub app_inventory: bool,     // list apps with the backend's own identifier
     pub uninstall_apps: bool,    // non-interactive application removal
     pub system_status: bool,     // health metrics
+    pub optimize: bool,          // reviewed system maintenance
 }
 ```
 
@@ -119,18 +135,18 @@ installed version at startup, and refuses to run against an unknown one. Output 
 drift silently, and a silently-changed field on a _delete_ path is the worst possible
 place to discover that.
 
-**6. `crates/core` must not depend on Tauri either.**
+**6. `crates/core` must not depend on any GUI framework.**
 
 The adapter trait is only half the shape. `core` sits between two ports and depends on
 neither side, which is what makes the _frontend_ replaceable as well as the backend.
-`crates/cli` (`nrmk`) links `core` with no Tauri anywhere, so a violation is a build
+`crates/cli` (`nrmk`) links `core` without a desktop framework, so a violation is a build
 failure rather than a review miss. See [ADR 0005](adr/0005-frontend-port.md).
 
-**7. `packages/transport` is the only module that may import `@tauri-apps/*`.**
+**7. Swift talks to Rust only through the private service boundary.**
 
-Components import from `@nirmoka/transport`. If a component calls `invoke()` directly, the
-React code is welded to Tauri and the escape route becomes fiction. Leaving Tauri should
-rewrite one file, not the app. CI greps for violations.
+`NativeServiceClient` owns process communication. Views call `AppModel`; the Rust
+service owns validation, capability/version checks, and confirmation tokens. The
+retired Tauri shell and TypeScript generator must not return to the build graph.
 
 **8. No backend binary is bundled.**
 
@@ -157,4 +173,4 @@ be swapped independently. If Tauri turns out to be the wrong choice, the product
 `core/` survives the move. This is a deliberate side effect of the design, not an
 accident.
 
-See [ADR 0003](adr/0003-tech-stack-tauri.md).
+See [ADR 0033](adr/0033-native-macos-is-the-only-desktop-shell.md).

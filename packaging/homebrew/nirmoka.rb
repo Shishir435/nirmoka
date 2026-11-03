@@ -6,7 +6,7 @@
 # The sha256 below is a placeholder and stays one. It is the hash of the source
 # tarball GitHub generates for a tag, so it cannot be known until the tag exists,
 # and a stale real-looking hash here would be worse than an obvious placeholder.
-# The `url` tag, however, must match crates/app/tauri.conf.json:
+# The `url` tag, however, must match apps/macos/Info.plist:
 # scripts/check-invariants.sh fails when it does not.
 #
 # A formula rather than a cask, deliberately. Homebrew removed `--no-quarantine`
@@ -22,34 +22,26 @@ class Nirmoka < Formula
   license "Apache-2.0"
   head "https://github.com/Shishir435/nirmoka.git", branch: "main"
 
-  depends_on "node" => :build
-  depends_on "pnpm" => :build
+  depends_on xcode: ["16.0", :build]
+  depends_on macos: :ventura
   depends_on "rust" => :build
   # Mole is macOS-only and so is the packaged app — see ADR 0023.
-  depends_on :macos
 
   # Scanning is the floor. Without a backend the window can do nothing but
   # explain that it has no backend, so the baseline one comes along.
   depends_on "ncdu"
 
   def install
-    # Homebrew's build sandbox refuses writes outside the build directory, and
-    # every one of these defaults to somewhere under $HOME. pnpm in particular
-    # honours the `packageManager` pin by downloading that exact version into
-    # $PNPM_HOME/.tools, whichever version brew happens to have installed.
+    # Keep compiler caches in Homebrew’s build directory.
     ENV["CARGO_HOME"] = buildpath/".cargo"
-    ENV["PNPM_HOME"] = buildpath/".pnpm"
-    ENV["npm_config_store_dir"] = buildpath/".pnpm-store"
+    ENV["CLANG_MODULE_CACHE_PATH"] = buildpath/".clang-cache"
+    ENV["SWIFTPM_MODULECACHE_OVERRIDE"] = buildpath/".swift-cache"
 
-    system "pnpm", "install", "--frozen-lockfile"
-    # `--bundles app` skips the .dmg: this is an install, not a download.
-    system "pnpm", "tauri", "build", "--bundles", "app"
+    system "apps/macos/build-app.sh"
 
-    prefix.install "target/release/bundle/macos/Nirmoka.app"
-    # The bundle executable keeps the crate's name, not the product's. Launching
-    # it directly is correct: it sits inside the bundle, so it picks up the
-    # Info.plist identity and appears in the Dock as Nirmoka.
-    bin.install_symlink prefix/"Nirmoka.app/Contents/MacOS/nirmoka-app" => "nirmoka"
+    prefix.install "target/macos/Nirmoka.app"
+    # The executable lives inside the native application bundle.
+    bin.install_symlink prefix/"Nirmoka.app/Contents/MacOS/Nirmoka" => "nirmoka"
   end
 
   def caveats
@@ -64,7 +56,7 @@ class Nirmoka < Formula
   end
 
   test do
-    app = prefix/"Nirmoka.app/Contents/MacOS/nirmoka-app"
+    app = prefix/"Nirmoka.app/Contents/MacOS/Nirmoka"
     assert_predicate app, :executable?
     # The app is a GUI and cannot be launched headless, so this asserts the
     # bundle is the architecture that was asked for rather than that it runs.

@@ -38,7 +38,7 @@ const FILE: &str = "settings.json";
 ///
 /// # Why the arguments are not the bundle identifier
 ///
-/// `tauri.conf.json` identifies this as `app.nirmoka.desktop`, and mirroring it
+/// The native Info.plist identifies this as `app.nirmoka.desktop`, and mirroring it
 /// as `("app", "nirmoka", "desktop")` looked like the tidy answer. It is wrong
 /// on Linux: `ProjectDirs` builds the XDG path from the **application name
 /// alone**, ignoring qualifier and organization, so it produced

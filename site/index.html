@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI for macOS, Linux, Windows</title>
+    <title>Nirmoka — Native macOS Disk Analysis and Cleanup</title>
     <meta
       name="description"
-      content="Nirmoka is a free, open source desktop app that gives a graphical interface to trusted command-line disk analysers. See what is eating your disk space on macOS, Linux, and Windows — a GUI for ncdu, gdu, and Mole."
+      content="Nirmoka is a free, open source desktop app that gives a graphical interface to trusted command-line disk analysers. See what is eating your disk space on macOS — a GUI for ncdu, gdu, and Mole."
     />
     <link rel="canonical" href="https://nirmoka.vercel.app/" />
     <meta name="author" content="Shishir435" />
@@ -21,14 +21,14 @@
     <meta property="og:title" content="Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI" />
     <meta
       property="og:description"
-      content="A free, open source desktop GUI for disk analysis and cleanup. One app on macOS, Linux, and Windows, built on the CLI tools you already trust."
+      content="A free, open source desktop GUI for disk analysis and cleanup. A native macOS app, built on the CLI tools you already trust."
     />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Nirmoka — Cross-Platform Disk Analyzer and Cleanup GUI" />
     <meta
       name="twitter:description"
-      content="A free, open source desktop GUI for disk analysis and cleanup. One app on macOS, Linux, and Windows."
+      content="A free, open source desktop GUI for disk analysis and cleanup. A native macOS app."
     />
 
     <!-- The Nirmoka mark, inline so the page still ships as one file. Source of
@@ -45,8 +45,8 @@
         "@type": "SoftwareApplication",
         "name": "Nirmoka",
         "applicationCategory": "UtilitiesApplication",
-        "operatingSystem": "macOS, Linux, Windows",
-        "description": "A free, open source cross-platform desktop GUI for disk analysis and cleanup, built as a frontend for command-line disk analysers including ncdu, gdu, and Mole.",
+        "operatingSystem": "macOS",
+        "description": "A free, open source native macOS app for disk analysis and cleanup, built as a frontend for command-line disk analysers including ncdu, gdu, and Mole.",
         "url": "https://nirmoka.vercel.app/",
         "license": "https://www.apache.org/licenses/LICENSE-2.0",
         "isAccessibleForFree": true,
@@ -97,18 +97,17 @@
         </p>
         <div class="grid">
           <article>
-            <h3>Cross-platform code from day one</h3>
+            <h3>A native Mac interface</h3>
             <p>
-              One codebase for macOS, Linux, and Windows, tested on all three. macOS is packaged
-              first, because the cleanup workflow runs on Mole and Mole is macOS-only. Different
-              platforms can use different backends underneath, and the interface stays the same.
+              SwiftUI provides native windows, navigation, and dialogs. The Rust core and adapters
+              stay independent of the interface.
             </p>
           </article>
           <article>
             <h3>Small enough to be honest</h3>
             <p>
-              Built with Tauri on the operating system's own webview, so the download is measured in
-              single-digit megabytes. A disk cleanup tool that eats 300 MB of disk is a joke.
+              Built with SwiftUI and a private Rust helper, with no embedded webview.
+              Existing command-line tools do the scanning and cleanup.
             </p>
           </article>
           <article>
@@ -179,8 +178,7 @@
 
         <h3>Which backend do I need?</h3>
         <p>
-          Any one of them. On macOS, Mole gives the most functionality. On Linux, ncdu is almost
-          certainly already installed. On Windows, gdu is the path.
+          Install ncdu for scanning. Mole optionally adds cleanup, app removal, and maintenance.
         </p>
 
         <h3>Will it delete something important?</h3>
@@ -193,15 +191,14 @@
 
         <h3>How do I install it?</h3>
         <p>
-          On macOS 12 or later, with Homebrew:
+          On macOS 13 or later, with Homebrew:
           <code>brew install nirmoka/tap/nirmoka</code>. The formula builds from source, which takes
           a few minutes and brings a Rust and Node toolchain along as build dependencies.
         </p>
         <p>
           A downloadable app needs an Apple Developer ID certificate, which needs a paid Apple
           Developer account, and there is not one yet — macOS refuses an unsigned download outright.
-          A source build has no such problem, which is why it is the supported path for now. Linux
-          and Windows build from a checkout.
+          A source build is the supported path for now. The desktop app requires macOS 13 or later.
         </p>
       </section>
 

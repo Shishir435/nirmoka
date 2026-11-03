@@ -524,6 +524,79 @@ pub fn plan(
     })
 }
 
+/// Inspect an installed application without creating a disk scan. Only an
+/// inventory-validated bundle reaches this function. The zero scan/node ids
+/// identify a read-only footprint and must never be used for Trash commands.
+pub fn installed(path: &Path, home: &Path) -> Result<AppFootprint, String> {
+    let path = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    if !path.is_dir()
+        || !path
+            .extension()
+            .is_some_and(|value| value.eq_ignore_ascii_case("app"))
+    {
+        return Err("the installed application is not an application bundle".into());
+    }
+    let name = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let identifier = bundle_id(&path);
+    let mut pending: Vec<PlannedPath> = identifier
+        .as_deref()
+        .map(|identifier| {
+            library_paths(home, identifier)
+                .into_iter()
+                .map(|(label, path)| PlannedPath {
+                    label,
+                    path,
+                    known: None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let known: Vec<PathBuf> = pending.iter().map(|value| value.path.clone()).collect();
+    pending.extend(
+        related_paths(
+            home,
+            &vendor_candidates(identifier.as_deref(), &name),
+            &known,
+        )
+        .into_iter()
+        .map(|path| PlannedPath {
+            label: RELATED_LABEL,
+            path,
+            known: None,
+        }),
+    );
+    let bundle = measure(PlannedPath {
+        label: "Application",
+        path: path.clone(),
+        known: None,
+    });
+    let mut footprint = resolve(FootprintPlan {
+        scan_id: 0,
+        node_id: 0,
+        name,
+        path,
+        bundle_id: identifier,
+        bundle_bytes: bundle.total_bytes.unwrap_or(0),
+        bundle_complete: bundle.complete,
+        pending,
+    });
+    if let Some(component) = footprint.components.first_mut() {
+        component.paths = vec![bundle];
+    }
+    footprint.unmeasured_paths = footprint
+        .components
+        .iter()
+        .flat_map(|value| &value.paths)
+        .filter(|value| value.total_bytes.is_none())
+        .count()
+        .min(u32::MAX as usize) as u32;
+    Ok(footprint)
+}
+
 /// Walk whatever the scan did not cover, and assemble the answer.
 ///
 /// Runs off the main thread. Nothing here holds a lock, which is the point of
@@ -660,6 +733,30 @@ mod tests {
     fn write(path: &Path, bytes: usize) {
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("created");
         std::fs::write(path, vec![b'x'; bytes]).expect("written");
+    }
+
+    #[test]
+    fn an_inventory_footprint_measures_from_disk_without_a_destructive_scan_identity() {
+        let home = scratch("installed-footprint");
+        let app = home.join("Example.app");
+        write(&app.join("Contents").join("data"), 4096);
+        let footprint = installed(&app, &home).unwrap();
+        assert_eq!(footprint.scan_id, 0);
+        assert_eq!(footprint.node_id, 0);
+        assert!(footprint.total_bytes > 0);
+        assert_eq!(
+            footprint.components[0].paths[0].source,
+            FootprintSource::Filesystem
+        );
+        assert!(footprint.components[0].complete);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn inventory_inspection_refuses_an_ordinary_directory() {
+        let home = scratch("installed-invalid");
+        assert!(installed(&home, &home).is_err());
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

@@ -2,7 +2,7 @@
 #
 # Pre-push hook: run what CI runs, before waiting on CI.
 #
-# Enable once per clone (or `pnpm hooks:install`):
+# Enable once per clone :
 #     git config core.hooksPath .githooks
 #
 # Skip for a single push when you know what you're doing:
@@ -101,23 +101,15 @@ if command -v cargo > /dev/null 2>&1; then
 
   step "cargo test" cargo test --workspace
 
-  # `cargo test` has just rewritten the generated bindings. A diff here means a
-  # Rust boundary type changed without its TypeScript mirror being committed,
-  # which CI rejects — catching it now saves the round trip.
-  step "generated types are current" \
-    git diff --exit-code --quiet -- packages/transport/src/generated
+
 else
   printf '\n\033[33m⚠ cargo not found — Rust checks skipped. CI will still run them.\033[0m\n'
   printf '  Install: curl --proto '"'"'=https'"'"' --tlsv1.2 -sSf https://sh.rustup.rs | sh\n'
 fi
 
-# --- Web --------------------------------------------------------------------
-if command -v pnpm > /dev/null 2>&1; then
-  step "oxlint" pnpm lint
-  step "oxfmt" pnpm format:check
-  step "typecheck" pnpm typecheck
-else
-  printf '\n\033[33m⚠ pnpm not found — web checks skipped.\033[0m\n'
+# --- Native macOS -----------------------------------------------------------
+if [[ "$(uname -s)" == Darwin ]] && command -v swift > /dev/null 2>&1; then
+  step "native tests" swift test --package-path apps/macos
 fi
 
 # --- Architecture -----------------------------------------------------------

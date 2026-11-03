@@ -52,10 +52,10 @@ jobs:
           # A rehearsal builds the version it rehearses: v0.1.0-rc.1 is 0.1.0.
           # Comparing the whole tag would refuse every prerelease.
           base="${tagged%%-*}"
-          bundled=$(node -p "require('./crates/app/tauri.conf.json').version")
+          bundled=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" apps/macos/Info.plist)
           echo "tag ${tagged}, version ${base}, bundle ${bundled}"
           if [ "$base" != "$bundled" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match tauri.conf.json ${bundled}"
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Info.plist ${bundled}"
             exit 1
           fi
 
@@ -91,38 +91,15 @@ jobs:
           echo "::warning::unsigned release, allowed by ALLOW_UNSIGNED_RELEASE"
           echo "::warning::missing:${missing} — the .dmg will be refused by Gatekeeper"
 
-      # One bundle for both architectures. Two downloads with near-identical
-      # names is a choice the person downloading should not have to make.
-      #
-      # The targets go on the toolchain `rust-toolchain.toml` pins, which is the
-      # one cargo obeys. Asking a setup action for them instead attaches them to
-      # whatever toolchain *it* installs, and the universal build then fails on
-      # the target it was told to add — which is exactly what happened to v0.1.0.
-      - name: The pinned toolchain, with both darwin targets
+      - name: The pinned toolchain
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          rustup target list --installed
-
       - uses: Swatinem/rust-cache@v2.9.1
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.12
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      # Two build steps for one build, because Tauri decides to sign on whether
-      # `APPLE_CERTIFICATE` is *set*, not whether it holds anything. A missing
-      # secret still produces an env var — an empty one — so a single step with
-      # these mapped unconditionally sends the bundler to `security import` with
-      # nothing to import. There is no way to omit a key from `env:` by
-      # expression, so the honest fix is one step per case. Neither passes
-      # `tagName`: publication happens below, after the bundle is checked.
-      - name: Build, sign, and notarize
+      - name: Build native universal app
+        run: apps/macos/build-universal.sh
+      - name: Sign and notarize
         if: env.SIGNED == 'true'
-        uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -130,28 +107,37 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          keychain="$RUNNER_TEMP/nirmoka.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          app=target/macos/Nirmoka.app
+          codesign --force --keychain "$keychain" --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$app/Contents/Helpers/nirmoka-native-service"
+          codesign --force --keychain "$keychain" --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/Nirmoka.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/Nirmoka.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$app"
+      - name: Package disk image
+        run: |
+          mkdir -p target/macos/dmg-root
+          ditto target/macos/Nirmoka.app target/macos/dmg-root/Nirmoka.app
+          ln -s /Applications target/macos/dmg-root/Applications
+          hdiutil create -volname Nirmoka -srcfolder target/macos/dmg-root -ov -format UDZO target/macos/Nirmoka.dmg
+      - uses: actions/upload-artifact@v4
         with:
-          projectPath: crates/app
-          args: --target universal-apple-darwin
-          includeUpdaterJson: false
-
-      - name: Build, unsigned
-        if: env.SIGNED != 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: crates/app
-          args: --target universal-apple-darwin
-          includeUpdaterJson: false
+          name: Nirmoka-macOS
+          path: target/macos/Nirmoka.dmg
 
       # What the user's Mac will ask, asked here first. Without this the first
       # report of a broken signature is a user seeing "Nirmoka is damaged".
       - name: Verify the signature and the notarization ticket
         if: env.SIGNED == 'true'
         run: |
-          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          app=target/macos/Nirmoka.app
           echo "verifying ${app}"
           codesign --verify --deep --strict --verbose=2 "$app"
           # Gatekeeper's own answer, which is the one that matters: a signed but
@@ -168,7 +154,7 @@ jobs:
         run: |
           # `|| true` so a missing bundle directory reports the count below
           # rather than dying on find's own error, which reads as a CI glitch.
-          dmg=$(find target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' 2>/dev/null || true)
+          dmg=$(find target/macos -maxdepth 1 -name '*.dmg' 2>/dev/null || true)
           count=$(printf '%s\n' "$dmg" | grep -c . || true)
           if [ "$count" != "1" ]; then
             echo "::error::expected exactly one .dmg, found ${count}"
@@ -184,7 +170,7 @@ jobs:
           ```
 
           Builds from source on your machine, which takes a few minutes and asks
-          Gatekeeper nothing. macOS 12 or later, Apple silicon and Intel.
+          Gatekeeper nothing. macOS 13 or later, Apple silicon and Intel.
 
           Nirmoka ships no disk scanner: `ncdu` comes with the formula, and the
           Clean page additionally wants `brew install mole`.

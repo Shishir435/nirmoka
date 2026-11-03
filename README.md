@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Shishir435/nirmoka?include_prereleases&sort=semver)](https://github.com/Shishir435/nirmoka/releases)
 
-**A cross-platform desktop GUI for disk analysis and cleanup — see what's eating your disk on macOS, Linux, and Windows.**
+**A native macOS app for disk analysis and cleanup.**
 
 Nirmoka is a free, open source desktop app that gives a real graphical interface to the
 disk-usage tools power users already trust. Point it at a directory, watch the tree fill in,
@@ -13,9 +13,8 @@ sort by size, and reclaim space — without memorising keybindings or parsing `d
 > **निर्मोक** (_nirmoka_) is Sanskrit for the skin a snake sheds — the dead layer a living
 > system leaves behind. That is exactly what this tool helps you find and remove.
 
-**Status: macOS beta, in preparation.** Linux and Windows compile and are tested in CI but are
-not packaged yet, because the cleanup workflow that makes this worth installing runs on Mole, which
-is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md).
+**Status: native macOS preview.** SwiftUI is the only desktop shell. The Rust core
+and adapters remain platform-neutral; see [ADR 0033](docs/adr/0033-native-macos-is-the-only-desktop-shell.md).
 
 ---
 
@@ -25,8 +24,8 @@ is macOS-only — see [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.m
 brew install nirmoka/tap/nirmoka
 ```
 
-macOS 12 or later, Apple silicon and Intel. The formula builds from source, which takes a few
-minutes and pulls a Rust and Node toolchain as build dependencies.
+macOS 13 or later, Apple silicon and Intel. The formula builds from source, which takes a few
+minutes and requires Rust and Xcode with Swift 6.
 
 Why a source build rather than a download: a signed app needs a Developer ID certificate, which
 needs a paid Apple Developer account, and there isn't one yet. Without it macOS refuses a downloaded
@@ -51,10 +50,8 @@ Existing GUI options are usually single-platform, abandoned, or several hundred 
 
 Nirmoka aims at a specific gap:
 
-- **Cross-platform code from day one.** The core carries no platform conditionals and CI builds it
-  everywhere. macOS is packaged first; the others follow a cleanup backend that runs there.
-- **Small.** Built with Tauri, so the download is measured in single-digit megabytes.
-  A disk cleanup tool that eats 300 MB of disk is a joke.
+- **A native Mac interface.** SwiftUI owns the window and dialogs; the Rust core and adapters stay independent of the interface.
+- **No embedded webview.** The app is built with SwiftUI and a private Rust helper.
 - **Not a reimplementation.** Nirmoka does not write its own disk scanner. It drives
   proven CLI tools as backends and focuses entirely on being a good interface to them.
 - **Safe by default.** Destructive actions are previewable, and deletion routes through
@@ -67,7 +64,7 @@ subprocess, reads its structured output, and renders it.
 
 ```
 ┌─────────────────────────────────────┐
-│  Nirmoka UI  (React + TypeScript)   │
+│  Nirmoka UI  (SwiftUI / macOS)   │
 └──────────────────┬──────────────────┘
                    │  domain types
 ┌──────────────────┴──────────────────┐
@@ -103,16 +100,16 @@ tells you how to get one if you have none.
 
 ## Tech stack
 
-- **[Tauri v2](https://tauri.app)** — native shell, OS webview, small binaries
+- **SwiftUI / AppKit** — native macOS interface and dialogs
 - **Rust** — core, adapter layer, subprocess handling
-- **React + TypeScript** — interface
+- **Private JSON-lines service** — Swift/Rust communication
 - **ncdu JSON export format** — the wire format every adapter speaks
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — how the layers fit together
 - [Adapter contract](docs/adapters.md) — what a backend must provide
-- [Monorepo layout](docs/monorepo.md) — two languages, two package managers
+- [Monorepo layout](docs/monorepo.md) — Swift and Rust layout
 - [Development setup](docs/development.md) — prerequisites and daily commands
 - [Roadmap](docs/roadmap.md) — the step-by-step tracker
 - [Decision records](docs/adr/) — why each major choice was made
@@ -122,15 +119,14 @@ tells you how to get one if you have none.
 
 ## Development
 
-Requires Node ≥ 22, pnpm, Rust (stable), and ncdu 2.x.
+Requires macOS 13+, Xcode 16+ with Swift 6, Rust, and ncdu 2.x.
 
 ```bash
-pnpm install
 cargo check --workspace --all-targets
 cargo test --workspace
 
-pnpm nrmk backends    # detect installed disk backends
-pnpm dev              # frontend dev server
+cargo run -p nirmoka-cli -- backends
+apps/macos/run-local.sh
 ```
 
 See [docs/development.md](docs/development.md) for the full setup.

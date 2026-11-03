@@ -24,14 +24,9 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 
-# Shell-only. Confined to crates/app by invariant 1 — nothing else in the
-# workspace may depend on these, and crates/cli exists to prove it.
-tauri = "2"
-tauri-build = "2"
-
 # The platform's own Trash service — the one Finder uses on macOS, the Recycle
 # Bin on Windows, the freedesktop specification elsewhere. Shell-only, like
-# tauri, because moving a selected path to the Trash is a platform integration
+# the application service, because moving a selected path to the Trash is a platform integration
 # rather than a backend ability (ADR 0025). The alternative was `osascript`
 # driving Finder's UI scripting layer, or making the product's central verb
 # depend on `brew install trash`. Default features off: they only add `chrono`,
@@ -39,15 +34,11 @@ tauri-build = "2"
 # do.
 trash = { version = "5", default-features = false, features = ["coinit_apartmentthreaded"] }
 
-# Generates the TypeScript mirrors of the boundary types. A hand-maintained
-# mirror of a Rust struct drifts silently; that is the whole problem here.
-ts-rs = "12"
-
 # Reads `Contents/Info.plist` for `CFBundleIdentifier`, which is the key every
 # application footprint is assembled from — see ADR 0028. A bundle's Info.plist
 # is binary as often as it is XML, so hand-parsing would mean implementing
 # Apple's bplist00 container; `defaults read` would mean a subprocess per app,
-# on a dashboard that lists forty of them. Shell-only, like tauri: nothing but
+# on a dashboard that lists forty of them. Shell-only: nothing but
 # crates/app has an application bundle to read.
 plist = "1"
 
@@ -66,7 +57,7 @@ directories = "6"
 #
 # `clippy::unwrap_used` is NOT here, because a Cargo lint table applies to test
 # targets too and a panic is how a test asserts. It is denied against lib and
-# bin targets only, by `pnpm rs:lint:strict` — see that script and CI.
+# bin targets only, by `cargo clippy --workspace -- -D clippy::unwrap_used` — see that script and CI.
 [workspace.lints.rust]
 # Nothing in this workspace uses `unsafe`. The day something wants to, that
 # should be a conversation rather than a commit that slips through review.

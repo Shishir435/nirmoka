@@ -24,22 +24,17 @@ pass() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Only the shell may depend on a GUI framework.
-#
-# This is the boundary that makes the frontend replaceable. crates/cli exists
-# to turn a violation into a build failure; this catches it a step earlier, and
-# catches it for every crate rather than the two that existed when it was
-# written — an adapter reaching for `tauri::async_runtime` would compile fine
-# and quietly weld a backend to the shell.
+# 1. The application is native-only (ADR 0033).
 # ---------------------------------------------------------------------------
-tauri_crates=$(grep -lE '^[[:space:]]*tauri(-build)?[[:space:]]*=' crates/*/Cargo.toml 2>/dev/null |
-  grep -v '^crates/app/Cargo.toml$' || true)
-
-if [[ -n "$tauri_crates" ]]; then
-  fail "only crates/app may depend on tauri (see docs/adr/0005)"
-  printf '%s\n' "$tauri_crates" >&2
+if grep -qE '^name = "(tauri|tauri-build|ts-rs)"$' Cargo.lock; then
+  fail "retired desktop dependencies remain in Cargo.lock"
 else
-  pass "tauri is confined to crates/app"
+  pass "no Tauri or TypeScript generation dependencies"
+fi
+if [[ -d apps/desktop || -d packages/transport ]]; then
+  fail "the native macOS app must be the only desktop shell"
+else
+  pass "native macOS is the only desktop shell"
 fi
 
 # ---------------------------------------------------------------------------
@@ -91,43 +86,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. packages/transport is the only module that knows about Tauri.
-#
-# If a component imports @tauri-apps directly, the React code is welded to
-# Tauri and the escape route in ADR 0005 becomes fiction.
-# ---------------------------------------------------------------------------
-tauri_hits=$(grep -rln '@tauri-apps' apps packages \
-  --include='*.ts' --include='*.tsx' \
-  --exclude-dir=node_modules --exclude-dir=dist 2>/dev/null |
-  grep -v '^packages/transport/' || true)
-
-if [[ -n "$tauri_hits" ]]; then
-  fail "@tauri-apps imported outside packages/transport"
-  printf '%s\n' "$tauri_hits" >&2
-else
-  pass "transport is the only Tauri-aware module"
-fi
-
-# ---------------------------------------------------------------------------
-# 5. The Homebrew formula names the version the bundle actually is.
-#
-# The formula is the supported install path (ADR 0024) and it is copied into a
-# separate tap repository, so a version that disagrees with tauri.conf.json
-# produces a formula that builds one thing and calls it another. Nothing else
-# in CI reads this file, so without this check the first report is a user's
-# failed install.
+# 4. Native bundle, Cargo workspace, and Homebrew version agree.
 # ---------------------------------------------------------------------------
 formula='packaging/homebrew/nirmoka.rb'
-bundled=$(grep -o '"version": *"[^"]*"' crates/app/tauri.conf.json | head -1 |
-  sed 's/.*"version": *"\([^"]*\)".*/\1/')
+bundled=$(sed -n '/<key>CFBundleShortVersionString<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}' apps/macos/Info.plist)
+workspace=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
 tagged=$(grep -o 'archive/refs/tags/v[^"]*\.tar\.gz' "$formula" | head -1 |
   sed 's|archive/refs/tags/v\(.*\)\.tar\.gz|\1|')
 
 if [[ -z "$bundled" || -z "$tagged" ]]; then
-  fail "could not read a version from tauri.conf.json or $formula"
-elif [[ "$bundled" != "$tagged" ]]; then
+  fail "could not read a version from apps/macos/Info.plist or $formula"
+elif [[ "$bundled" != "$tagged" || "$bundled" != "$workspace" ]]; then
   fail "formula is v${tagged} but the bundle is ${bundled}"
-  printf '  update the url in %s, or bump tauri.conf.json\n' "$formula" >&2
+  printf '  update the url in %s, or bump apps/macos/Info.plist\n' "$formula" >&2
 else
   pass "the formula and the bundle agree on ${bundled}"
 fi

@@ -1,3 +1,6 @@
+> Historical React/Tauri design material. Retired by ADR 0033; see development.md
+> and apps/macos for the current native application.
+
 # Nirmoka UI Readiness Audit
 
 **Date:** 2026-08-18

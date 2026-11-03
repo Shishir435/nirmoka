@@ -24,7 +24,7 @@ the repository's **Security** tab. It creates a private advisory only you and th
 maintainer can see.
 
 Please include what you have: the version (`nirmoka --version`, or the release you
-installed), your macOS version, which backends are installed (`pnpm nrmk backends` or the
+installed), your macOS version, which backends are installed (`cargo run -p nirmoka-cli -- backends` or the
 Help page), and the smallest sequence of steps that shows the problem. A path that
 triggers it is more useful than a description of one.
 

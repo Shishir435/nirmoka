@@ -3,7 +3,13 @@
 Ordered by dependency, not by excitement. This file is the tracker — check boxes off as
 work lands, and keep the **Current step** line accurate.
 
-**Current step: 17 — inspector.** Step 11 shipped as 0.1.1: `brew install
+**Current step: native macOS consolidation and UX continuity (ADR 0033).**
+The only desktop shell is now `apps/macos`; React/Tauri, its transport, and web
+build tooling have been retired. Earlier checked steps below describe historical
+work. Native navigation, setup, app inspection/removal, and scan continuity are
+verified with Rust/Swift checks and the native window.
+
+**Previous milestone: 17 — inspector.** Step 11 shipped as 0.1.1: `brew install
 nirmoka/tap/nirmoka` installs a working macOS beta, and it is read-only. Step 12 added the verb the
 product was missing — see [ADR 0025](adr/0025-move-to-trash-is-a-platform-integration.md) — and the
 first person to use it said the seven tabs were confusing, which step 13 answers. Steps 14 to 18

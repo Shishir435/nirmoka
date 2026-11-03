@@ -54,7 +54,7 @@ perl -0pi -e "s/^version = \"\Q${current}\E\"/version = \"${version}\"/m" Cargo.
 
 # The version inside the bundle, and the one the release workflow checks the tag
 # against.
-perl -0pi -e "s/(\"version\": \")\Q${current}\E(\")/\${1}${version}\${2}/" crates/app/tauri.conf.json
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${version}" apps/macos/Info.plist
 
 # The formula's url tag. The sha256 beside it stays a placeholder on purpose.
 perl -0pi -e "s{(archive/refs/tags/v)\Q${current}\E(\.tar\.gz)}{\${1}${version}\${2}}" \
@@ -80,7 +80,7 @@ fi
 echo
 echo "updated:"
 grep -m1 '^version = ' Cargo.toml
-grep -m1 '"version"' crates/app/tauri.conf.json
+/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" apps/macos/Info.plist
 grep -m1 'archive/refs/tags' packaging/homebrew/nirmoka.rb
 
 echo

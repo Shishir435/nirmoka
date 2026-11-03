@@ -58,6 +58,9 @@ pub struct Capabilities {
 
     /// System health metrics.
     pub system_status: bool,
+
+    /// Preview and run the backend's safe system maintenance workflow.
+    pub optimize: bool,
 }
 
 impl Capabilities {
@@ -73,6 +76,7 @@ impl Capabilities {
         app_inventory: false,
         uninstall_apps: false,
         system_status: false,
+        optimize: false,
     };
 }
 

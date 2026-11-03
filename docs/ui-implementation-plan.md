@@ -1,3 +1,6 @@
+> Historical React/Tauri design material. Retired by ADR 0033; see development.md
+> and apps/macos for the current native application.
+
 # Implementation Plan: Two-Surface UI
 
 Incremental plan to reach the approved product design. Each step is independently shippable and testable.

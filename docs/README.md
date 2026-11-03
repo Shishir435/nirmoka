@@ -1,6 +1,6 @@
 # Nirmoka Documentation
 
-Design documentation for Nirmoka, a cross-platform desktop GUI for disk analysis and
+Design documentation for Nirmoka, a native macOS app for disk analysis and
 cleanup.
 
 ## Start here
@@ -9,7 +9,7 @@ cleanup.
 | ----------------------------------- | ------------------------------------------------------ |
 | [Architecture](architecture.md)     | The layers, the rules that keep them separate, and why |
 | [Adapter contract](adapters.md)     | What a backend must provide to be usable               |
-| [Monorepo layout](monorepo.md)      | Two languages, two package managers, how they coexist  |
+| [Monorepo layout](monorepo.md)      | Swift and Rust, how they coexist  |
 | [Development setup](development.md) | Prerequisites, daily commands, troubleshooting         |
 | [Roadmap](roadmap.md)               | The step-by-step tracker, plus what is out of scope    |
 

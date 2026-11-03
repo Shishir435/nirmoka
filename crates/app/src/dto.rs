@@ -1,19 +1,4 @@
-//! The types that cross into TypeScript.
-//!
-//! These are deliberately separate from the domain types in `nirmoka-core` and
-//! `nirmoka-adapter`, even where they look identical today.
-//!
-//! Two reasons. First, invariant 1: `core` may depend on the standard library,
-//! serde, and thiserror, so it cannot carry a `#[derive(TS)]`. Second, the shape
-//! the UI needs and the shape the domain uses drift apart — a `Row` is a `Node`
-//! plus its position in a window and its share of the parent, which is a fact
-//! about a viewport, not about a file. Keeping the boundary explicit means that
-//! drift shows up as a conversion, not as a domain type quietly growing a field
-//! that only the frontend wanted.
-//!
-//! The TypeScript mirrors are generated from this file by `cargo test -p
-//! nirmoka-app --test export_bindings` and committed to
-//! `packages/transport/src/generated/`. CI regenerates and fails on a diff.
+//! JSON boundary types consumed by the native SwiftUI application.
 
 use nirmoka_adapter::registry::RegistryEntry;
 use nirmoka_adapter::wire::TreeStats;
@@ -27,52 +12,9 @@ use nirmoka_adapter::{
 };
 use nirmoka_core::{Node, NodeKind as CoreNodeKind, Sort as CoreSort, Tree};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-// Byte counts carry `#[ts(type = "number")]` throughout.
-//
-// ts-rs maps `u64` to `bigint`, which is right for a general Rust type and wrong
-// here: Tauri's IPC is JSON, so these arrive as ordinary JavaScript numbers and
-// a `bigint` annotation would describe a value that never appears. The precision
-// ceiling is 2^53 bytes — 8 petabytes for a single entry — which is past the
-// size of any disk this will run on.
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
-pub enum NodeKind {
-    Directory,
-    File,
-    Symlink,
-    Other,
-}
-
-impl From<CoreNodeKind> for NodeKind {
-    fn from(kind: CoreNodeKind) -> Self {
-        match kind {
-            CoreNodeKind::Directory => Self::Directory,
-            CoreNodeKind::File => Self::File,
-            CoreNodeKind::Symlink => Self::Symlink,
-            CoreNodeKind::Other => Self::Other,
-        }
-    }
-}
-
-/// How the frontend asked for a directory to be ordered.
-///
-/// This is the one DTO that travels inwards as well as out, so it derives
-/// `Deserialize` too. Sorting stays in Rust because the frontend only ever holds
-/// a window: sorting a few dozen rows out of a hundred thousand would reorder
-/// the slice and call it a sort.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum Sort {
     #[default]
     LargestFirst,
@@ -96,12 +38,8 @@ impl From<Sort> for CoreSort {
 ///
 /// The frontend holds a single node id, so without the chain there is no way to
 /// name the directory it descended from — "up" would mean rescanning.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct Crumb {
     pub id: u32,
     pub name: String,
@@ -113,12 +51,8 @@ pub struct Crumb {
 /// than backend abilities, so they are not `Capabilities` flags — see ADR 0022
 /// and ADR 0025. The label travels with the flag because every platform has its
 /// own word for the same action.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct PlatformFeatures {
     pub reveal_label: String,
     pub quick_look: bool,
@@ -139,33 +73,22 @@ pub struct PlatformFeatures {
 
 /// Capacity of the filesystem containing a path. This is deliberately separate
 /// from a scan summary: bytes reached by a scan are not disk capacity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct VolumeInfo {
     /// What the desktop calls this volume — "Macintosh HD" rather than
     /// `/System/Volumes/Data`. Resolved by the platform layer, because the name
     /// is not in `df` output and the window has no way to look it up.
     pub name: String,
     pub mount_point: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
-    #[ts(type = "number")]
     pub used_bytes: u64,
-    #[ts(type = "number")]
     pub free_bytes: u64,
 }
 
 /// One backend-produced system-health snapshot.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct SystemStatus {
     pub backend: String,
     pub backend_instead_of: Option<String>,
@@ -184,12 +107,8 @@ pub struct SystemStatus {
 }
 
 /// Exact path groups published by a backend dry run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupPreview {
     pub backend: String,
     pub backend_instead_of: Option<String>,
@@ -197,7 +116,6 @@ pub struct CleanupPreview {
     pub generated_at: String,
     pub categories: Vec<CleanupCategory>,
     pub potential_cleanup: Option<String>,
-    #[ts(type = "number")]
     pub total_items: u64,
     pub system_scope: CleanupSystemScope,
     pub warnings: Vec<String>,
@@ -208,23 +126,15 @@ pub struct CleanupPreview {
 /// The backend's own words, carried through unchanged — see ADR 0030. `kind`
 /// says which of its three kinds of line this was, so the window can lay them
 /// out without parsing text a backend is free to reword.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupProgress {
     pub kind: CleanupProgressKind,
     pub text: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum CleanupProgressKind {
     /// A heading: the group the backend has started on.
     Category,
@@ -250,72 +160,48 @@ impl CleanupProgress {
 }
 
 /// Latest Rust-held cleanup review, bound to a short-lived one-time token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupPreparation {
-    #[ts(type = "number")]
     pub confirmation_token: u64,
     pub backend: String,
     pub backend_instead_of: Option<String>,
     pub backend_version: String,
     pub preview_generated_at: String,
     pub potential_cleanup: Option<String>,
-    #[ts(type = "number")]
     pub total_items: u64,
     pub system_scope: CleanupSystemScope,
     pub warnings: Vec<String>,
-    #[ts(type = "number")]
     pub expires_in_seconds: u64,
     pub requires_confirmation: bool,
     pub warning: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupCategory {
     pub name: String,
     pub items: Vec<CleanupItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupItem {
     pub path: String,
     pub reported_size: Option<String>,
-    #[ts(type = "number")]
     pub item_count: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum CleanupSystemScope {
     Included,
     UserOnly,
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum CleanupCompletion {
     Finished,
     Partial,
@@ -330,12 +216,8 @@ pub enum CleanupCompletion {
 /// deliberate: the rows are what the UI draws, and the transcript is what the
 /// user is actually approving, so a parse that silently narrowed the plan stays
 /// visible instead of becoming the whole story.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct UninstallPreview {
     pub backend: String,
     pub backend_version: String,
@@ -344,7 +226,6 @@ pub struct UninstallPreview {
     pub requested: Vec<String>,
     pub apps: Vec<UninstallApp>,
     pub reported_total: Option<String>,
-    #[ts(type = "number")]
     pub total_items: u64,
     pub has_review_only_items: bool,
     pub warnings: Vec<String>,
@@ -352,12 +233,8 @@ pub struct UninstallPreview {
     pub transcript: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct UninstallApp {
     pub name: String,
     pub homebrew_cask: bool,
@@ -365,12 +242,8 @@ pub struct UninstallApp {
     pub items: Vec<UninstallItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct UninstallItem {
     /// The backend's display form, tilde-abbreviated. Not a resolvable path, and
     /// nothing in the window may treat it as one — see `nirmoka_adapter::uninstall`.
@@ -379,24 +252,16 @@ pub struct UninstallItem {
     pub scope: UninstallItemScope,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum UninstallItemScope {
     Removed,
     System,
     ReviewOnly,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum UninstallCompletion {
     Finished,
     Partial,
@@ -408,44 +273,31 @@ pub enum UninstallCompletion {
 ///
 /// The token is the only thing that can start the removal. No application name
 /// and no path returns as an execute parameter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct UninstallPreparation {
-    #[ts(type = "number")]
     pub confirmation_token: u64,
     pub backend: String,
     pub backend_version: String,
     /// Display names, for the dialog's own sentence. The identifiers stay in Rust.
     pub applications: Vec<String>,
     pub reported_total: Option<String>,
-    #[ts(type = "number")]
     pub total_items: u64,
     pub has_review_only_items: bool,
     pub warnings: Vec<String>,
-    #[ts(type = "number")]
     pub expires_in_seconds: u64,
     pub requires_confirmation: bool,
     pub warning: String,
 }
 
 /// One durable uninstall journal entry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct UninstallOperation {
-    #[ts(type = "number")]
     pub id: u64,
     pub backend: String,
     pub backend_version: String,
     pub reviewed_applications: Vec<String>,
-    #[ts(type = "number")]
     pub reviewed_items: u64,
     pub reviewed_total: Option<String>,
     pub completion: UninstallCompletion,
@@ -453,7 +305,6 @@ pub struct UninstallOperation {
     pub failed: Vec<String>,
     pub reported_freed: Option<String>,
     pub warnings: Vec<String>,
-    #[ts(type = "number")]
     pub executed_at_ms: u64,
     pub log_error: Option<String>,
 }
@@ -576,25 +427,18 @@ fn sentence_list(names: &[String]) -> String {
 /// re-discovers candidates when it runs, so the preview is what the user
 /// approved, not what happened. What happened is the scope, the completion, and
 /// the backend's own warnings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CleanupOperation {
-    #[ts(type = "number")]
     pub id: u64,
     pub backend: String,
     pub backend_version: String,
     pub preview_generated_at: String,
-    #[ts(type = "number")]
     pub reviewed_items: u64,
     pub reviewed_potential_cleanup: Option<String>,
     pub system_scope: CleanupSystemScope,
     pub completion: CleanupCompletion,
     pub warnings: Vec<String>,
-    #[ts(type = "number")]
     pub executed_at_ms: u64,
     pub log_error: Option<String>,
 }
@@ -685,12 +529,8 @@ fn cleanup_system_scope(scope: AdapterCleanupSystemScope) -> CleanupSystemScope 
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct HardwareStatus {
     pub model: String,
     pub cpu_model: String,
@@ -699,12 +539,8 @@ pub struct HardwareStatus {
     pub os_version: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CpuStatus {
     pub usage: f64,
     pub load1: f64,
@@ -714,39 +550,24 @@ pub struct CpuStatus {
     pub logical_cpu: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct MemoryStatus {
-    #[ts(type = "number")]
     pub used: u64,
-    #[ts(type = "number")]
     pub total: u64,
-    #[ts(type = "number")]
     pub available: u64,
     pub used_percent: f64,
-    #[ts(type = "number")]
     pub swap_used: u64,
-    #[ts(type = "number")]
     pub swap_total: u64,
     pub pressure: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DiskStatus {
     pub mount: String,
     pub device: String,
-    #[ts(type = "number")]
     pub used: u64,
-    #[ts(type = "number")]
     pub total: u64,
     pub used_percent: f64,
     pub filesystem: String,
@@ -754,12 +575,8 @@ pub struct DiskStatus {
     pub smart_status: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct BatteryStatus {
     pub percent: f64,
     pub status: String,
@@ -769,12 +586,8 @@ pub struct BatteryStatus {
     pub capacity: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ThermalStatus {
     pub cpu_temp: Option<f64>,
     pub gpu_temp: Option<f64>,
@@ -860,41 +673,27 @@ impl SystemStatus {
 }
 
 /// One application bundle found inside the completed scan tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ApplicationItem {
     pub id: u32,
     pub name: String,
     pub path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
     pub size_is_partial: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ApplicationInventory {
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub total: u32,
     pub rows: Vec<ApplicationItem>,
 }
 
 /// Applications addressed by a backend's own uninstall identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct InstalledApplicationInventory {
     pub backend: String,
     pub backend_instead_of: Option<String>,
@@ -902,12 +701,8 @@ pub struct InstalledApplicationInventory {
     pub rows: Vec<InstalledApplication>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct InstalledApplication {
     pub name: String,
     pub bundle_id: String,
@@ -956,12 +751,8 @@ impl InstalledApplicationInventory {
 /// totals sum to the scanned size and the stacked bar on the dashboard adds up.
 /// `Other` is the honest default rather than a dumping ground — a scan of a
 /// directory that is none of these is entirely Other, and says so.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum StorageCategory {
     Apps,
     PersonalFiles,
@@ -986,12 +777,8 @@ impl StorageCategory {
 }
 
 /// One entry accounting for a meaningful share of a category.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CategoryConsumer {
     /// Node id in the scan that produced this breakdown, so a click can open it.
     pub id: u32,
@@ -1007,7 +794,6 @@ pub struct CategoryConsumer {
     /// Bytes this entry accounts for *in its own category*, which is not always
     /// its size on disk: `~/Documents` reports its personal files, while the
     /// `node_modules` inside it are counted under Development.
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// True when any byte counted into `total_bytes` came from an entry the
     /// scan could not read in full, which makes the number a lower bound.
@@ -1019,15 +805,10 @@ pub struct CategoryConsumer {
 }
 
 /// One category's total and the entries that make it up.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CategorySummary {
     pub category: StorageCategory,
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// Fraction of the scanned size, 0..1, for bar rendering.
     pub share: f64,
@@ -1035,20 +816,14 @@ pub struct CategorySummary {
 }
 
 /// The whole scan, sorted into kinds.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct CategoryBreakdown {
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub root_path: String,
     /// The sum of every category, which is the scan's own total. Deliberately
     /// not disk capacity: bytes reached by a scan are not what a volume holds,
     /// which is what `volume` is for.
-    #[ts(type = "number")]
     pub scanned_bytes: u64,
     /// Capacity of the volume the scan root sits on, when it could be read.
     /// `null` rather than invented numbers if `df` failed — the dashboard shows
@@ -1065,12 +840,8 @@ pub struct CategoryBreakdown {
 /// not zero — a cache directory the walk could not finish is unknown, and
 /// showing it as empty would understate exactly the thing the user opened this
 /// screen to find.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum FootprintSource {
     Scan,
     Filesystem,
@@ -1078,16 +849,11 @@ pub enum FootprintSource {
 }
 
 /// One path belonging to an application, and what it cost to find out.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct FootprintPath {
     pub path: String,
     /// `null` when the size is not known. See [`FootprintSource`].
-    #[ts(type = "number | null")]
     pub total_bytes: Option<u64>,
     /// False when part of this path could not be read — a locked subdirectory,
     /// or an entry a scan recorded as unreadable or excluded. `total_bytes` is
@@ -1103,16 +869,11 @@ pub struct FootprintPath {
 /// keeps there: `Docker.raw` is one path under Containers at its real size, and
 /// the images and volumes inside it are Docker's vocabulary for the contents of
 /// a file this program can only see the outside of. See ADR 0028.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct StorageComponent {
     pub label: String,
     /// The sum of the paths whose size is known.
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// False when a path here could not be sized, or was only read in part.
     /// The total is then a lower bound.
@@ -1130,14 +891,9 @@ pub struct StorageComponent {
 
 /// What one application costs: the bundle, plus everything under `~/Library`
 /// carrying its bundle identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct AppFootprint {
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub node_id: u32,
     /// Without the `.app` suffix, which is a filesystem detail and not the name
@@ -1150,12 +906,10 @@ pub struct AppFootprint {
     pub bundle_id: Option<String>,
     /// The sum of the components attributed by bundle identifier. Excludes
     /// anything matched by vendor name — see `related_bytes`.
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// Bytes in vendor-named directories that probably belong to this
     /// application. Zero when none were found. Deliberately a second number
     /// rather than part of the first.
-    #[ts(type = "number")]
     pub related_bytes: u64,
     /// How many existing paths could not be sized. Greater than zero means
     /// `total_bytes` is a lower bound, and the window says so.
@@ -1163,17 +917,12 @@ pub struct AppFootprint {
     /// Epoch milliseconds, from Spotlight. `null` where Spotlight has no answer
     /// — indexing off, a volume it does not index, or a platform that is not
     /// macOS. The window omits the line rather than claiming "never".
-    #[ts(type = "number | null")]
     pub last_used_ms: Option<i64>,
     pub components: Vec<StorageComponent>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum DeveloperCategory {
     XcodeDerivedData,
     SimulatorData,
@@ -1184,32 +933,21 @@ pub enum DeveloperCategory {
 }
 
 /// Developer data evidenced by names and locations in the completed scan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DeveloperItem {
     pub id: u32,
     pub category: DeveloperCategory,
     pub name: String,
     pub path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
-    #[ts(type = "number | null")]
     pub modified_at_ms: Option<u64>,
     pub size_is_partial: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DeveloperInventory {
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub total: u32,
     pub rows: Vec<DeveloperItem>,
@@ -1219,12 +957,8 @@ pub struct DeveloperInventory {
 ///
 /// `unsupportedVersion` stays a distinct state all the way to the UI. Collapsing
 /// it into "not installed" would tell a user to install what they already have.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum Detection {
     #[serde(rename_all = "camelCase")]
     Found {
@@ -1266,12 +1000,8 @@ impl From<&AdapterDetection> for Detection {
 /// `detection` and `error` are both optional because detection itself can fail —
 /// a backend that exists but whose version output could not be read is neither
 /// "found" nor "not installed", and saying so is more useful than picking one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct Backend {
     pub id: String,
     pub display_name: String,
@@ -1314,12 +1044,8 @@ impl From<&RegistryEntry> for Backend {
 /// macOS is honoured everywhere Mole can do the job — and ncdu still scans,
 /// because Mole cannot. A UI showing only `chosen` would claim the scan came
 /// from a backend that never ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct BackendSelection {
     /// The backend id the user picked, or `null` for the platform default.
     ///
@@ -1357,12 +1083,8 @@ pub struct BackendSelection {
 }
 
 /// What the active backend can do, so the UI can hide controls it cannot honour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct Capabilities {
     pub scan: bool,
     pub delete: bool,
@@ -1373,15 +1095,34 @@ pub struct Capabilities {
     pub app_inventory: bool,
     pub uninstall_apps: bool,
     pub system_status: bool,
+    pub optimize: bool,
+}
+
+/// One-time approval handle for the exact optimization preview shown in the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizePreparation {
+    pub confirmation_token: u64,
+    pub backend: String,
+    pub backend_version: String,
+    pub expires_in_seconds: u64,
+    pub warning: String,
+}
+
+/// Result reported by Mole after a reviewed optimization run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeOperation {
+    pub backend: String,
+    pub backend_version: String,
+    pub completion: nirmoka_adapter::OptimizeCompletion,
+    pub transcript: String,
+    pub executed_at_ms: u64,
 }
 
 /// Stable failure classes for destructive commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum DeleteFailureCode {
     NoCompletedScan,
     StaleScan,
@@ -1396,12 +1137,8 @@ pub enum DeleteFailureCode {
     Platform,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DeleteFailure {
     pub code: DeleteFailureCode,
     pub message: String,
@@ -1416,31 +1153,21 @@ impl DeleteFailure {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub enum DeleteDisposition {
     Trash,
     Permanent,
 }
 
 /// A validated destructive operation waiting for explicit confirmation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DeletePreparation {
-    #[ts(type = "number")]
     pub confirmation_token: u64,
     pub backend: String,
     pub backend_instead_of: Option<String>,
     pub target_path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
     pub disposition: DeleteDisposition,
     pub recoverable: bool,
@@ -1454,19 +1181,13 @@ pub struct DeletePreparation {
 /// Deliberately not `DeletePreparation`. That type carries a backend, the
 /// backend it was chosen instead of, and whether a dry run happened — three
 /// questions with no answer here, because no backend is involved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct TrashPreparation {
-    #[ts(type = "number")]
     pub confirmation_token: u64,
     /// The resolved path, not the one that was clicked. What the dialog names
     /// must be what was checked.
     pub target_path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// A directory takes everything under it, which is the part of a confirmation
     /// people misread.
@@ -1475,19 +1196,12 @@ pub struct TrashPreparation {
 }
 
 /// One item this session moved to the Trash.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct TrashOperation {
-    #[ts(type = "number")]
     pub id: u64,
     pub target_path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
-    #[ts(type = "number")]
     pub trashed_at_ms: u64,
     /// Recovery is the platform's Put Back, not a button here. There is no
     /// `undone` field to set, because Nirmoka never learns that it happened.
@@ -1507,23 +1221,16 @@ impl TrashOperation {
 }
 
 /// One durable deletion journal entry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct DeleteOperation {
-    #[ts(type = "number")]
     pub id: u64,
     pub backend: String,
     pub target_path: String,
     pub disposition: DeleteDisposition,
     pub recoverable: bool,
     pub undone: bool,
-    #[ts(type = "number")]
     pub deleted_at_ms: u64,
-    #[ts(type = "number | null")]
     pub undone_at_ms: Option<u64>,
     pub log_error: Option<String>,
 }
@@ -1556,30 +1263,24 @@ impl From<AdapterCapabilities> for Capabilities {
             app_inventory: caps.app_inventory,
             uninstall_apps: caps.uninstall_apps,
             system_status: caps.system_status,
+            optimize: caps.optimize,
         }
     }
 }
 
 /// One rendered line. The frontend never receives anything else about the tree.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct Row {
     /// Opaque handle into the Rust-side tree. Pass it back to descend.
     pub id: u32,
     pub name: String,
     pub kind: NodeKind,
     /// Disk usage for this entry alone.
-    #[ts(type = "number")]
     pub own_bytes: u64,
     /// What the entry claims to be. Differs from `ownBytes` for sparse files.
-    #[ts(type = "number")]
     pub apparent_bytes: u64,
     /// Disk usage for this entry plus everything under it.
-    #[ts(type = "number")]
     pub total_bytes: u64,
     /// The size is a lower bound: the backend could not read this entry.
     pub read_error: bool,
@@ -1622,17 +1323,12 @@ impl Row {
 /// `total` is how many children exist, not how many are in `rows` — the caller
 /// needs it to size a scrollbar without asking for the whole directory, which is
 /// invariant 5 in one field.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct RowPage {
     /// Which scan these rows came from. Pass it back with any id taken from
     /// them; a page from a scan that has since been replaced is refused rather
     /// than answered from a tree that reused the same numbers.
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub parent_id: u32,
     /// The parent's own name, which is what the breadcrumb's last segment says.
@@ -1662,50 +1358,33 @@ pub struct RowPage {
 /// Emitted periodically rather than per entry: a home directory produces
 /// millions of entries and an event per entry would spend more time in IPC than
 /// in the scan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ScanProgress {
-    #[ts(type = "number")]
     pub scanned: u64,
     /// Where the backend is now, for something truthful to put on screen.
     pub current_path: String,
 }
 
 /// A finished scan. Everything here is a fact about a completed walk.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ScanSummary {
     /// Identifies this scan for the lifetime of the process. Node ids are only
     /// meaningful together with it.
-    #[ts(type = "number")]
     pub scan_id: u64,
     pub root_id: u32,
     pub root_path: String,
-    #[ts(type = "number")]
     pub total_bytes: u64,
-    #[ts(type = "number")]
     pub entries: u64,
-    #[ts(type = "number")]
     pub directories: u64,
     pub backend_id: String,
     pub backend_version: Option<String>,
     /// Counts of what the totals could not account for. A total that quietly
     /// omits twelve unreadable directories is a lie by omission.
-    #[ts(type = "number")]
     pub read_errors: u64,
-    #[ts(type = "number")]
     pub excluded: u64,
-    #[ts(type = "number")]
     pub hardlinks_deduplicated: u64,
-    #[ts(type = "number")]
     pub hardlink_bytes_saved: u64,
 }
 
@@ -1744,12 +1423,8 @@ impl ScanSummary {
 ///
 /// `cancelled` is separate from the message because a cancelled scan is not an
 /// error the user needs to read — they are the one who stopped it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(
-    export,
-    export_to = "../../../packages/transport/src/generated/bindings.ts"
-)]
 pub struct ScanFailure {
     pub message: String,
     pub cancelled: bool,
@@ -1991,5 +1666,24 @@ mod tests {
         assert_eq!(inventory.rows[0].name, "Large");
         assert_eq!(inventory.rows[0].reported_size, "10.1GB");
         assert_eq!(inventory.rows[1].uninstall_name, "Small Command");
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeKind {
+    Directory,
+    File,
+    Symlink,
+    Other,
+}
+impl From<CoreNodeKind> for NodeKind {
+    fn from(kind: CoreNodeKind) -> Self {
+        match kind {
+            CoreNodeKind::Directory => Self::Directory,
+            CoreNodeKind::File => Self::File,
+            CoreNodeKind::Symlink => Self::Symlink,
+            CoreNodeKind::Other => Self::Other,
+        }
     }
 }

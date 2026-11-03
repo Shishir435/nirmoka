@@ -38,7 +38,8 @@ use nirmoka_adapter::process::{self, find_in_path, RunningProcess};
 use nirmoka_adapter::{
     Adapter, AdapterError, CancelToken, Capabilities, CleanupCategory, CleanupCompletion,
     CleanupExecution, CleanupItem, CleanupPreview, CleanupProgress, CleanupSystemScope, Detection,
-    InstalledApplication, ScanOptions, ScanSummary, SystemStatus, UninstallApp,
+    InstalledApplication, OptimizeCompletion, OptimizeExecution, OptimizeItem, OptimizeItemKind,
+    OptimizePreview, OptimizeSection, ScanOptions, ScanSummary, SystemStatus, UninstallApp,
     UninstallCompletion, UninstallExecution, UninstallItem, UninstallItemScope, UninstallPreview,
     WireSink,
 };
@@ -169,12 +170,28 @@ impl Adapter for MoleAdapter {
             uninstall_apps: true,
             // `mo status --json`.
             system_status: true,
+            // `mo optimize --dry-run` is a non-mutating preview.
+            optimize: true,
         }
     }
 
     fn system_status(&self, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
         let (binary, _) = supported_binary(self.detect()?)?;
         status_from(&binary, cancel)
+    }
+
+    fn optimize_preview(&self, cancel: &CancelToken) -> Result<OptimizePreview, AdapterError> {
+        let (binary, version) = supported_binary(self.detect()?)?;
+        optimize_preview_from(&binary, &version, cancel)
+    }
+
+    fn execute_optimize(
+        &self,
+        reviewed_version: &str,
+        cancel: &CancelToken,
+    ) -> Result<OptimizeExecution, AdapterError> {
+        let binary = execution_binary(self.detect()?, reviewed_version)?;
+        execute_optimize_from(&binary, cancel)
     }
 
     fn installed_applications(
@@ -293,6 +310,211 @@ fn applications_from(
 
 fn status_from(binary: &Path, cancel: &CancelToken) -> Result<SystemStatus, AdapterError> {
     json_from_command(binary, &["status", "--json"], "system status", cancel)
+}
+
+fn optimize_preview_from(
+    binary: &Path,
+    backend_version: &str,
+    cancel: &CancelToken,
+) -> Result<OptimizePreview, AdapterError> {
+    use std::io::Read;
+
+    let operation = "system optimization preview";
+    let mut command = process::command(binary);
+    command.args(["optimize", "--dry-run"]);
+    let mut process =
+        RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+    let output = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|mut stdout| {
+            let mut output = String::new();
+            stdout
+                .read_to_string(&mut output)
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })?;
+            Ok(output)
+        });
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    if outcome.cancelled {
+        return Err(AdapterError::Cancelled {
+            backend: "mole",
+            operation,
+        });
+    }
+    if !outcome.status.success() {
+        return Err(AdapterError::BackendFailed {
+            binary: BINARY,
+            status: outcome.status.code().unwrap_or(-1),
+            stderr: outcome.stderr,
+        });
+    }
+
+    let stdout = strip_ansi(&output?);
+    if !stdout.contains("DRY RUN MODE, No files will be modified") {
+        return Err(AdapterError::MalformedBackendOutput {
+            binary: BINARY,
+            operation,
+            reason: "the expected non-mutating dry-run marker was missing".to_string(),
+        });
+    }
+    let mut transcript = stdout.clone();
+    if !outcome.stderr.is_empty() {
+        if !transcript.is_empty() && !transcript.ends_with('\n') {
+            transcript.push('\n');
+        }
+        transcript.push_str(&strip_ansi(&outcome.stderr));
+    }
+    let (action_count, sections) = parse_optimize_sections(&stdout).map_err(|reason| {
+        AdapterError::MalformedBackendOutput {
+            binary: BINARY,
+            operation,
+            reason,
+        }
+    })?;
+    Ok(OptimizePreview {
+        backend_version: backend_version.to_string(),
+        action_count,
+        sections,
+        transcript,
+    })
+}
+
+fn parse_optimize_sections(output: &str) -> Result<(u64, Vec<OptimizeSection>), String> {
+    if !output.contains("Dry Run Complete, No Changes Made") {
+        return Err("the dry-run completion marker was missing".to_string());
+    }
+    let action_count = output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Would apply "))
+        .and_then(|summary| summary.split_whitespace().next())
+        .and_then(|count| count.parse::<u64>().ok())
+        .ok_or_else(|| "the optimization count summary was missing or unreadable".to_string())?;
+
+    let mut sections = Vec::<OptimizeSection>::new();
+    let mut current = None;
+    for line in output.lines() {
+        let line = line.trim();
+        if line.starts_with("→ DRY RUN MODE") {
+            continue;
+        }
+        if line == "PERFORMANCE DIAGNOSIS" {
+            sections.push(OptimizeSection {
+                name: line.to_string(),
+                items: Vec::new(),
+            });
+            current = Some(sections.len() - 1);
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("➤ ") {
+            sections.push(OptimizeSection {
+                name: name.to_string(),
+                items: Vec::new(),
+            });
+            current = Some(sections.len() - 1);
+            continue;
+        }
+
+        let classified = [
+            ("→ ", OptimizeItemKind::Action),
+            ("✓ ", OptimizeItemKind::Complete),
+            ("◎ ", OptimizeItemKind::Review),
+            ("☞ ", OptimizeItemKind::Note),
+        ]
+        .iter()
+        .find_map(|(marker, kind)| line.strip_prefix(marker).map(|text| (*kind, text)));
+        if let Some((kind, text)) = classified {
+            let section_index = match current {
+                Some(index) => index,
+                None => {
+                    sections.push(OptimizeSection {
+                        name: "Mole report".to_string(),
+                        items: Vec::new(),
+                    });
+                    let index = sections.len() - 1;
+                    current = Some(index);
+                    index
+                }
+            };
+            sections[section_index].items.push(OptimizeItem {
+                kind,
+                text: text.to_string(),
+            });
+        }
+    }
+    Ok((action_count, sections))
+}
+
+fn execute_optimize_from(
+    binary: &Path,
+    cancel: &CancelToken,
+) -> Result<OptimizeExecution, AdapterError> {
+    use std::io::Read;
+
+    let operation = "system optimization";
+    let mut command = process::command(binary);
+    command.arg("optimize");
+    let mut process =
+        RunningProcess::spawn(&mut command, cancel).map_err(|source| AdapterError::Spawn {
+            binary: BINARY,
+            source,
+        })?;
+    let output = process
+        .take_stdout()
+        .ok_or_else(|| AdapterError::OperationFailed {
+            backend: "mole",
+            operation,
+            reason: "backend stdout was unavailable".to_string(),
+        })
+        .and_then(|mut stdout| {
+            let mut output = String::new();
+            stdout
+                .read_to_string(&mut output)
+                .map_err(|source| AdapterError::OperationFailed {
+                    backend: "mole",
+                    operation,
+                    reason: source.to_string(),
+                })?;
+            Ok(output)
+        });
+    let outcome = process.finish().map_err(|source| AdapterError::Spawn {
+        binary: BINARY,
+        source,
+    })?;
+    let (mut transcript, read_failed) = match output {
+        Ok(output) => (strip_ansi(&output), false),
+        Err(error) => (error.to_string(), true),
+    };
+    if !outcome.stderr.is_empty() {
+        if !transcript.is_empty() && !transcript.ends_with('\n') {
+            transcript.push('\n');
+        }
+        transcript.push_str(&strip_ansi(&outcome.stderr));
+    }
+    let completion = if outcome.cancelled {
+        OptimizeCompletion::Cancelled
+    } else if outcome.status.success() && !read_failed {
+        OptimizeCompletion::Finished
+    } else {
+        OptimizeCompletion::Failed
+    };
+    Ok(OptimizeExecution {
+        completion,
+        transcript,
+    })
 }
 
 /// Which of Mole's narration lines is worth showing, and as what.

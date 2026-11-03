@@ -12,28 +12,28 @@ Start with [`docs/architecture.md`](docs/architecture.md), then
 ## Before you open a pull request
 
 ```bash
-pnpm install
+
 
 # Rust
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm rs:lint:strict          # no unwrap() in shipping code
+cargo clippy --workspace -- -D clippy::unwrap_used          # no unwrap() in shipping code
 cargo test --workspace
 
-# Frontend
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm build
+# Native macOS
+swift test --package-path apps/macos
+apps/macos/build-app.sh
 
 # Architecture
 ./scripts/check-invariants.sh
 ```
 
-`pnpm hooks:install` runs all of that on `git push`, which is cheaper than finding out
+`git config core.hooksPath .githooks` runs all of that on `git push`, which is cheaper than finding out
 from CI. `NIRMOKA_SKIP_HOOKS=1 git push` skips it when you mean to.
 
-If you touched `crates/app/src/dto.rs`, run `pnpm types` and commit the regenerated
-`packages/transport/src/generated/bindings.ts`. CI fails on a diff there.
+Boundary changes must be checked against the real helper with the Swift contract tests.
 
-If you added a dependency, run `pnpm rs:deny` (`cargo install cargo-deny --locked`).
+If you added a dependency, run `cargo deny check` (`cargo install cargo-deny --locked`).
 
 ## The five invariants
 
@@ -42,7 +42,7 @@ preferences — breaking one collapses the architecture, and a PR that needs to 
 is a PR that needs a conversation first, not a workaround.
 
 1. `crates/core` depends on nothing but std, serde, and thiserror.
-2. `packages/transport` is the only place that may import `@tauri-apps/*`.
+2. Swift views use AppModel; NativeServiceClient owns the private Rust service transport.
 3. No `#[cfg(target_os)]` in `crates/core`.
 4. The wire format is ncdu's JSON export.
 5. The tree lives in Rust; the frontend receives only the visible window.
@@ -96,3 +96,6 @@ platform-neutral. `crates/core` has no platform conditionals, paths are `PathBuf
 home and cache directories come from the `directories` crate — never from a `~/Library` or
 `/Users/` literal. Linux and Windows are compiled and tested in CI; only macOS is packaged,
 for the reason in [ADR 0023](docs/adr/0023-the-first-release-is-macos-only.md).
+
+The only desktop shell is SwiftUI in `apps/macos`. Run Swift tests and build/use
+the native app after UI changes. See docs/development.md and ADR 0033.
