@@ -127,7 +127,7 @@ jobs:
           ditto target/macos/Nirmoka.app target/macos/dmg-root/Nirmoka.app
           ln -s /Applications target/macos/dmg-root/Applications
           hdiutil create -volname Nirmoka -srcfolder target/macos/dmg-root -ov -format UDZO target/macos/Nirmoka.dmg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Nirmoka-macOS
           path: target/macos/Nirmoka.dmg
